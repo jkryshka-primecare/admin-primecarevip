@@ -4,6 +4,8 @@ import {
   Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
 } from "@/components/ui/table";
 import ReminderModal from "@/components/ReminderModal";
+import { HintDetailDrawer } from "@/components/hint-sandbox/HintDetailDrawer";
+import type { HintResponse } from "@/components/hint-sandbox/types";
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "sonner";
 
