@@ -139,7 +139,16 @@ const MedicationStats = () => {
                     {med.category}
                   </span>
                 </TableCell>
-                <TableCell className="font-mono text-sm text-foreground">{med.refillDate}</TableCell>
+                <TableCell className="font-mono text-sm text-foreground">
+                  <div className="flex items-center gap-2">
+                    {med.refillDate}
+                    {groupCounts[`${med.patient}|${med.refillDate}`] > 1 && (
+                      <span className="px-2 py-0.5 rounded text-[9px] font-bold uppercase tracking-wider bg-cyan-clinical/15 text-cyan-clinical border border-cyan-clinical/30">
+                        +{groupCounts[`${med.patient}|${med.refillDate}`] - 1} same day
+                      </span>
+                    )}
+                  </div>
+                </TableCell>
                 <TableCell className="font-mono text-sm text-foreground">{med.daysLeft}</TableCell>
                 <TableCell>
                   <span className={`px-3 py-1.5 rounded text-[10px] font-bold uppercase tracking-wider border ${statusStyle[med.status]}`}>
@@ -149,9 +158,11 @@ const MedicationStats = () => {
                 <TableCell>
                   <button
                     onClick={() => openReminder(med)}
-                    className="px-4 py-2.5 rounded bg-sapphire/10 text-sapphire border border-sapphire/20 text-xs font-bold hover:bg-sapphire/20 transition-colors"
+                    className="px-4 py-2.5 rounded bg-sapphire/10 text-sapphire border border-sapphire/20 text-xs font-bold hover:bg-sapphire/20 transition-colors whitespace-nowrap"
                   >
-                    Set Reminder
+                    {groupCounts[`${med.patient}|${med.refillDate}`] > 1
+                      ? `Set Reminder (${groupCounts[`${med.patient}|${med.refillDate}`]})`
+                      : "Set Reminder"}
                   </button>
                 </TableCell>
               </TableRow>
