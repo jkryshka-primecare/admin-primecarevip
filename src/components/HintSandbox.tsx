@@ -379,7 +379,10 @@ const HintSandbox = () => {
                 <button
                   onClick={() => setOffset(offset + limit)}
                   disabled={
-                    loading || !records || records.length < limit
+                    loading ||
+                    !records ||
+                    records.length < limit ||
+                    (total !== null && offset + limit >= total)
                   }
                   className="px-3 py-1.5 rounded text-[10px] font-bold tracking-widest uppercase border border-border text-muted-foreground hover:text-foreground transition-colors disabled:opacity-30 disabled:cursor-not-allowed"
                 >
