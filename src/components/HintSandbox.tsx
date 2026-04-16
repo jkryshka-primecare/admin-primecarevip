@@ -193,7 +193,7 @@ const HintSandbox = () => {
             </button>
           ))}
           <button
-            onClick={() => load(resource, limit, offset)}
+            onClick={() => load(resource, limit, offset, search)}
             disabled={loading}
             className="px-3 py-1.5 rounded text-[10px] font-bold tracking-widest uppercase border border-border text-muted-foreground hover:text-foreground transition-colors flex items-center gap-1.5 disabled:opacity-50"
           >
@@ -202,6 +202,38 @@ const HintSandbox = () => {
           </button>
         </div>
       </div>
+
+      {/* Search (only for resources Hint supports `q` on) */}
+      {SEARCHABLE_RESOURCES.has(resource) && (
+        <div className="flex items-center gap-3">
+          <label className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground">
+            Search
+          </label>
+          <div className="relative flex-1 max-w-md">
+            <input
+              type="search"
+              value={searchInput}
+              onChange={(e) => setSearchInput(e.target.value)}
+              placeholder={`Search ${resource} by name, email, ID…`}
+              className="w-full bg-background border border-border rounded px-3 py-2 text-xs font-mono text-foreground placeholder:text-muted-foreground/60 focus:outline-none focus:border-sapphire/50 focus:ring-1 focus:ring-sapphire/30"
+            />
+            {searchInput && (
+              <button
+                onClick={() => setSearchInput("")}
+                className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground text-xs px-1"
+                aria-label="Clear search"
+              >
+                ✕
+              </button>
+            )}
+          </div>
+          {search && (
+            <span className="text-[10px] font-mono text-muted-foreground">
+              q=<span className="text-sapphire">{search}</span>
+            </span>
+          )}
+        </div>
+      )}
 
       {/* Status / error */}
       {error && (
