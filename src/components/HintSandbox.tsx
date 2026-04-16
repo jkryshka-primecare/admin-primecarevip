@@ -30,6 +30,8 @@ const PAGINATED_RESOURCES = new Set<HintResource>([
   "invoices",
   "plans",
 ]);
+// Hint's API supports a `q` text-search param on these list endpoints.
+const SEARCHABLE_RESOURCES = new Set<HintResource>(["patients", "memberships"]);
 
 const HintSandbox = () => {
   const [resource, setResource] = useState<HintResource>("patients");
