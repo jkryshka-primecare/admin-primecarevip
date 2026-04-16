@@ -22,7 +22,9 @@ const corsHeaders = {
   "Access-Control-Allow-Methods": "POST, OPTIONS",
 };
 
-const HINT_BASE = "https://provider.staging.hint.com/api/provider/v1";
+const HINT_HOST = "https://api.staging.hint.com";
+const HINT_PRACTICE_BASE = `${HINT_HOST}/api/provider`;
+const HINT_PARTNER_BASE = `${HINT_HOST}/api/partner`;
 
 type RequestBody = {
   resource?: string;
@@ -82,9 +84,10 @@ Deno.serve(async (req) => {
       );
     }
 
-    // Build target URL
+    // Build target URL — partner scope hits /api/partner/*, practice hits /api/provider/*
+    const base = scope === "partner" ? HINT_PARTNER_BASE : HINT_PRACTICE_BASE;
     const path = body.id ? `${resource}/${encodeURIComponent(body.id)}` : resource;
-    const url = new URL(`${HINT_BASE}/${path}`);
+    const url = new URL(`${base}/${path}`);
     if (body.query) {
       for (const [k, v] of Object.entries(body.query)) {
         url.searchParams.set(k, String(v));
@@ -97,8 +100,8 @@ Deno.serve(async (req) => {
       headers: {
         Accept: "application/json",
         "Content-Type": "application/json",
-        // Hint uses HTTP Basic auth: API key as username, blank password.
-        Authorization: `Basic ${btoa(`${apiKey}:`)}`,
+        // Hint uses Bearer token auth (RFC 6750).
+        Authorization: `Bearer ${apiKey}`,
       },
       body: method === "GET" || method === "DELETE"
         ? undefined
