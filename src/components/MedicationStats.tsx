@@ -43,6 +43,34 @@ const MedicationStats = () => {
   const [activeCategory, setActiveCategory] = useState("All");
   const [searchTerm, setSearchTerm] = useState("");
   const [reminderMed, setReminderMed] = useState<Medication | null>(null);
+  const [medications, setMedications] = useState<Medication[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [sandboxMeta, setSandboxMeta] = useState<{ source: string; generated: string } | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    const load = async () => {
+      setLoading(true);
+      try {
+        const { data, error } = await supabase.functions.invoke("fhir-medications-sandbox", {
+          method: "GET",
+        });
+        if (error) throw error;
+        if (cancelled) return;
+        setMedications(data.medications ?? []);
+        setSandboxMeta({ source: data.source, generated: data.generated });
+      } catch (e) {
+        const msg = e instanceof Error ? e.message : "Failed to load sandbox data";
+        toast.error("Sandbox API error", { description: msg });
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    };
+    load();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   const filtered = medications.filter((m) => {
     const matchesCat = activeCategory === "All" || m.category === activeCategory;
@@ -52,7 +80,6 @@ const MedicationStats = () => {
     return matchesCat && matchesSearch;
   });
 
-  // Group by patient + refillDate to detect consolidation opportunities
   const groupKey = (m: Medication) => `${m.patient}|${m.refillDate}`;
   const groupCounts = medications.reduce<Record<string, number>>((acc, m) => {
     const k = groupKey(m);
