@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { RefreshCw } from "lucide-react";
 import {
   Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
@@ -13,11 +13,20 @@ type Medication = {
   id: number;
   rxId?: string;
   patient: string;
+  patientId?: string; // Hint pat-… id (when joined with the Hint sandbox)
+  seedPatient?: string; // original FHIR seed display name, kept for debugging
   medication: string;
   category: string;
   refillDate: string;
   daysLeft: number;
   status: "urgent" | "due-soon" | "on-track";
+};
+
+type HintPatient = {
+  id: string;
+  name?: string;
+  first_name?: string;
+  last_name?: string;
 };
 
 const statusStyle: Record<string, string> = {
@@ -44,22 +53,51 @@ const MedicationStats = () => {
   const [activeCategory, setActiveCategory] = useState("All");
   const [searchTerm, setSearchTerm] = useState("");
   const [reminderMed, setReminderMed] = useState<Medication | null>(null);
-  const [medications, setMedications] = useState<Medication[]>([]);
+  const [rawMedications, setRawMedications] = useState<Medication[]>([]);
+  const [hintPatients, setHintPatients] = useState<HintPatient[]>([]);
   const [loading, setLoading] = useState(true);
   const [sandboxMeta, setSandboxMeta] = useState<{ source: string; generated: string } | null>(null);
+  const [hintMeta, setHintMeta] = useState<{ count: number; total: number | null } | null>(null);
 
-  const loadMedications = useCallback(async (isRefresh = false) => {
+  const loadAll = useCallback(async (isRefresh = false) => {
     setLoading(true);
     try {
-      const { data, error } = await supabase.functions.invoke("fhir-medications-sandbox", {
-        method: "GET",
-      });
-      if (error) throw error;
-      setMedications(data.medications ?? []);
-      setSandboxMeta({ source: data.source, generated: data.generated });
+      // Fetch FHIR medications and Hint patients in parallel.
+      const [fhirRes, hintRes] = await Promise.all([
+        supabase.functions.invoke("fhir-medications-sandbox", { method: "GET" }),
+        supabase.functions.invoke("hint-sandbox", {
+          body: {
+            resource: "patients",
+            scope: "practice",
+            method: "GET",
+            query: { limit: 100, offset: 0 },
+          },
+        }),
+      ]);
+
+      if (fhirRes.error) throw fhirRes.error;
+      const meds: Medication[] = fhirRes.data?.medications ?? [];
+      setRawMedications(meds);
+      setSandboxMeta({ source: fhirRes.data.source, generated: fhirRes.data.generated });
+
+      // Hint failures shouldn't block medication display — just log.
+      if (hintRes.error) {
+        console.warn("Hint patient fetch failed:", hintRes.error);
+        setHintPatients([]);
+        setHintMeta(null);
+      } else {
+        const hintData = hintRes.data;
+        const patients: HintPatient[] = Array.isArray(hintData?.data) ? hintData.data : [];
+        setHintPatients(patients);
+        setHintMeta({
+          count: patients.length,
+          total: hintData?.pagination?.total ?? null,
+        });
+      }
+
       if (isRefresh) {
         toast.success("Sandbox data refreshed", {
-          description: `${data.count ?? data.medications?.length ?? 0} records from ${data.source}`,
+          description: `${meds.length} Rx · ${(hintRes.data?.data?.length ?? 0)} Hint patients`,
         });
       }
     } catch (e) {
@@ -71,14 +109,76 @@ const MedicationStats = () => {
   }, []);
 
   useEffect(() => {
-    loadMedications();
-  }, [loadMedications]);
+    loadAll();
+  }, [loadAll]);
+
+  // Join: replace each med's `patient` with a real Hint patient, grouped by
+  // surname seed. Same seed name → same Hint patient (preserves multi-Rx
+  // groupings like "Garcia, M. has 3 meds"). If no surname match, fall back
+  // to round-robin through the remaining unmatched Hint patients so every
+  // medication still gets a real Hint identity.
+  const medications = useMemo<Medication[]>(() => {
+    if (rawMedications.length === 0) return [];
+    if (hintPatients.length === 0) return rawMedications;
+
+    const uniqueSeedNames = Array.from(
+      new Set(rawMedications.map((m) => m.patient)),
+    );
+    const usedHintIds = new Set<string>();
+    const seedToHint = new Map<string, HintPatient>();
+    let fallbackCursor = 0;
+
+    const findBySurname = (seedName: string): HintPatient | undefined => {
+      // "Thompson, R." → surname "thompson"
+      const surname = seedName.split(",")[0]?.trim().toLowerCase();
+      if (!surname) return undefined;
+      return hintPatients.find(
+        (p) =>
+          !usedHintIds.has(p.id) &&
+          p.last_name?.toLowerCase() === surname,
+      );
+    };
+
+    const nextFallback = (): HintPatient | undefined => {
+      while (fallbackCursor < hintPatients.length) {
+        const candidate = hintPatients[fallbackCursor++];
+        if (!usedHintIds.has(candidate.id)) return candidate;
+      }
+      // All Hint patients already used — start reusing from the top.
+      return hintPatients[0];
+    };
+
+    for (const seedName of uniqueSeedNames) {
+      const matched = findBySurname(seedName) ?? nextFallback();
+      if (matched) {
+        usedHintIds.add(matched.id);
+        seedToHint.set(seedName, matched);
+      }
+    }
+
+    return rawMedications.map((m) => {
+      const hint = seedToHint.get(m.patient);
+      if (!hint) return m;
+      const displayName =
+        hint.name ??
+        [hint.first_name, hint.last_name].filter(Boolean).join(" ") ??
+        m.patient;
+      return {
+        ...m,
+        seedPatient: m.patient,
+        patient: displayName,
+        patientId: hint.id,
+      };
+    });
+  }, [rawMedications, hintPatients]);
 
   const filtered = medications.filter((m) => {
     const matchesCat = activeCategory === "All" || m.category === activeCategory;
+    const term = searchTerm.toLowerCase();
     const matchesSearch =
-      m.patient.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      m.medication.toLowerCase().includes(searchTerm.toLowerCase());
+      m.patient.toLowerCase().includes(term) ||
+      m.medication.toLowerCase().includes(term) ||
+      (m.patientId?.toLowerCase().includes(term) ?? false);
     return matchesCat && matchesSearch;
   });
 
@@ -121,9 +221,15 @@ const MedicationStats = () => {
             <span className="px-2 py-0.5 rounded text-[9px] font-bold uppercase tracking-wider bg-sapphire/15 text-sapphire border border-sapphire/30">
               Sandbox FHIR API
             </span>
+            {hintMeta && (
+              <span className="px-2 py-0.5 rounded text-[9px] font-bold uppercase tracking-wider bg-cyan-clinical/15 text-cyan-clinical border border-cyan-clinical/30">
+                Hint · {hintMeta.count}
+                {hintMeta.total !== null ? `/${hintMeta.total}` : ""} patients
+              </span>
+            )}
             <button
               type="button"
-              onClick={() => loadMedications(true)}
+              onClick={() => loadAll(true)}
               disabled={loading}
               aria-label="Refresh sandbox data"
               className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded text-[10px] font-bold uppercase tracking-wider bg-secondary text-foreground border border-border hover:bg-muted disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
@@ -182,8 +288,15 @@ const MedicationStats = () => {
           <TableBody>
             {filtered.map((med) => (
               <TableRow key={med.id} className="border-border hover:bg-muted/30">
-                <TableCell className="font-mono text-sm text-cyan-clinical cursor-pointer hover:underline">
-                  {med.patient}
+                <TableCell className="cursor-pointer">
+                  <div className="font-mono text-sm text-cyan-clinical hover:underline">
+                    {med.patient}
+                  </div>
+                  {med.patientId && (
+                    <div className="text-[10px] font-mono text-muted-foreground mt-0.5">
+                      {med.patientId}
+                    </div>
+                  )}
                 </TableCell>
                 <TableCell className="text-sm text-foreground">{med.medication}</TableCell>
                 <TableCell>
