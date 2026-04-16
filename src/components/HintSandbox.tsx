@@ -29,6 +29,12 @@ const HintSandbox = () => {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  // Detail drawer state
+  const [detailOpen, setDetailOpen] = useState(false);
+  const [detailLoading, setDetailLoading] = useState(false);
+  const [detail, setDetail] = useState<HintResponse | null>(null);
+  const [detailId, setDetailId] = useState<string | null>(null);
+
   const load = useCallback(async (which: HintResource) => {
     setLoading(true);
     setError(null);
@@ -60,6 +66,32 @@ const HintSandbox = () => {
       setLoading(false);
     }
   }, []);
+
+  const loadDetail = useCallback(
+    async (which: HintResource, id: string) => {
+      setDetailOpen(true);
+      setDetailId(id);
+      setDetail(null);
+      setDetailLoading(true);
+      try {
+        const { data, error: invokeError } = await supabase.functions.invoke<HintResponse>(
+          "hint-sandbox",
+          { body: { resource: which, id, scope: "practice", method: "GET" } },
+        );
+        if (invokeError) throw invokeError;
+        if (!data) throw new Error("Empty response from Hint sandbox");
+        setDetail(data);
+        if (data.status >= 400) toast.error(`Hint ${which}/${id} returned ${data.status}`);
+        else toast.success(`${which}/${id} fetched in ${data.elapsedMs}ms`);
+      } catch (e) {
+        const msg = e instanceof Error ? e.message : "Unknown error";
+        toast.error(msg);
+      } finally {
+        setDetailLoading(false);
+      }
+    },
+    [],
+  );
 
   useEffect(() => {
     load(resource);
