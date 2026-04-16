@@ -46,6 +46,9 @@ const SCOPE_BASE_PATH: Record<HintScope, string> = {
 };
 
 const PAGE_SIZE_OPTIONS = [10, 25, 50, 100] as const;
+// Singleton resources — Hint returns a single object, not a list. We don't
+// send pagination params to these.
+const SINGLETON_RESOURCES = new Set<HintResource>(["practice", "partner"]);
 const PAGINATED_RESOURCES = new Set<HintResource>([
   "patients",
   "memberships",
