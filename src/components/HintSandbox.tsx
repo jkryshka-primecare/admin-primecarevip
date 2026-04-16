@@ -183,13 +183,69 @@ const HintSandbox = () => {
         </div>
 
         {records && records.length > 0 ? (
-          <RecordsTable records={records} />
+          <RecordsTable
+            records={records}
+            onRowClick={(row) => {
+              const id = typeof row.id === "string" ? row.id : null;
+              if (!id) {
+                toast.error("Row has no id field");
+                return;
+              }
+              loadDetail(resource, id);
+            }}
+          />
         ) : (
           <div className="p-8 text-center text-sm text-muted-foreground">
             {loading ? "Fetching from Hint..." : "No records to display."}
           </div>
         )}
       </div>
+
+      {/* Detail drawer */}
+      {detailOpen && (
+        <div
+          className="fixed inset-0 z-50 bg-background/80 backdrop-blur-sm flex items-start justify-end"
+          onClick={() => setDetailOpen(false)}
+        >
+          <div
+            className="h-full w-full max-w-2xl bg-card border-l border-border overflow-y-auto"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="px-6 py-4 border-b border-border flex items-center justify-between sticky top-0 bg-card z-10">
+              <div className="space-y-1">
+                <div className="text-[10px] font-bold tracking-widest uppercase text-muted-foreground">
+                  {resource} detail
+                </div>
+                <div className="text-sm font-mono text-foreground">{detailId}</div>
+                {detail && (
+                  <div className="text-[10px] font-mono text-muted-foreground">
+                    {detail.upstream.replace("https://", "")} · {detail.elapsedMs}ms · HTTP{" "}
+                    {detail.status}
+                  </div>
+                )}
+              </div>
+              <button
+                onClick={() => setDetailOpen(false)}
+                className="px-3 py-1.5 rounded text-[10px] font-bold tracking-widest uppercase border border-border text-muted-foreground hover:text-foreground"
+              >
+                Close
+              </button>
+            </div>
+            <div className="p-6">
+              {detailLoading ? (
+                <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                  <Loader2 className="size-4 animate-spin" />
+                  Fetching {resource}/{detailId}…
+                </div>
+              ) : detail ? (
+                <DetailView data={detail.data} />
+              ) : (
+                <div className="text-sm text-muted-foreground">No data.</div>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Raw JSON */}
       <details className="border border-border rounded">
