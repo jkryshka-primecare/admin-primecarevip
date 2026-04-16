@@ -6,6 +6,7 @@ import EngagementPanel from "@/components/EngagementPanel";
 import CostSavingsPanel from "@/components/CostSavingsPanel";
 import ClaimsPipeline from "@/components/ClaimsPipeline";
 import MessagingAnalytics from "@/components/MessagingAnalytics";
+import MedicationStats from "@/components/MedicationStats";
 
 const sectionTitles: Record<string, string> = {
   overview: "Executive Registry",
@@ -14,6 +15,7 @@ const sectionTitles: Record<string, string> = {
   savings: "Cost Savings Analysis",
   claims: "Claims Pipeline",
   messaging: "Messaging Analytics",
+  medications: "Medication Statistics",
 };
 
 const Index = () => {
@@ -63,6 +65,7 @@ const Index = () => {
           {activeSection === "savings" && <CostSavingsPanel />}
           {activeSection === "claims" && <ClaimsPipeline />}
           {activeSection === "messaging" && <MessagingAnalytics />}
+          {activeSection === "medications" && <MedicationStats />}
         </div>
       </main>
     </div>
