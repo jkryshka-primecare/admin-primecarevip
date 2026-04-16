@@ -8,6 +8,7 @@ const navItems = [
   { label: "Claims Pipeline", id: "claims" },
   { label: "Messaging Analytics", id: "messaging" },
   { label: "Medication Stats", id: "medications" },
+  { label: "Hint Sandbox", id: "hint" },
 ];
 
 interface SidebarProps {
