@@ -1,28 +1,23 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import {
   Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
 } from "@/components/ui/table";
 import ReminderModal from "@/components/ReminderModal";
+import { supabase } from "@/integrations/supabase/client";
+import { toast } from "sonner";
 
 const categories = ["All", "Chronic / Routine", "Controlled", "Acute", "Preventive"];
 
-const medications = [
-  { id: 1, patient: "Thompson, R.", medication: "Metformin 500mg", category: "Chronic / Routine", refillDate: "2026-04-22", daysLeft: 6, status: "due-soon" },
-  { id: 2, patient: "Garcia, M.", medication: "Lisinopril 10mg", category: "Chronic / Routine", refillDate: "2026-04-18", daysLeft: 2, status: "urgent" },
-  { id: 3, patient: "Chen, L.", medication: "Adderall XR 20mg", category: "Controlled", refillDate: "2026-04-25", daysLeft: 9, status: "on-track" },
-  { id: 4, patient: "Williams, J.", medication: "Oxycodone 5mg", category: "Controlled", refillDate: "2026-04-17", daysLeft: 1, status: "urgent" },
-  { id: 5, patient: "Patel, S.", medication: "Atorvastatin 40mg", category: "Chronic / Routine", refillDate: "2026-05-02", daysLeft: 16, status: "on-track" },
-  { id: 6, patient: "Davis, K.", medication: "Amoxicillin 500mg", category: "Acute", refillDate: "2026-04-20", daysLeft: 4, status: "due-soon" },
-  { id: 7, patient: "Nguyen, T.", medication: "Amlodipine 5mg", category: "Chronic / Routine", refillDate: "2026-04-19", daysLeft: 3, status: "urgent" },
-  { id: 8, patient: "Brown, A.", medication: "Alprazolam 0.5mg", category: "Controlled", refillDate: "2026-04-30", daysLeft: 14, status: "on-track" },
-  { id: 9, patient: "Lee, H.", medication: "Flu Vaccine", category: "Preventive", refillDate: "2026-10-01", daysLeft: 168, status: "on-track" },
-  { id: 10, patient: "Martinez, C.", medication: "Levothyroxine 50mcg", category: "Chronic / Routine", refillDate: "2026-04-21", daysLeft: 5, status: "due-soon" },
-  { id: 11, patient: "Garcia, M.", medication: "Atorvastatin 20mg", category: "Chronic / Routine", refillDate: "2026-04-18", daysLeft: 2, status: "urgent" },
-  { id: 12, patient: "Garcia, M.", medication: "Aspirin 81mg", category: "Preventive", refillDate: "2026-04-18", daysLeft: 2, status: "urgent" },
-  { id: 13, patient: "Thompson, R.", medication: "Glipizide 5mg", category: "Chronic / Routine", refillDate: "2026-04-22", daysLeft: 6, status: "due-soon" },
-];
-
-type Medication = typeof medications[number];
+type Medication = {
+  id: number;
+  rxId?: string;
+  patient: string;
+  medication: string;
+  category: string;
+  refillDate: string;
+  daysLeft: number;
+  status: "urgent" | "due-soon" | "on-track";
+};
 
 const statusStyle: Record<string, string> = {
   urgent: "bg-hcc-alert/15 text-hcc-alert border-hcc-alert/30",
