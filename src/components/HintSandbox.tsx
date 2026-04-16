@@ -54,10 +54,23 @@ const HintSandbox = () => {
   const [detailId, setDetailId] = useState<string | null>(null);
 
   const load = useCallback(
-    async (which: HintResource, nextLimit: number, nextOffset: number) => {
+    async (
+      which: HintResource,
+      nextLimit: number,
+      nextOffset: number,
+      nextSearch: string,
+    ) => {
       setLoading(true);
       setError(null);
       try {
+        const query: Record<string, string | number> = {};
+        if (PAGINATED_RESOURCES.has(which)) {
+          query.limit = nextLimit;
+          query.offset = nextOffset;
+        }
+        if (SEARCHABLE_RESOURCES.has(which) && nextSearch.trim()) {
+          query.q = nextSearch.trim();
+        }
         const { data, error: invokeError } = await supabase.functions.invoke<HintResponse>(
           "hint-sandbox",
           {
@@ -65,9 +78,7 @@ const HintSandbox = () => {
               resource: which,
               scope: "practice",
               method: "GET",
-              query: PAGINATED_RESOURCES.has(which)
-                ? { limit: nextLimit, offset: nextOffset }
-                : undefined,
+              query: Object.keys(query).length > 0 ? query : undefined,
             },
           },
         );
