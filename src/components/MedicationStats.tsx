@@ -317,14 +317,22 @@ const MedicationStats = () => {
           <TableBody>
             {filtered.map((med) => (
               <TableRow key={med.id} className="border-border hover:bg-muted/30">
-                <TableCell className="cursor-pointer">
-                  <div className="font-mono text-sm text-cyan-clinical hover:underline">
-                    {med.patient}
-                  </div>
-                  {med.patientId && (
-                    <div className="text-[10px] font-mono text-muted-foreground mt-0.5">
-                      {med.patientId}
-                    </div>
+                <TableCell>
+                  {med.patientId ? (
+                    <button
+                      type="button"
+                      onClick={() => openPatientDetail(med.patientId!)}
+                      className="text-left group"
+                    >
+                      <div className="font-mono text-sm text-cyan-clinical group-hover:underline">
+                        {med.patient}
+                      </div>
+                      <div className="text-[10px] font-mono text-muted-foreground mt-0.5 group-hover:text-foreground">
+                        {med.patientId}
+                      </div>
+                    </button>
+                  ) : (
+                    <div className="font-mono text-sm text-foreground">{med.patient}</div>
                   )}
                 </TableCell>
                 <TableCell className="text-sm text-foreground">{med.medication}</TableCell>
