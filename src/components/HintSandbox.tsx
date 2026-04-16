@@ -20,6 +20,10 @@ interface HintResponse {
   status: number;
   elapsedMs: number;
   generated: string;
+  pagination?: {
+    total: number | null;
+    headers: Record<string, string>;
+  };
   data: unknown;
 }
 
