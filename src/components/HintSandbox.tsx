@@ -3,7 +3,15 @@ import { Loader2, RefreshCw } from "lucide-react";
 import { toast } from "sonner";
 import { supabase } from "@/integrations/supabase/client";
 
-type HintResource = "patients" | "memberships" | "invoices" | "plans" | "practice";
+type HintScope = "practice" | "partner";
+type HintResource =
+  | "patients"
+  | "memberships"
+  | "invoices"
+  | "plans"
+  | "practice"
+  | "members"
+  | "subscriptions";
 
 interface HintResponse {
   source: string;
@@ -15,13 +23,27 @@ interface HintResponse {
   data: unknown;
 }
 
-const RESOURCES: { id: HintResource; label: string }[] = [
-  { id: "patients", label: "Patients" },
-  { id: "memberships", label: "Memberships" },
-  { id: "invoices", label: "Invoices" },
-  { id: "plans", label: "Plans" },
-  { id: "practice", label: "Practice" },
-];
+// Resources available per scope. Practice API exposes the day-to-day
+// clinic resources; Partner API is for cross-practice / billing entities.
+const RESOURCES_BY_SCOPE: Record<HintScope, { id: HintResource; label: string }[]> = {
+  practice: [
+    { id: "patients", label: "Patients" },
+    { id: "memberships", label: "Memberships" },
+    { id: "invoices", label: "Invoices" },
+    { id: "plans", label: "Plans" },
+    { id: "practice", label: "Practice" },
+  ],
+  partner: [
+    { id: "members", label: "Members" },
+    { id: "subscriptions", label: "Subscriptions" },
+    { id: "invoices", label: "Invoices" },
+  ],
+};
+
+const SCOPE_BASE_PATH: Record<HintScope, string> = {
+  practice: "api.staging.hint.com/api/provider",
+  partner: "api.staging.hint.com/api/partner",
+};
 
 const PAGE_SIZE_OPTIONS = [10, 25, 50, 100] as const;
 const PAGINATED_RESOURCES = new Set<HintResource>([
@@ -29,11 +51,18 @@ const PAGINATED_RESOURCES = new Set<HintResource>([
   "memberships",
   "invoices",
   "plans",
+  "members",
+  "subscriptions",
 ]);
 // Hint's API supports a `q` text-search param on these list endpoints.
-const SEARCHABLE_RESOURCES = new Set<HintResource>(["patients", "memberships"]);
+const SEARCHABLE_RESOURCES = new Set<HintResource>([
+  "patients",
+  "memberships",
+  "members",
+]);
 
 const HintSandbox = () => {
+  const [scope, setScope] = useState<HintScope>("practice");
   const [resource, setResource] = useState<HintResource>("patients");
   const [response, setResponse] = useState<HintResponse | null>(null);
   const [loading, setLoading] = useState(false);
@@ -56,6 +85,7 @@ const HintSandbox = () => {
   const load = useCallback(
     async (
       which: HintResource,
+      whichScope: HintScope,
       nextLimit: number,
       nextOffset: number,
       nextSearch: string,
@@ -76,7 +106,7 @@ const HintSandbox = () => {
           {
             body: {
               resource: which,
-              scope: "practice",
+              scope: whichScope,
               method: "GET",
               query: Object.keys(query).length > 0 ? query : undefined,
             },
@@ -88,7 +118,7 @@ const HintSandbox = () => {
         if (data.status >= 400) {
           toast.error(`Hint API returned ${data.status}`);
         } else {
-          toast.success(`Hint ${which} fetched in ${data.elapsedMs}ms`);
+          toast.success(`Hint ${whichScope}/${which} fetched in ${data.elapsedMs}ms`);
         }
       } catch (e) {
         const msg = e instanceof Error ? e.message : "Unknown error";
@@ -102,7 +132,7 @@ const HintSandbox = () => {
   );
 
   const loadDetail = useCallback(
-    async (which: HintResource, id: string) => {
+    async (which: HintResource, whichScope: HintScope, id: string) => {
       setDetailOpen(true);
       setDetailId(id);
       setDetail(null);
@@ -110,7 +140,7 @@ const HintSandbox = () => {
       try {
         const { data, error: invokeError } = await supabase.functions.invoke<HintResponse>(
           "hint-sandbox",
-          { body: { resource: which, id, scope: "practice", method: "GET" } },
+          { body: { resource: which, id, scope: whichScope, method: "GET" } },
         );
         if (invokeError) throw invokeError;
         if (!data) throw new Error("Empty response from Hint sandbox");
@@ -126,6 +156,14 @@ const HintSandbox = () => {
     },
     [],
   );
+
+  // When scope changes, snap to that scope's first available resource.
+  useEffect(() => {
+    const available = RESOURCES_BY_SCOPE[scope];
+    if (!available.some((r) => r.id === resource)) {
+      setResource(available[0].id);
+    }
+  }, [scope, resource]);
 
   // Reset offset & search whenever the resource changes.
   useEffect(() => {
@@ -144,8 +182,8 @@ const HintSandbox = () => {
   }, [searchInput]);
 
   useEffect(() => {
-    load(resource, limit, offset, search);
-  }, [resource, limit, offset, search, load]);
+    load(resource, scope, limit, offset, search);
+  }, [resource, scope, limit, offset, search, load]);
 
   const records = extractRecords(response?.data, resource);
 
@@ -163,7 +201,7 @@ const HintSandbox = () => {
             </span>
           </div>
           <p className="text-xs text-muted-foreground font-mono">
-            api.staging.hint.com/api/provider
+            {SCOPE_BASE_PATH[scope]}
             {response && (
               <>
                 <span className="mx-2 text-border">·</span>
@@ -177,29 +215,49 @@ const HintSandbox = () => {
           </p>
         </div>
 
-        <div className="flex items-center gap-2">
-          {RESOURCES.map((r) => (
+        <div className="flex flex-col items-end gap-2">
+          {/* Scope toggle: Practice (provider) vs Partner */}
+          <div className="flex items-center gap-1 p-0.5 rounded border border-border bg-secondary/30">
+            {(["practice", "partner"] as const).map((s) => (
+              <button
+                key={s}
+                onClick={() => setScope(s)}
+                className={
+                  "px-2.5 py-1 rounded text-[10px] font-bold tracking-widest uppercase transition-colors " +
+                  (scope === s
+                    ? "bg-sapphire/15 text-sapphire"
+                    : "text-muted-foreground hover:text-foreground")
+                }
+              >
+                {s}
+              </button>
+            ))}
+          </div>
+
+          <div className="flex items-center gap-2 flex-wrap justify-end">
+            {RESOURCES_BY_SCOPE[scope].map((r) => (
+              <button
+                key={r.id}
+                onClick={() => setResource(r.id)}
+                className={
+                  "px-3 py-1.5 rounded text-[10px] font-bold tracking-widest uppercase border transition-colors " +
+                  (resource === r.id
+                    ? "bg-sapphire/10 text-sapphire border-sapphire/30"
+                    : "text-muted-foreground border-border hover:text-foreground")
+                }
+              >
+                {r.label}
+              </button>
+            ))}
             <button
-              key={r.id}
-              onClick={() => setResource(r.id)}
-              className={
-                "px-3 py-1.5 rounded text-[10px] font-bold tracking-widest uppercase border transition-colors " +
-                (resource === r.id
-                  ? "bg-sapphire/10 text-sapphire border-sapphire/30"
-                  : "text-muted-foreground border-border hover:text-foreground")
-              }
+              onClick={() => load(resource, scope, limit, offset, search)}
+              disabled={loading}
+              className="px-3 py-1.5 rounded text-[10px] font-bold tracking-widest uppercase border border-border text-muted-foreground hover:text-foreground transition-colors flex items-center gap-1.5 disabled:opacity-50"
             >
-              {r.label}
+              <RefreshCw className={"size-3 " + (loading ? "animate-spin" : "")} />
+              Refresh
             </button>
-          ))}
-          <button
-            onClick={() => load(resource, limit, offset, search)}
-            disabled={loading}
-            className="px-3 py-1.5 rounded text-[10px] font-bold tracking-widest uppercase border border-border text-muted-foreground hover:text-foreground transition-colors flex items-center gap-1.5 disabled:opacity-50"
-          >
-            <RefreshCw className={"size-3 " + (loading ? "animate-spin" : "")} />
-            Refresh
-          </button>
+          </div>
         </div>
       </div>
 
@@ -326,7 +384,7 @@ const HintSandbox = () => {
                 toast.error("Row has no id field");
                 return;
               }
-              loadDetail(resource, id);
+              loadDetail(resource, scope, id);
             }}
           />
         ) : (
