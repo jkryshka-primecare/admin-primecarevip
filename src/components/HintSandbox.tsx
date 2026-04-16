@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { Fragment, useCallback, useEffect, useState } from "react";
 import { Loader2, RefreshCw } from "lucide-react";
 import { toast } from "sonner";
 import { supabase } from "@/integrations/supabase/client";
@@ -28,6 +28,12 @@ const HintSandbox = () => {
   const [response, setResponse] = useState<HintResponse | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  // Detail drawer state
+  const [detailOpen, setDetailOpen] = useState(false);
+  const [detailLoading, setDetailLoading] = useState(false);
+  const [detail, setDetail] = useState<HintResponse | null>(null);
+  const [detailId, setDetailId] = useState<string | null>(null);
 
   const load = useCallback(async (which: HintResource) => {
     setLoading(true);
@@ -60,6 +66,32 @@ const HintSandbox = () => {
       setLoading(false);
     }
   }, []);
+
+  const loadDetail = useCallback(
+    async (which: HintResource, id: string) => {
+      setDetailOpen(true);
+      setDetailId(id);
+      setDetail(null);
+      setDetailLoading(true);
+      try {
+        const { data, error: invokeError } = await supabase.functions.invoke<HintResponse>(
+          "hint-sandbox",
+          { body: { resource: which, id, scope: "practice", method: "GET" } },
+        );
+        if (invokeError) throw invokeError;
+        if (!data) throw new Error("Empty response from Hint sandbox");
+        setDetail(data);
+        if (data.status >= 400) toast.error(`Hint ${which}/${id} returned ${data.status}`);
+        else toast.success(`${which}/${id} fetched in ${data.elapsedMs}ms`);
+      } catch (e) {
+        const msg = e instanceof Error ? e.message : "Unknown error";
+        toast.error(msg);
+      } finally {
+        setDetailLoading(false);
+      }
+    },
+    [],
+  );
 
   useEffect(() => {
     load(resource);
@@ -151,13 +183,69 @@ const HintSandbox = () => {
         </div>
 
         {records && records.length > 0 ? (
-          <RecordsTable records={records} />
+          <RecordsTable
+            records={records}
+            onRowClick={(row) => {
+              const id = typeof row.id === "string" ? row.id : null;
+              if (!id) {
+                toast.error("Row has no id field");
+                return;
+              }
+              loadDetail(resource, id);
+            }}
+          />
         ) : (
           <div className="p-8 text-center text-sm text-muted-foreground">
             {loading ? "Fetching from Hint..." : "No records to display."}
           </div>
         )}
       </div>
+
+      {/* Detail drawer */}
+      {detailOpen && (
+        <div
+          className="fixed inset-0 z-50 bg-background/80 backdrop-blur-sm flex items-start justify-end"
+          onClick={() => setDetailOpen(false)}
+        >
+          <div
+            className="h-full w-full max-w-2xl bg-card border-l border-border overflow-y-auto"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="px-6 py-4 border-b border-border flex items-center justify-between sticky top-0 bg-card z-10">
+              <div className="space-y-1">
+                <div className="text-[10px] font-bold tracking-widest uppercase text-muted-foreground">
+                  {resource} detail
+                </div>
+                <div className="text-sm font-mono text-foreground">{detailId}</div>
+                {detail && (
+                  <div className="text-[10px] font-mono text-muted-foreground">
+                    {detail.upstream.replace("https://", "")} · {detail.elapsedMs}ms · HTTP{" "}
+                    {detail.status}
+                  </div>
+                )}
+              </div>
+              <button
+                onClick={() => setDetailOpen(false)}
+                className="px-3 py-1.5 rounded text-[10px] font-bold tracking-widest uppercase border border-border text-muted-foreground hover:text-foreground"
+              >
+                Close
+              </button>
+            </div>
+            <div className="p-6">
+              {detailLoading ? (
+                <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                  <Loader2 className="size-4 animate-spin" />
+                  Fetching {resource}/{detailId}…
+                </div>
+              ) : detail ? (
+                <DetailView data={detail.data} />
+              ) : (
+                <div className="text-sm text-muted-foreground">No data.</div>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Raw JSON */}
       <details className="border border-border rounded">
@@ -196,7 +284,13 @@ const SummaryCard = ({
   </div>
 );
 
-const RecordsTable = ({ records }: { records: Record<string, unknown>[] }) => {
+const RecordsTable = ({
+  records,
+  onRowClick,
+}: {
+  records: Record<string, unknown>[];
+  onRowClick?: (row: Record<string, unknown>) => void;
+}) => {
   const columns = pickColumns(records);
   return (
     <div className="overflow-x-auto">
@@ -214,21 +308,61 @@ const RecordsTable = ({ records }: { records: Record<string, unknown>[] }) => {
           </tr>
         </thead>
         <tbody>
-          {records.slice(0, 25).map((row, i) => (
-            <tr
-              key={i}
-              className="border-b border-border/50 hover:bg-secondary/20"
-            >
-              {columns.map((c) => (
-                <td key={c} className="px-4 py-2 text-foreground font-mono">
-                  {formatCell(row[c])}
-                </td>
-              ))}
-            </tr>
-          ))}
+          {records.slice(0, 25).map((row, i) => {
+            const clickable = !!onRowClick && typeof row.id === "string";
+            return (
+              <tr
+                key={i}
+                onClick={clickable ? () => onRowClick!(row) : undefined}
+                className={
+                  "border-b border-border/50 transition-colors " +
+                  (clickable ? "cursor-pointer hover:bg-sapphire/10" : "hover:bg-secondary/20")
+                }
+              >
+                {columns.map((c) => (
+                  <td key={c} className="px-4 py-2 text-foreground font-mono">
+                    {formatCell(row[c])}
+                  </td>
+                ))}
+              </tr>
+            );
+          })}
         </tbody>
       </table>
     </div>
+  );
+};
+
+const DetailView = ({ data }: { data: unknown }) => {
+  if (!data || typeof data !== "object") {
+    return (
+      <pre className="text-[11px] font-mono text-muted-foreground whitespace-pre-wrap">
+        {String(data ?? "—")}
+      </pre>
+    );
+  }
+  const entries = Object.entries(data as Record<string, unknown>).filter(
+    ([, v]) => v !== null && v !== undefined && v !== "" && !(Array.isArray(v) && v.length === 0),
+  );
+  return (
+    <dl className="grid grid-cols-[140px_1fr] gap-x-4 gap-y-2 text-xs">
+      {entries.map(([k, v]) => (
+        <Fragment key={k}>
+          <dt className="text-[10px] font-bold tracking-widest uppercase text-muted-foreground pt-0.5">
+            {k}
+          </dt>
+          <dd className="font-mono text-foreground break-all">
+            {typeof v === "object" ? (
+              <pre className="text-[11px] text-muted-foreground whitespace-pre-wrap">
+                {JSON.stringify(v, null, 2)}
+              </pre>
+            ) : (
+              String(v)
+            )}
+          </dd>
+        </Fragment>
+      ))}
+    </dl>
   );
 };
 
