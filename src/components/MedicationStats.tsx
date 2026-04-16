@@ -112,9 +112,24 @@ const MedicationStats = () => {
       {/* Filters */}
       <section className="titanium-border rounded-lg bg-card p-6 space-y-4">
         <div className="flex items-center justify-between">
-          <h2 className="text-sm font-bold uppercase tracking-widest text-muted-foreground">
-            Refill Tracker
-          </h2>
+          <div className="flex items-center gap-3">
+            <h2 className="text-sm font-bold uppercase tracking-widest text-muted-foreground">
+              Refill Tracker
+            </h2>
+            <span className="px-2 py-0.5 rounded text-[9px] font-bold uppercase tracking-wider bg-sapphire/15 text-sapphire border border-sapphire/30">
+              Sandbox FHIR API
+            </span>
+            {loading && (
+              <span className="text-[10px] font-mono text-muted-foreground animate-pulse">
+                fetching…
+              </span>
+            )}
+            {!loading && sandboxMeta && (
+              <span className="text-[10px] font-mono text-muted-foreground">
+                {sandboxMeta.source} · {new Date(sandboxMeta.generated).toLocaleTimeString()}
+              </span>
+            )}
+          </div>
           <input
             type="text"
             placeholder="Search patient or medication…"
