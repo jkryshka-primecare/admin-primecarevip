@@ -188,6 +188,7 @@ const HintSandbox = () => {
   }, [resource, scope, limit, offset, search, load]);
 
   const records = extractRecords(response?.data, resource);
+  const total = response?.pagination?.total ?? null;
 
   return (
     <div className="space-y-6">
