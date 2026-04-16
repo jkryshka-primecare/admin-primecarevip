@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { RefreshCw } from "lucide-react";
 import {
   Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
@@ -13,11 +13,20 @@ type Medication = {
   id: number;
   rxId?: string;
   patient: string;
+  patientId?: string; // Hint pat-… id (when joined with the Hint sandbox)
+  seedPatient?: string; // original FHIR seed display name, kept for debugging
   medication: string;
   category: string;
   refillDate: string;
   daysLeft: number;
   status: "urgent" | "due-soon" | "on-track";
+};
+
+type HintPatient = {
+  id: string;
+  name?: string;
+  first_name?: string;
+  last_name?: string;
 };
 
 const statusStyle: Record<string, string> = {
