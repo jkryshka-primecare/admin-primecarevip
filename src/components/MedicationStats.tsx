@@ -17,6 +17,9 @@ const medications = [
   { id: 8, patient: "Brown, A.", medication: "Alprazolam 0.5mg", category: "Controlled", refillDate: "2026-04-30", daysLeft: 14, status: "on-track" },
   { id: 9, patient: "Lee, H.", medication: "Flu Vaccine", category: "Preventive", refillDate: "2026-10-01", daysLeft: 168, status: "on-track" },
   { id: 10, patient: "Martinez, C.", medication: "Levothyroxine 50mcg", category: "Chronic / Routine", refillDate: "2026-04-21", daysLeft: 5, status: "due-soon" },
+  { id: 11, patient: "Garcia, M.", medication: "Atorvastatin 20mg", category: "Chronic / Routine", refillDate: "2026-04-18", daysLeft: 2, status: "urgent" },
+  { id: 12, patient: "Garcia, M.", medication: "Aspirin 81mg", category: "Preventive", refillDate: "2026-04-18", daysLeft: 2, status: "urgent" },
+  { id: 13, patient: "Thompson, R.", medication: "Glipizide 5mg", category: "Chronic / Routine", refillDate: "2026-04-22", daysLeft: 6, status: "due-soon" },
 ];
 
 type Medication = typeof medications[number];
