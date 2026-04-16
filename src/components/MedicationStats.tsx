@@ -385,6 +385,15 @@ const MedicationStats = () => {
         groupedMedications={groupedForReminder}
         onClose={() => setReminderMed(null)}
       />
+
+      <HintDetailDrawer
+        open={detailOpen}
+        resource="patients"
+        detailId={detailId}
+        detail={detail}
+        loading={detailLoading}
+        onClose={() => setDetailOpen(false)}
+      />
     </div>
   );
 };
