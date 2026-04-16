@@ -1,28 +1,23 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import {
   Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
 } from "@/components/ui/table";
 import ReminderModal from "@/components/ReminderModal";
+import { supabase } from "@/integrations/supabase/client";
+import { toast } from "sonner";
 
 const categories = ["All", "Chronic / Routine", "Controlled", "Acute", "Preventive"];
 
-const medications = [
-  { id: 1, patient: "Thompson, R.", medication: "Metformin 500mg", category: "Chronic / Routine", refillDate: "2026-04-22", daysLeft: 6, status: "due-soon" },
-  { id: 2, patient: "Garcia, M.", medication: "Lisinopril 10mg", category: "Chronic / Routine", refillDate: "2026-04-18", daysLeft: 2, status: "urgent" },
-  { id: 3, patient: "Chen, L.", medication: "Adderall XR 20mg", category: "Controlled", refillDate: "2026-04-25", daysLeft: 9, status: "on-track" },
-  { id: 4, patient: "Williams, J.", medication: "Oxycodone 5mg", category: "Controlled", refillDate: "2026-04-17", daysLeft: 1, status: "urgent" },
-  { id: 5, patient: "Patel, S.", medication: "Atorvastatin 40mg", category: "Chronic / Routine", refillDate: "2026-05-02", daysLeft: 16, status: "on-track" },
-  { id: 6, patient: "Davis, K.", medication: "Amoxicillin 500mg", category: "Acute", refillDate: "2026-04-20", daysLeft: 4, status: "due-soon" },
-  { id: 7, patient: "Nguyen, T.", medication: "Amlodipine 5mg", category: "Chronic / Routine", refillDate: "2026-04-19", daysLeft: 3, status: "urgent" },
-  { id: 8, patient: "Brown, A.", medication: "Alprazolam 0.5mg", category: "Controlled", refillDate: "2026-04-30", daysLeft: 14, status: "on-track" },
-  { id: 9, patient: "Lee, H.", medication: "Flu Vaccine", category: "Preventive", refillDate: "2026-10-01", daysLeft: 168, status: "on-track" },
-  { id: 10, patient: "Martinez, C.", medication: "Levothyroxine 50mcg", category: "Chronic / Routine", refillDate: "2026-04-21", daysLeft: 5, status: "due-soon" },
-  { id: 11, patient: "Garcia, M.", medication: "Atorvastatin 20mg", category: "Chronic / Routine", refillDate: "2026-04-18", daysLeft: 2, status: "urgent" },
-  { id: 12, patient: "Garcia, M.", medication: "Aspirin 81mg", category: "Preventive", refillDate: "2026-04-18", daysLeft: 2, status: "urgent" },
-  { id: 13, patient: "Thompson, R.", medication: "Glipizide 5mg", category: "Chronic / Routine", refillDate: "2026-04-22", daysLeft: 6, status: "due-soon" },
-];
-
-type Medication = typeof medications[number];
+type Medication = {
+  id: number;
+  rxId?: string;
+  patient: string;
+  medication: string;
+  category: string;
+  refillDate: string;
+  daysLeft: number;
+  status: "urgent" | "due-soon" | "on-track";
+};
 
 const statusStyle: Record<string, string> = {
   urgent: "bg-hcc-alert/15 text-hcc-alert border-hcc-alert/30",
@@ -48,6 +43,34 @@ const MedicationStats = () => {
   const [activeCategory, setActiveCategory] = useState("All");
   const [searchTerm, setSearchTerm] = useState("");
   const [reminderMed, setReminderMed] = useState<Medication | null>(null);
+  const [medications, setMedications] = useState<Medication[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [sandboxMeta, setSandboxMeta] = useState<{ source: string; generated: string } | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    const load = async () => {
+      setLoading(true);
+      try {
+        const { data, error } = await supabase.functions.invoke("fhir-medications-sandbox", {
+          method: "GET",
+        });
+        if (error) throw error;
+        if (cancelled) return;
+        setMedications(data.medications ?? []);
+        setSandboxMeta({ source: data.source, generated: data.generated });
+      } catch (e) {
+        const msg = e instanceof Error ? e.message : "Failed to load sandbox data";
+        toast.error("Sandbox API error", { description: msg });
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    };
+    load();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   const filtered = medications.filter((m) => {
     const matchesCat = activeCategory === "All" || m.category === activeCategory;
@@ -57,7 +80,6 @@ const MedicationStats = () => {
     return matchesCat && matchesSearch;
   });
 
-  // Group by patient + refillDate to detect consolidation opportunities
   const groupKey = (m: Medication) => `${m.patient}|${m.refillDate}`;
   const groupCounts = medications.reduce<Record<string, number>>((acc, m) => {
     const k = groupKey(m);
@@ -90,9 +112,24 @@ const MedicationStats = () => {
       {/* Filters */}
       <section className="titanium-border rounded-lg bg-card p-6 space-y-4">
         <div className="flex items-center justify-between">
-          <h2 className="text-sm font-bold uppercase tracking-widest text-muted-foreground">
-            Refill Tracker
-          </h2>
+          <div className="flex items-center gap-3">
+            <h2 className="text-sm font-bold uppercase tracking-widest text-muted-foreground">
+              Refill Tracker
+            </h2>
+            <span className="px-2 py-0.5 rounded text-[9px] font-bold uppercase tracking-wider bg-sapphire/15 text-sapphire border border-sapphire/30">
+              Sandbox FHIR API
+            </span>
+            {loading && (
+              <span className="text-[10px] font-mono text-muted-foreground animate-pulse">
+                fetching…
+              </span>
+            )}
+            {!loading && sandboxMeta && (
+              <span className="text-[10px] font-mono text-muted-foreground">
+                {sandboxMeta.source} · {new Date(sandboxMeta.generated).toLocaleTimeString()}
+              </span>
+            )}
+          </div>
           <input
             type="text"
             placeholder="Search patient or medication…"
@@ -173,7 +210,7 @@ const MedicationStats = () => {
             {filtered.length === 0 && (
               <TableRow>
                 <TableCell colSpan={7} className="text-center text-muted-foreground py-8">
-                  No medications match the current filters.
+                  {loading ? "Loading sandbox FHIR data…" : "No medications match the current filters."}
                 </TableCell>
               </TableRow>
             )}
