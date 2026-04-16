@@ -3,7 +3,15 @@ import { Loader2, RefreshCw } from "lucide-react";
 import { toast } from "sonner";
 import { supabase } from "@/integrations/supabase/client";
 
-type HintResource = "patients" | "memberships" | "invoices" | "plans" | "practice";
+type HintScope = "practice" | "partner";
+type HintResource =
+  | "patients"
+  | "memberships"
+  | "invoices"
+  | "plans"
+  | "practice"
+  | "members"
+  | "subscriptions";
 
 interface HintResponse {
   source: string;
@@ -15,13 +23,27 @@ interface HintResponse {
   data: unknown;
 }
 
-const RESOURCES: { id: HintResource; label: string }[] = [
-  { id: "patients", label: "Patients" },
-  { id: "memberships", label: "Memberships" },
-  { id: "invoices", label: "Invoices" },
-  { id: "plans", label: "Plans" },
-  { id: "practice", label: "Practice" },
-];
+// Resources available per scope. Practice API exposes the day-to-day
+// clinic resources; Partner API is for cross-practice / billing entities.
+const RESOURCES_BY_SCOPE: Record<HintScope, { id: HintResource; label: string }[]> = {
+  practice: [
+    { id: "patients", label: "Patients" },
+    { id: "memberships", label: "Memberships" },
+    { id: "invoices", label: "Invoices" },
+    { id: "plans", label: "Plans" },
+    { id: "practice", label: "Practice" },
+  ],
+  partner: [
+    { id: "members", label: "Members" },
+    { id: "subscriptions", label: "Subscriptions" },
+    { id: "invoices", label: "Invoices" },
+  ],
+};
+
+const SCOPE_BASE_PATH: Record<HintScope, string> = {
+  practice: "api.staging.hint.com/api/provider",
+  partner: "api.staging.hint.com/api/partner",
+};
 
 const PAGE_SIZE_OPTIONS = [10, 25, 50, 100] as const;
 const PAGINATED_RESOURCES = new Set<HintResource>([
@@ -29,9 +51,15 @@ const PAGINATED_RESOURCES = new Set<HintResource>([
   "memberships",
   "invoices",
   "plans",
+  "members",
+  "subscriptions",
 ]);
 // Hint's API supports a `q` text-search param on these list endpoints.
-const SEARCHABLE_RESOURCES = new Set<HintResource>(["patients", "memberships"]);
+const SEARCHABLE_RESOURCES = new Set<HintResource>([
+  "patients",
+  "memberships",
+  "members",
+]);
 
 const HintSandbox = () => {
   const [resource, setResource] = useState<HintResource>("patients");
