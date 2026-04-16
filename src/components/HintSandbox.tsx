@@ -30,6 +30,8 @@ const PAGINATED_RESOURCES = new Set<HintResource>([
   "invoices",
   "plans",
 ]);
+// Hint's API supports a `q` text-search param on these list endpoints.
+const SEARCHABLE_RESOURCES = new Set<HintResource>(["patients", "memberships"]);
 
 const HintSandbox = () => {
   const [resource, setResource] = useState<HintResource>("patients");
@@ -41,6 +43,10 @@ const HintSandbox = () => {
   const [limit, setLimit] = useState(10);
   const [offset, setOffset] = useState(0);
 
+  // Search state (Hint's `q` param, debounced before firing)
+  const [searchInput, setSearchInput] = useState("");
+  const [search, setSearch] = useState("");
+
   // Detail drawer state
   const [detailOpen, setDetailOpen] = useState(false);
   const [detailLoading, setDetailLoading] = useState(false);
@@ -48,10 +54,23 @@ const HintSandbox = () => {
   const [detailId, setDetailId] = useState<string | null>(null);
 
   const load = useCallback(
-    async (which: HintResource, nextLimit: number, nextOffset: number) => {
+    async (
+      which: HintResource,
+      nextLimit: number,
+      nextOffset: number,
+      nextSearch: string,
+    ) => {
       setLoading(true);
       setError(null);
       try {
+        const query: Record<string, string | number> = {};
+        if (PAGINATED_RESOURCES.has(which)) {
+          query.limit = nextLimit;
+          query.offset = nextOffset;
+        }
+        if (SEARCHABLE_RESOURCES.has(which) && nextSearch.trim()) {
+          query.q = nextSearch.trim();
+        }
         const { data, error: invokeError } = await supabase.functions.invoke<HintResponse>(
           "hint-sandbox",
           {
@@ -59,9 +78,7 @@ const HintSandbox = () => {
               resource: which,
               scope: "practice",
               method: "GET",
-              query: PAGINATED_RESOURCES.has(which)
-                ? { limit: nextLimit, offset: nextOffset }
-                : undefined,
+              query: Object.keys(query).length > 0 ? query : undefined,
             },
           },
         );
@@ -110,14 +127,25 @@ const HintSandbox = () => {
     [],
   );
 
-  // Reset offset whenever the resource changes, then load with current limit/offset.
+  // Reset offset & search whenever the resource changes.
   useEffect(() => {
     setOffset(0);
+    setSearchInput("");
+    setSearch("");
   }, [resource]);
 
+  // Debounce search input → committed search value (350ms).
   useEffect(() => {
-    load(resource, limit, offset);
-  }, [resource, limit, offset, load]);
+    const handle = setTimeout(() => {
+      setSearch(searchInput);
+      setOffset(0);
+    }, 350);
+    return () => clearTimeout(handle);
+  }, [searchInput]);
+
+  useEffect(() => {
+    load(resource, limit, offset, search);
+  }, [resource, limit, offset, search, load]);
 
   const records = extractRecords(response?.data, resource);
 
@@ -165,7 +193,7 @@ const HintSandbox = () => {
             </button>
           ))}
           <button
-            onClick={() => load(resource, limit, offset)}
+            onClick={() => load(resource, limit, offset, search)}
             disabled={loading}
             className="px-3 py-1.5 rounded text-[10px] font-bold tracking-widest uppercase border border-border text-muted-foreground hover:text-foreground transition-colors flex items-center gap-1.5 disabled:opacity-50"
           >
@@ -174,6 +202,38 @@ const HintSandbox = () => {
           </button>
         </div>
       </div>
+
+      {/* Search (only for resources Hint supports `q` on) */}
+      {SEARCHABLE_RESOURCES.has(resource) && (
+        <div className="flex items-center gap-3">
+          <label className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground">
+            Search
+          </label>
+          <div className="relative flex-1 max-w-md">
+            <input
+              type="search"
+              value={searchInput}
+              onChange={(e) => setSearchInput(e.target.value)}
+              placeholder={`Search ${resource} by name, email, ID…`}
+              className="w-full bg-background border border-border rounded px-3 py-2 text-xs font-mono text-foreground placeholder:text-muted-foreground/60 focus:outline-none focus:border-sapphire/50 focus:ring-1 focus:ring-sapphire/30"
+            />
+            {searchInput && (
+              <button
+                onClick={() => setSearchInput("")}
+                className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground text-xs px-1"
+                aria-label="Clear search"
+              >
+                ✕
+              </button>
+            )}
+          </div>
+          {search && (
+            <span className="text-[10px] font-mono text-muted-foreground">
+              q=<span className="text-sapphire">{search}</span>
+            </span>
+          )}
+        </div>
+      )}
 
       {/* Status / error */}
       {error && (
