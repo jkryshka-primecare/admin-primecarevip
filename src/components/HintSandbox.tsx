@@ -23,11 +23,23 @@ const RESOURCES: { id: HintResource; label: string }[] = [
   { id: "practice", label: "Practice" },
 ];
 
+const PAGE_SIZE_OPTIONS = [10, 25, 50, 100] as const;
+const PAGINATED_RESOURCES = new Set<HintResource>([
+  "patients",
+  "memberships",
+  "invoices",
+  "plans",
+]);
+
 const HintSandbox = () => {
   const [resource, setResource] = useState<HintResource>("patients");
   const [response, setResponse] = useState<HintResponse | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  // Pagination state (Hint uses limit + offset; default 10, max 100)
+  const [limit, setLimit] = useState(10);
+  const [offset, setOffset] = useState(0);
 
   // Detail drawer state
   const [detailOpen, setDetailOpen] = useState(false);
@@ -35,37 +47,42 @@ const HintSandbox = () => {
   const [detail, setDetail] = useState<HintResponse | null>(null);
   const [detailId, setDetailId] = useState<string | null>(null);
 
-  const load = useCallback(async (which: HintResource) => {
-    setLoading(true);
-    setError(null);
-    try {
-      const { data, error: invokeError } = await supabase.functions.invoke<HintResponse>(
-        "hint-sandbox",
-        {
-          body: {
-            resource: which,
-            scope: "practice",
-            method: "GET",
-            query: which === "practice" ? undefined : { page: 1, per_page: 25 },
+  const load = useCallback(
+    async (which: HintResource, nextLimit: number, nextOffset: number) => {
+      setLoading(true);
+      setError(null);
+      try {
+        const { data, error: invokeError } = await supabase.functions.invoke<HintResponse>(
+          "hint-sandbox",
+          {
+            body: {
+              resource: which,
+              scope: "practice",
+              method: "GET",
+              query: PAGINATED_RESOURCES.has(which)
+                ? { limit: nextLimit, offset: nextOffset }
+                : undefined,
+            },
           },
-        },
-      );
-      if (invokeError) throw invokeError;
-      if (!data) throw new Error("Empty response from Hint sandbox");
-      setResponse(data);
-      if (data.status >= 400) {
-        toast.error(`Hint API returned ${data.status}`);
-      } else {
-        toast.success(`Hint ${which} fetched in ${data.elapsedMs}ms`);
+        );
+        if (invokeError) throw invokeError;
+        if (!data) throw new Error("Empty response from Hint sandbox");
+        setResponse(data);
+        if (data.status >= 400) {
+          toast.error(`Hint API returned ${data.status}`);
+        } else {
+          toast.success(`Hint ${which} fetched in ${data.elapsedMs}ms`);
+        }
+      } catch (e) {
+        const msg = e instanceof Error ? e.message : "Unknown error";
+        setError(msg);
+        toast.error(msg);
+      } finally {
+        setLoading(false);
       }
-    } catch (e) {
-      const msg = e instanceof Error ? e.message : "Unknown error";
-      setError(msg);
-      toast.error(msg);
-    } finally {
-      setLoading(false);
-    }
-  }, []);
+    },
+    [],
+  );
 
   const loadDetail = useCallback(
     async (which: HintResource, id: string) => {
@@ -93,9 +110,14 @@ const HintSandbox = () => {
     [],
   );
 
+  // Reset offset whenever the resource changes, then load with current limit/offset.
   useEffect(() => {
-    load(resource);
-  }, [resource, load]);
+    setOffset(0);
+  }, [resource]);
+
+  useEffect(() => {
+    load(resource, limit, offset);
+  }, [resource, limit, offset, load]);
 
   const records = extractRecords(response?.data, resource);
 
@@ -143,7 +165,7 @@ const HintSandbox = () => {
             </button>
           ))}
           <button
-            onClick={() => load(resource)}
+            onClick={() => load(resource, limit, offset)}
             disabled={loading}
             className="px-3 py-1.5 rounded text-[10px] font-bold tracking-widest uppercase border border-border text-muted-foreground hover:text-foreground transition-colors flex items-center gap-1.5 disabled:opacity-50"
           >
@@ -175,11 +197,64 @@ const HintSandbox = () => {
 
       {/* Records table */}
       <div className="border border-border rounded overflow-hidden">
-        <div className="px-4 py-3 border-b border-border flex items-center justify-between bg-secondary/30">
+        <div className="px-4 py-3 border-b border-border flex items-center justify-between gap-4 flex-wrap bg-secondary/30">
           <span className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground">
-            {resource} · first {records?.length ?? 0} records
+            {resource}
+            {PAGINATED_RESOURCES.has(resource) && (
+              <>
+                {" · showing "}
+                {records?.length ?? 0}
+                {" · offset "}
+                {offset}
+                {"–"}
+                {offset + (records?.length ?? 0)}
+              </>
+            )}
           </span>
-          {loading && <Loader2 className="size-3 animate-spin text-muted-foreground" />}
+
+          <div className="flex items-center gap-2">
+            {loading && <Loader2 className="size-3 animate-spin text-muted-foreground" />}
+
+            {PAGINATED_RESOURCES.has(resource) && (
+              <>
+                <label className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground">
+                  Page size
+                </label>
+                <select
+                  value={limit}
+                  onChange={(e) => {
+                    setLimit(Number(e.target.value));
+                    setOffset(0);
+                  }}
+                  disabled={loading}
+                  className="bg-background border border-border rounded px-2 py-1 text-xs font-mono text-foreground disabled:opacity-50"
+                >
+                  {PAGE_SIZE_OPTIONS.map((n) => (
+                    <option key={n} value={n}>
+                      {n}
+                    </option>
+                  ))}
+                </select>
+
+                <button
+                  onClick={() => setOffset(Math.max(0, offset - limit))}
+                  disabled={loading || offset === 0}
+                  className="px-3 py-1.5 rounded text-[10px] font-bold tracking-widest uppercase border border-border text-muted-foreground hover:text-foreground transition-colors disabled:opacity-30 disabled:cursor-not-allowed"
+                >
+                  ← Prev
+                </button>
+                <button
+                  onClick={() => setOffset(offset + limit)}
+                  disabled={
+                    loading || !records || records.length < limit
+                  }
+                  className="px-3 py-1.5 rounded text-[10px] font-bold tracking-widest uppercase border border-border text-muted-foreground hover:text-foreground transition-colors disabled:opacity-30 disabled:cursor-not-allowed"
+                >
+                  Next →
+                </button>
+              </>
+            )}
+          </div>
         </div>
 
         {records && records.length > 0 ? (
