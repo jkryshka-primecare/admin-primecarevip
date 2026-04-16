@@ -126,6 +126,35 @@ Deno.serve(async (req) => {
       // leave as text
     }
 
+    // Hint returns pagination metadata in response headers. Surface whatever
+    // we can find so the UI can render "Showing 10 of 47" style counts.
+    const PAGINATION_HEADER_KEYS = [
+      "x-total-count",
+      "total-count",
+      "x-total",
+      "total",
+      "x-total-pages",
+      "total-pages",
+      "x-page",
+      "page",
+      "x-per-page",
+      "per-page",
+      "x-limit",
+      "x-offset",
+      "link",
+    ];
+    const paginationHeaders: Record<string, string> = {};
+    for (const key of PAGINATION_HEADER_KEYS) {
+      const value = upstream.headers.get(key);
+      if (value !== null) paginationHeaders[key] = value;
+    }
+    const totalRaw =
+      paginationHeaders["x-total-count"] ??
+      paginationHeaders["total-count"] ??
+      paginationHeaders["x-total"] ??
+      paginationHeaders["total"];
+    const total = totalRaw !== undefined ? Number(totalRaw) : undefined;
+
     return json(
       {
         source: "sandbox.hint.lovable.local",
@@ -134,6 +163,10 @@ Deno.serve(async (req) => {
         status: upstream.status,
         elapsedMs,
         generated: new Date().toISOString(),
+        pagination: {
+          total: Number.isFinite(total) ? total : null,
+          headers: paginationHeaders,
+        },
         data: parsed,
       },
       upstream.ok ? 200 : upstream.status,
