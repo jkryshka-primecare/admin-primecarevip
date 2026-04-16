@@ -221,9 +221,15 @@ const MedicationStats = () => {
             <span className="px-2 py-0.5 rounded text-[9px] font-bold uppercase tracking-wider bg-sapphire/15 text-sapphire border border-sapphire/30">
               Sandbox FHIR API
             </span>
+            {hintMeta && (
+              <span className="px-2 py-0.5 rounded text-[9px] font-bold uppercase tracking-wider bg-cyan-clinical/15 text-cyan-clinical border border-cyan-clinical/30">
+                Hint · {hintMeta.count}
+                {hintMeta.total !== null ? `/${hintMeta.total}` : ""} patients
+              </span>
+            )}
             <button
               type="button"
-              onClick={() => loadMedications(true)}
+              onClick={() => loadAll(true)}
               disabled={loading}
               aria-label="Refresh sandbox data"
               className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded text-[10px] font-bold uppercase tracking-wider bg-secondary text-foreground border border-border hover:bg-muted disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
