@@ -127,14 +127,25 @@ const HintSandbox = () => {
     [],
   );
 
-  // Reset offset whenever the resource changes, then load with current limit/offset.
+  // Reset offset & search whenever the resource changes.
   useEffect(() => {
     setOffset(0);
+    setSearchInput("");
+    setSearch("");
   }, [resource]);
 
+  // Debounce search input → committed search value (350ms).
   useEffect(() => {
-    load(resource, limit, offset);
-  }, [resource, limit, offset, load]);
+    const handle = setTimeout(() => {
+      setSearch(searchInput);
+      setOffset(0);
+    }, 350);
+    return () => clearTimeout(handle);
+  }, [searchInput]);
+
+  useEffect(() => {
+    load(resource, limit, offset, search);
+  }, [resource, limit, offset, search, load]);
 
   const records = extractRecords(response?.data, resource);
 
