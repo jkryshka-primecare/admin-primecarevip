@@ -51,6 +51,8 @@ const ALLOWED_RESOURCES = new Set([
   "users",
   "providers",
   "memberships_summary",
+  "organizations",
+  "memberships_revenue",
 ]);
 
 Deno.serve(async (req) => {
