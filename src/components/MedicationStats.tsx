@@ -288,8 +288,15 @@ const MedicationStats = () => {
           <TableBody>
             {filtered.map((med) => (
               <TableRow key={med.id} className="border-border hover:bg-muted/30">
-                <TableCell className="font-mono text-sm text-cyan-clinical cursor-pointer hover:underline">
-                  {med.patient}
+                <TableCell className="cursor-pointer">
+                  <div className="font-mono text-sm text-cyan-clinical hover:underline">
+                    {med.patient}
+                  </div>
+                  {med.patientId && (
+                    <div className="text-[10px] font-mono text-muted-foreground mt-0.5">
+                      {med.patientId}
+                    </div>
+                  )}
                 </TableCell>
                 <TableCell className="text-sm text-foreground">{med.medication}</TableCell>
                 <TableCell>
