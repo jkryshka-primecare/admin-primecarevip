@@ -38,6 +38,12 @@ const HintSandbox = () => {
   const [detail, setDetail] = useState<HintResponse | null>(null);
   const [detailId, setDetailId] = useState<string | null>(null);
 
+  // Monotonic request counter — only the latest in-flight load may mutate
+  // state. This prevents a stale 404 (e.g. from the snap-to-resource effect
+  // firing partner/patients before partner/practices) from overwriting the
+  // newer successful response.
+  const requestIdRef = useRef(0);
+
   const load = useCallback(
     async (
       which: HintResource,
@@ -46,6 +52,7 @@ const HintSandbox = () => {
       nextOffset: number,
       nextSearch: string,
     ) => {
+      const requestId = ++requestIdRef.current;
       setLoading(true);
       setError(null);
       try {
@@ -68,6 +75,8 @@ const HintSandbox = () => {
             },
           },
         );
+        // Drop stale responses — a newer load has superseded this one.
+        if (requestId !== requestIdRef.current) return;
         if (invokeError) throw invokeError;
         if (!data) throw new Error("Empty response from Hint sandbox");
         setResponse(data);
@@ -77,11 +86,12 @@ const HintSandbox = () => {
           toast.success(`Hint ${whichScope}/${which} fetched in ${data.elapsedMs}ms`);
         }
       } catch (e) {
+        if (requestId !== requestIdRef.current) return;
         const msg = e instanceof Error ? e.message : "Unknown error";
         setError(msg);
         toast.error(msg);
       } finally {
-        setLoading(false);
+        if (requestId === requestIdRef.current) setLoading(false);
       }
     },
     [],
