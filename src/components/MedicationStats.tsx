@@ -48,30 +48,31 @@ const MedicationStats = () => {
   const [loading, setLoading] = useState(true);
   const [sandboxMeta, setSandboxMeta] = useState<{ source: string; generated: string } | null>(null);
 
-  useEffect(() => {
-    let cancelled = false;
-    const load = async () => {
-      setLoading(true);
-      try {
-        const { data, error } = await supabase.functions.invoke("fhir-medications-sandbox", {
-          method: "GET",
+  const loadMedications = useCallback(async (isRefresh = false) => {
+    setLoading(true);
+    try {
+      const { data, error } = await supabase.functions.invoke("fhir-medications-sandbox", {
+        method: "GET",
+      });
+      if (error) throw error;
+      setMedications(data.medications ?? []);
+      setSandboxMeta({ source: data.source, generated: data.generated });
+      if (isRefresh) {
+        toast.success("Sandbox data refreshed", {
+          description: `${data.count ?? data.medications?.length ?? 0} records from ${data.source}`,
         });
-        if (error) throw error;
-        if (cancelled) return;
-        setMedications(data.medications ?? []);
-        setSandboxMeta({ source: data.source, generated: data.generated });
-      } catch (e) {
-        const msg = e instanceof Error ? e.message : "Failed to load sandbox data";
-        toast.error("Sandbox API error", { description: msg });
-      } finally {
-        if (!cancelled) setLoading(false);
       }
-    };
-    load();
-    return () => {
-      cancelled = true;
-    };
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : "Failed to load sandbox data";
+      toast.error("Sandbox API error", { description: msg });
+    } finally {
+      setLoading(false);
+    }
   }, []);
+
+  useEffect(() => {
+    loadMedications();
+  }, [loadMedications]);
 
   const filtered = medications.filter((m) => {
     const matchesCat = activeCategory === "All" || m.category === activeCategory;
