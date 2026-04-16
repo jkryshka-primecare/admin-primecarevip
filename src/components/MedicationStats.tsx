@@ -4,6 +4,8 @@ import {
   Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
 } from "@/components/ui/table";
 import ReminderModal from "@/components/ReminderModal";
+import { HintDetailDrawer } from "@/components/hint-sandbox/HintDetailDrawer";
+import type { HintResponse } from "@/components/hint-sandbox/types";
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "sonner";
 
@@ -58,6 +60,33 @@ const MedicationStats = () => {
   const [loading, setLoading] = useState(true);
   const [sandboxMeta, setSandboxMeta] = useState<{ source: string; generated: string } | null>(null);
   const [hintMeta, setHintMeta] = useState<{ count: number; total: number | null } | null>(null);
+
+  // Hint patient detail drawer state
+  const [detailOpen, setDetailOpen] = useState(false);
+  const [detailLoading, setDetailLoading] = useState(false);
+  const [detail, setDetail] = useState<HintResponse | null>(null);
+  const [detailId, setDetailId] = useState<string | null>(null);
+
+  const openPatientDetail = useCallback(async (patientId: string) => {
+    setDetailOpen(true);
+    setDetailId(patientId);
+    setDetail(null);
+    setDetailLoading(true);
+    try {
+      const { data, error } = await supabase.functions.invoke<HintResponse>("hint-sandbox", {
+        body: { resource: "patients", id: patientId, scope: "practice", method: "GET" },
+      });
+      if (error) throw error;
+      if (!data) throw new Error("Empty response from Hint sandbox");
+      setDetail(data);
+      if (data.status >= 400) toast.error(`Hint patients/${patientId} returned ${data.status}`);
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : "Unknown error";
+      toast.error(msg);
+    } finally {
+      setDetailLoading(false);
+    }
+  }, []);
 
   const loadAll = useCallback(async (isRefresh = false) => {
     setLoading(true);
@@ -288,14 +317,22 @@ const MedicationStats = () => {
           <TableBody>
             {filtered.map((med) => (
               <TableRow key={med.id} className="border-border hover:bg-muted/30">
-                <TableCell className="cursor-pointer">
-                  <div className="font-mono text-sm text-cyan-clinical hover:underline">
-                    {med.patient}
-                  </div>
-                  {med.patientId && (
-                    <div className="text-[10px] font-mono text-muted-foreground mt-0.5">
-                      {med.patientId}
-                    </div>
+                <TableCell>
+                  {med.patientId ? (
+                    <button
+                      type="button"
+                      onClick={() => openPatientDetail(med.patientId!)}
+                      className="text-left group"
+                    >
+                      <div className="font-mono text-sm text-cyan-clinical group-hover:underline">
+                        {med.patient}
+                      </div>
+                      <div className="text-[10px] font-mono text-muted-foreground mt-0.5 group-hover:text-foreground">
+                        {med.patientId}
+                      </div>
+                    </button>
+                  ) : (
+                    <div className="font-mono text-sm text-foreground">{med.patient}</div>
                   )}
                 </TableCell>
                 <TableCell className="text-sm text-foreground">{med.medication}</TableCell>
@@ -347,6 +384,15 @@ const MedicationStats = () => {
         medication={reminderMed}
         groupedMedications={groupedForReminder}
         onClose={() => setReminderMed(null)}
+      />
+
+      <HintDetailDrawer
+        open={detailOpen}
+        resource="patients"
+        detailId={detailId}
+        detail={detail}
+        loading={detailLoading}
+        onClose={() => setDetailOpen(false)}
       />
     </div>
   );
