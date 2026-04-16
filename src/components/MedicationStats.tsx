@@ -61,6 +61,33 @@ const MedicationStats = () => {
   const [sandboxMeta, setSandboxMeta] = useState<{ source: string; generated: string } | null>(null);
   const [hintMeta, setHintMeta] = useState<{ count: number; total: number | null } | null>(null);
 
+  // Hint patient detail drawer state
+  const [detailOpen, setDetailOpen] = useState(false);
+  const [detailLoading, setDetailLoading] = useState(false);
+  const [detail, setDetail] = useState<HintResponse | null>(null);
+  const [detailId, setDetailId] = useState<string | null>(null);
+
+  const openPatientDetail = useCallback(async (patientId: string) => {
+    setDetailOpen(true);
+    setDetailId(patientId);
+    setDetail(null);
+    setDetailLoading(true);
+    try {
+      const { data, error } = await supabase.functions.invoke<HintResponse>("hint-sandbox", {
+        body: { resource: "patients", id: patientId, scope: "practice", method: "GET" },
+      });
+      if (error) throw error;
+      if (!data) throw new Error("Empty response from Hint sandbox");
+      setDetail(data);
+      if (data.status >= 400) toast.error(`Hint patients/${patientId} returned ${data.status}`);
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : "Unknown error";
+      toast.error(msg);
+    } finally {
+      setDetailLoading(false);
+    }
+  }, []);
+
   const loadAll = useCallback(async (isRefresh = false) => {
     setLoading(true);
     try {
