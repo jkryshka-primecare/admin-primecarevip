@@ -26,13 +26,30 @@ interface MedicationInfo {
 
 interface ReminderModalProps {
   medication: MedicationInfo | null;
+  /** All meds for this patient sharing the same refill date (includes the primary). */
+  groupedMedications?: MedicationInfo[];
   onClose: () => void;
 }
 
-const defaultMessage = (med: MedicationInfo) =>
-  `Hi ${med.patient.split(",")[0]}, this is a reminder that your ${med.medication} refill is coming up on ${med.refillDate}. Are you ready to have this refill sent to your pharmacy? Please reply YES to confirm or contact us to update your preferred pharmacy.`;
+const firstName = (patient: string) => patient.split(",")[0];
 
-const ReminderModal = ({ medication, onClose }: ReminderModalProps) => {
+const buildDefaultMessage = (meds: MedicationInfo[]) => {
+  if (meds.length === 0) return "";
+  const name = firstName(meds[0].patient);
+  const date = meds[0].refillDate;
+  if (meds.length === 1) {
+    return `Hi ${name}, this is a reminder that your ${meds[0].medication} refill is coming up on ${date}. Are you ready to have this refill sent to your pharmacy? Please reply YES to confirm or contact us to update your preferred pharmacy.`;
+  }
+  const list = meds.map((m) => `• ${m.medication}`).join("\n");
+  return `Hi ${name}, you have ${meds.length} medications due for refill on ${date}:\n${list}\n\nAre you ready to have these refills sent to your pharmacy? Please reply YES to confirm all, or let us know which ones you'd like to skip. You can also update your preferred pharmacy with us.`;
+};
+
+const ReminderModal = ({ medication, groupedMedications, onClose }: ReminderModalProps) => {
+  const meds = groupedMedications && groupedMedications.length > 0
+    ? groupedMedications
+    : medication ? [medication] : [];
+  const isGrouped = meds.length > 1;
+
   const [frequency, setFrequency] = useState("Weekly");
   const [customDays, setCustomDays] = useState("3");
   const [selectedMethods, setSelectedMethods] = useState<string[]>(["in-app"]);
@@ -48,12 +65,13 @@ const ReminderModal = ({ medication, onClose }: ReminderModalProps) => {
       setCustomDays("3");
       setSelectedMethods(["in-app"]);
       setNotes("");
-      setMessageText(defaultMessage(medication));
+      setMessageText(buildDefaultMessage(meds));
       setPatientConsent("pending");
       setPharmacySelection("ph-1");
       setCustomPharmacy("");
     }
-  }, [medication]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [medication, groupedMedications?.length]);
 
   const toggleMethod = (id: string) => {
     setSelectedMethods((prev) =>
@@ -75,9 +93,10 @@ const ReminderModal = ({ medication, onClose }: ReminderModalProps) => {
       ? customPharmacy || "Not specified"
       : savedPharmacies.find((p) => p.id === pharmacySelection)?.name ?? "Unknown";
     const freqLabel = frequency === "Custom" ? `Every ${customDays} days` : frequency;
-    toast.success(`Reminder set for ${medication.patient}`, {
-      description: `${medication.medication} — ${freqLabel} via ${selectedMethods.join(", ")} · Pharmacy: ${pharmacy}`,
-    });
+    const summary = isGrouped
+      ? `${meds.length} medications consolidated — ${freqLabel} via ${selectedMethods.join(", ")} · Pharmacy: ${pharmacy}`
+      : `${medication.medication} — ${freqLabel} via ${selectedMethods.join(", ")} · Pharmacy: ${pharmacy}`;
+    toast.success(`Reminder set for ${medication.patient}`, { description: summary });
     onClose();
   };
 
@@ -93,24 +112,44 @@ const ReminderModal = ({ medication, onClose }: ReminderModalProps) => {
       <DialogContent className="bg-card border-border max-w-lg max-h-[90vh] overflow-y-auto">
         <DialogHeader>
           <DialogTitle className="text-foreground text-lg font-medium tracking-tight">
-            Configure Refill Reminder
+            {isGrouped ? "Configure Consolidated Refill Reminder" : "Configure Refill Reminder"}
           </DialogTitle>
           <DialogDescription className="text-muted-foreground text-sm">
             {medication && (
               <>
                 <span className="text-cyan-clinical font-mono">{medication.patient}</span>
-                {" — "}{medication.medication}{" · Next refill "}
-                <span className="font-mono">{medication.refillDate}</span>
+                {isGrouped ? (
+                  <> — {meds.length} medications · Refill date <span className="font-mono">{medication.refillDate}</span></>
+                ) : (
+                  <> — {medication.medication} · Next refill <span className="font-mono">{medication.refillDate}</span></>
+                )}
               </>
             )}
           </DialogDescription>
         </DialogHeader>
 
         <div className="space-y-5 pt-2">
+          {/* Grouped notice */}
+          {isGrouped && (
+            <div className="rounded border border-cyan-clinical/30 bg-cyan-clinical/10 p-4 space-y-2">
+              <p className="text-[10px] font-bold uppercase tracking-widest text-cyan-clinical">
+                Consolidated into one message
+              </p>
+              <p className="text-xs text-muted-foreground leading-relaxed">
+                {meds.length} medications share this refill date and will be sent in a single notification:
+              </p>
+              <ul className="text-xs text-foreground space-y-1 pl-1">
+                {meds.map((m) => (
+                  <li key={m.medication} className="font-mono">• {m.medication}</li>
+                ))}
+              </ul>
+            </div>
+          )}
+
           {/* Patient Consent */}
           <div className="space-y-2">
             <label className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground">
-              Patient Ready to Receive Refill?
+              Patient Ready to Receive Refill{isGrouped ? "s" : ""}?
             </label>
             <div className="flex gap-2">
               {(["pending", "yes", "no"] as const).map((opt) => (
@@ -177,16 +216,16 @@ const ReminderModal = ({ medication, onClose }: ReminderModalProps) => {
           {/* Reminder Message */}
           <div className="space-y-2">
             <label className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground">
-              Reminder Message
+              Reminder Message {isGrouped && <span className="text-cyan-clinical">(consolidated)</span>}
             </label>
             <textarea
               value={messageText}
               onChange={(e) => setMessageText(e.target.value)}
-              rows={4}
+              rows={isGrouped ? 8 : 4}
               className="w-full px-4 py-3 rounded bg-secondary border border-border text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-cyan-clinical/40 resize-none leading-relaxed"
             />
             <button
-              onClick={() => medication && setMessageText(defaultMessage(medication))}
+              onClick={() => setMessageText(buildDefaultMessage(meds))}
               className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground hover:text-foreground transition-colors"
             >
               ↻ Reset to Default
@@ -263,7 +302,7 @@ const ReminderModal = ({ medication, onClose }: ReminderModalProps) => {
               onClick={handleSave}
               className="flex-1 px-6 py-3 bg-sapphire text-primary-foreground text-xs font-bold uppercase tracking-wider rounded hover:opacity-90 transition-opacity"
             >
-              Save Reminder
+              {isGrouped ? `Save Consolidated Reminder (${meds.length})` : "Save Reminder"}
             </button>
             <button
               onClick={onClose}

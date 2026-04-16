@@ -17,6 +17,9 @@ const medications = [
   { id: 8, patient: "Brown, A.", medication: "Alprazolam 0.5mg", category: "Controlled", refillDate: "2026-04-30", daysLeft: 14, status: "on-track" },
   { id: 9, patient: "Lee, H.", medication: "Flu Vaccine", category: "Preventive", refillDate: "2026-10-01", daysLeft: 168, status: "on-track" },
   { id: 10, patient: "Martinez, C.", medication: "Levothyroxine 50mcg", category: "Chronic / Routine", refillDate: "2026-04-21", daysLeft: 5, status: "due-soon" },
+  { id: 11, patient: "Garcia, M.", medication: "Atorvastatin 20mg", category: "Chronic / Routine", refillDate: "2026-04-18", daysLeft: 2, status: "urgent" },
+  { id: 12, patient: "Garcia, M.", medication: "Aspirin 81mg", category: "Preventive", refillDate: "2026-04-18", daysLeft: 2, status: "urgent" },
+  { id: 13, patient: "Thompson, R.", medication: "Glipizide 5mg", category: "Chronic / Routine", refillDate: "2026-04-22", daysLeft: 6, status: "due-soon" },
 ];
 
 type Medication = typeof medications[number];
@@ -54,7 +57,18 @@ const MedicationStats = () => {
     return matchesCat && matchesSearch;
   });
 
+  // Group by patient + refillDate to detect consolidation opportunities
+  const groupKey = (m: Medication) => `${m.patient}|${m.refillDate}`;
+  const groupCounts = medications.reduce<Record<string, number>>((acc, m) => {
+    const k = groupKey(m);
+    acc[k] = (acc[k] || 0) + 1;
+    return acc;
+  }, {});
+  const getGroup = (med: Medication) =>
+    medications.filter((m) => groupKey(m) === groupKey(med));
+
   const openReminder = (med: Medication) => setReminderMed(med);
+  const groupedForReminder = reminderMed ? getGroup(reminderMed) : undefined;
 
   return (
     <div className="space-y-8">
@@ -128,7 +142,16 @@ const MedicationStats = () => {
                     {med.category}
                   </span>
                 </TableCell>
-                <TableCell className="font-mono text-sm text-foreground">{med.refillDate}</TableCell>
+                <TableCell className="font-mono text-sm text-foreground">
+                  <div className="flex items-center gap-2">
+                    {med.refillDate}
+                    {groupCounts[`${med.patient}|${med.refillDate}`] > 1 && (
+                      <span className="px-2 py-0.5 rounded text-[9px] font-bold uppercase tracking-wider bg-cyan-clinical/15 text-cyan-clinical border border-cyan-clinical/30">
+                        +{groupCounts[`${med.patient}|${med.refillDate}`] - 1} same day
+                      </span>
+                    )}
+                  </div>
+                </TableCell>
                 <TableCell className="font-mono text-sm text-foreground">{med.daysLeft}</TableCell>
                 <TableCell>
                   <span className={`px-3 py-1.5 rounded text-[10px] font-bold uppercase tracking-wider border ${statusStyle[med.status]}`}>
@@ -138,9 +161,11 @@ const MedicationStats = () => {
                 <TableCell>
                   <button
                     onClick={() => openReminder(med)}
-                    className="px-4 py-2.5 rounded bg-sapphire/10 text-sapphire border border-sapphire/20 text-xs font-bold hover:bg-sapphire/20 transition-colors"
+                    className="px-4 py-2.5 rounded bg-sapphire/10 text-sapphire border border-sapphire/20 text-xs font-bold hover:bg-sapphire/20 transition-colors whitespace-nowrap"
                   >
-                    Set Reminder
+                    {groupCounts[`${med.patient}|${med.refillDate}`] > 1
+                      ? `Set Reminder (${groupCounts[`${med.patient}|${med.refillDate}`]})`
+                      : "Set Reminder"}
                   </button>
                 </TableCell>
               </TableRow>
@@ -156,7 +181,11 @@ const MedicationStats = () => {
         </Table>
       </section>
 
-      <ReminderModal medication={reminderMed} onClose={() => setReminderMed(null)} />
+      <ReminderModal
+        medication={reminderMed}
+        groupedMedications={groupedForReminder}
+        onClose={() => setReminderMed(null)}
+      />
     </div>
   );
 };
