@@ -65,7 +65,7 @@ const HintSandbox = () => {
     load(resource);
   }, [resource, load]);
 
-  const records = extractRecords(response?.data);
+  const records = extractRecords(response?.data, resource);
 
   return (
     <div className="space-y-6">
@@ -81,7 +81,7 @@ const HintSandbox = () => {
             </span>
           </div>
           <p className="text-xs text-muted-foreground font-mono">
-            provider.staging.hint.com/api/provider/v1
+            api.staging.hint.com/api/provider
             {response && (
               <>
                 <span className="mx-2 text-border">·</span>
@@ -232,12 +232,17 @@ const RecordsTable = ({ records }: { records: Record<string, unknown>[] }) => {
   );
 };
 
-function extractRecords(data: unknown): Record<string, unknown>[] | null {
+function extractRecords(
+  data: unknown,
+  resource?: HintResource,
+): Record<string, unknown>[] | null {
   if (!data) return null;
   if (Array.isArray(data)) return data as Record<string, unknown>[];
   if (typeof data === "object") {
     const obj = data as Record<string, unknown>;
-    // Hint sometimes wraps with { patients: [...] } etc.
+    // Practice is a single resource — render as one row, not its phones[] array.
+    if (resource === "practice") return [obj];
+    // Hint sometimes wraps list responses with { patients: [...] } etc.
     for (const v of Object.values(obj)) {
       if (Array.isArray(v)) return v as Record<string, unknown>[];
     }
