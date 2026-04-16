@@ -23,11 +23,23 @@ const RESOURCES: { id: HintResource; label: string }[] = [
   { id: "practice", label: "Practice" },
 ];
 
+const PAGE_SIZE_OPTIONS = [10, 25, 50, 100] as const;
+const PAGINATED_RESOURCES = new Set<HintResource>([
+  "patients",
+  "memberships",
+  "invoices",
+  "plans",
+]);
+
 const HintSandbox = () => {
   const [resource, setResource] = useState<HintResource>("patients");
   const [response, setResponse] = useState<HintResponse | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  // Pagination state (Hint uses limit + offset; default 10, max 100)
+  const [limit, setLimit] = useState(10);
+  const [offset, setOffset] = useState(0);
 
   // Detail drawer state
   const [detailOpen, setDetailOpen] = useState(false);
@@ -35,37 +47,42 @@ const HintSandbox = () => {
   const [detail, setDetail] = useState<HintResponse | null>(null);
   const [detailId, setDetailId] = useState<string | null>(null);
 
-  const load = useCallback(async (which: HintResource) => {
-    setLoading(true);
-    setError(null);
-    try {
-      const { data, error: invokeError } = await supabase.functions.invoke<HintResponse>(
-        "hint-sandbox",
-        {
-          body: {
-            resource: which,
-            scope: "practice",
-            method: "GET",
-            query: which === "practice" ? undefined : { page: 1, per_page: 25 },
+  const load = useCallback(
+    async (which: HintResource, nextLimit: number, nextOffset: number) => {
+      setLoading(true);
+      setError(null);
+      try {
+        const { data, error: invokeError } = await supabase.functions.invoke<HintResponse>(
+          "hint-sandbox",
+          {
+            body: {
+              resource: which,
+              scope: "practice",
+              method: "GET",
+              query: PAGINATED_RESOURCES.has(which)
+                ? { limit: nextLimit, offset: nextOffset }
+                : undefined,
+            },
           },
-        },
-      );
-      if (invokeError) throw invokeError;
-      if (!data) throw new Error("Empty response from Hint sandbox");
-      setResponse(data);
-      if (data.status >= 400) {
-        toast.error(`Hint API returned ${data.status}`);
-      } else {
-        toast.success(`Hint ${which} fetched in ${data.elapsedMs}ms`);
+        );
+        if (invokeError) throw invokeError;
+        if (!data) throw new Error("Empty response from Hint sandbox");
+        setResponse(data);
+        if (data.status >= 400) {
+          toast.error(`Hint API returned ${data.status}`);
+        } else {
+          toast.success(`Hint ${which} fetched in ${data.elapsedMs}ms`);
+        }
+      } catch (e) {
+        const msg = e instanceof Error ? e.message : "Unknown error";
+        setError(msg);
+        toast.error(msg);
+      } finally {
+        setLoading(false);
       }
-    } catch (e) {
-      const msg = e instanceof Error ? e.message : "Unknown error";
-      setError(msg);
-      toast.error(msg);
-    } finally {
-      setLoading(false);
-    }
-  }, []);
+    },
+    [],
+  );
 
   const loadDetail = useCallback(
     async (which: HintResource, id: string) => {
