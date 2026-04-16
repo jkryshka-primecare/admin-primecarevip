@@ -54,7 +54,18 @@ const MedicationStats = () => {
     return matchesCat && matchesSearch;
   });
 
+  // Group by patient + refillDate to detect consolidation opportunities
+  const groupKey = (m: Medication) => `${m.patient}|${m.refillDate}`;
+  const groupCounts = medications.reduce<Record<string, number>>((acc, m) => {
+    const k = groupKey(m);
+    acc[k] = (acc[k] || 0) + 1;
+    return acc;
+  }, {});
+  const getGroup = (med: Medication) =>
+    medications.filter((m) => groupKey(m) === groupKey(med));
+
   const openReminder = (med: Medication) => setReminderMed(med);
+  const groupedForReminder = reminderMed ? getGroup(reminderMed) : undefined;
 
   return (
     <div className="space-y-8">
