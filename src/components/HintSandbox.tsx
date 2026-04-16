@@ -562,8 +562,8 @@ function extractRecords(
   if (Array.isArray(data)) return data as Record<string, unknown>[];
   if (typeof data === "object") {
     const obj = data as Record<string, unknown>;
-    // Practice is a single resource — render as one row, not its phones[] array.
-    if (resource === "practice") return [obj];
+    // Practice/Partner are single resources — render as one row.
+    if (resource && SINGLETON_RESOURCES.has(resource)) return [obj];
     // Hint sometimes wraps list responses with { patients: [...] } etc.
     for (const v of Object.values(obj)) {
       if (Array.isArray(v)) return v as Record<string, unknown>[];
