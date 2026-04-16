@@ -20,6 +20,10 @@ interface HintResponse {
   status: number;
   elapsedMs: number;
   generated: string;
+  pagination?: {
+    total: number | null;
+    headers: Record<string, string>;
+  };
   data: unknown;
 }
 
@@ -184,6 +188,7 @@ const HintSandbox = () => {
   }, [resource, scope, limit, offset, search, load]);
 
   const records = extractRecords(response?.data, resource);
+  const total = response?.pagination?.total ?? null;
 
   return (
     <div className="space-y-6">
@@ -302,7 +307,13 @@ const HintSandbox = () => {
       <div className="grid grid-cols-3 gap-4">
         <SummaryCard
           label="Records returned"
-          value={records ? records.length.toString() : "—"}
+          value={
+            records
+              ? total !== null
+                ? `${records.length} of ${total}`
+                : records.length.toString()
+              : "—"
+          }
         />
         <SummaryCard label="Resource" value={resource} mono />
         <SummaryCard
@@ -319,7 +330,13 @@ const HintSandbox = () => {
             {PAGINATED_RESOURCES.has(resource) && (
               <>
                 {" · showing "}
-                {records?.length ?? 0}
+                <span className="text-foreground">{records?.length ?? 0}</span>
+                {total !== null && (
+                  <>
+                    {" of "}
+                    <span className="text-foreground">{total}</span>
+                  </>
+                )}
                 {" · offset "}
                 {offset}
                 {"–"}
@@ -362,7 +379,10 @@ const HintSandbox = () => {
                 <button
                   onClick={() => setOffset(offset + limit)}
                   disabled={
-                    loading || !records || records.length < limit
+                    loading ||
+                    !records ||
+                    records.length < limit ||
+                    (total !== null && offset + limit >= total)
                   }
                   className="px-3 py-1.5 rounded text-[10px] font-bold tracking-widest uppercase border border-border text-muted-foreground hover:text-foreground transition-colors disabled:opacity-30 disabled:cursor-not-allowed"
                 >
