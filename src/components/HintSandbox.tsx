@@ -62,6 +62,7 @@ const SEARCHABLE_RESOURCES = new Set<HintResource>([
 ]);
 
 const HintSandbox = () => {
+  const [scope, setScope] = useState<HintScope>("practice");
   const [resource, setResource] = useState<HintResource>("patients");
   const [response, setResponse] = useState<HintResponse | null>(null);
   const [loading, setLoading] = useState(false);
@@ -84,6 +85,7 @@ const HintSandbox = () => {
   const load = useCallback(
     async (
       which: HintResource,
+      whichScope: HintScope,
       nextLimit: number,
       nextOffset: number,
       nextSearch: string,
@@ -104,7 +106,7 @@ const HintSandbox = () => {
           {
             body: {
               resource: which,
-              scope: "practice",
+              scope: whichScope,
               method: "GET",
               query: Object.keys(query).length > 0 ? query : undefined,
             },
@@ -116,7 +118,7 @@ const HintSandbox = () => {
         if (data.status >= 400) {
           toast.error(`Hint API returned ${data.status}`);
         } else {
-          toast.success(`Hint ${which} fetched in ${data.elapsedMs}ms`);
+          toast.success(`Hint ${whichScope}/${which} fetched in ${data.elapsedMs}ms`);
         }
       } catch (e) {
         const msg = e instanceof Error ? e.message : "Unknown error";
@@ -130,7 +132,7 @@ const HintSandbox = () => {
   );
 
   const loadDetail = useCallback(
-    async (which: HintResource, id: string) => {
+    async (which: HintResource, whichScope: HintScope, id: string) => {
       setDetailOpen(true);
       setDetailId(id);
       setDetail(null);
@@ -138,7 +140,7 @@ const HintSandbox = () => {
       try {
         const { data, error: invokeError } = await supabase.functions.invoke<HintResponse>(
           "hint-sandbox",
-          { body: { resource: which, id, scope: "practice", method: "GET" } },
+          { body: { resource: which, id, scope: whichScope, method: "GET" } },
         );
         if (invokeError) throw invokeError;
         if (!data) throw new Error("Empty response from Hint sandbox");
@@ -154,6 +156,14 @@ const HintSandbox = () => {
     },
     [],
   );
+
+  // When scope changes, snap to that scope's first available resource.
+  useEffect(() => {
+    const available = RESOURCES_BY_SCOPE[scope];
+    if (!available.some((r) => r.id === resource)) {
+      setResource(available[0].id);
+    }
+  }, [scope, resource]);
 
   // Reset offset & search whenever the resource changes.
   useEffect(() => {
@@ -172,8 +182,8 @@ const HintSandbox = () => {
   }, [searchInput]);
 
   useEffect(() => {
-    load(resource, limit, offset, search);
-  }, [resource, limit, offset, search, load]);
+    load(resource, scope, limit, offset, search);
+  }, [resource, scope, limit, offset, search, load]);
 
   const records = extractRecords(response?.data, resource);
 
