@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { Fragment, useCallback, useEffect, useState } from "react";
 import { Loader2, RefreshCw } from "lucide-react";
 import { toast } from "sonner";
 import { supabase } from "@/integrations/supabase/client";
@@ -284,7 +284,13 @@ const SummaryCard = ({
   </div>
 );
 
-const RecordsTable = ({ records }: { records: Record<string, unknown>[] }) => {
+const RecordsTable = ({
+  records,
+  onRowClick,
+}: {
+  records: Record<string, unknown>[];
+  onRowClick?: (row: Record<string, unknown>) => void;
+}) => {
   const columns = pickColumns(records);
   return (
     <div className="overflow-x-auto">
@@ -302,21 +308,61 @@ const RecordsTable = ({ records }: { records: Record<string, unknown>[] }) => {
           </tr>
         </thead>
         <tbody>
-          {records.slice(0, 25).map((row, i) => (
-            <tr
-              key={i}
-              className="border-b border-border/50 hover:bg-secondary/20"
-            >
-              {columns.map((c) => (
-                <td key={c} className="px-4 py-2 text-foreground font-mono">
-                  {formatCell(row[c])}
-                </td>
-              ))}
-            </tr>
-          ))}
+          {records.slice(0, 25).map((row, i) => {
+            const clickable = !!onRowClick && typeof row.id === "string";
+            return (
+              <tr
+                key={i}
+                onClick={clickable ? () => onRowClick!(row) : undefined}
+                className={
+                  "border-b border-border/50 transition-colors " +
+                  (clickable ? "cursor-pointer hover:bg-sapphire/10" : "hover:bg-secondary/20")
+                }
+              >
+                {columns.map((c) => (
+                  <td key={c} className="px-4 py-2 text-foreground font-mono">
+                    {formatCell(row[c])}
+                  </td>
+                ))}
+              </tr>
+            );
+          })}
         </tbody>
       </table>
     </div>
+  );
+};
+
+const DetailView = ({ data }: { data: unknown }) => {
+  if (!data || typeof data !== "object") {
+    return (
+      <pre className="text-[11px] font-mono text-muted-foreground whitespace-pre-wrap">
+        {String(data ?? "—")}
+      </pre>
+    );
+  }
+  const entries = Object.entries(data as Record<string, unknown>).filter(
+    ([, v]) => v !== null && v !== undefined && v !== "" && !(Array.isArray(v) && v.length === 0),
+  );
+  return (
+    <dl className="grid grid-cols-[140px_1fr] gap-x-4 gap-y-2 text-xs">
+      {entries.map(([k, v]) => (
+        <Fragment key={k}>
+          <dt className="text-[10px] font-bold tracking-widest uppercase text-muted-foreground pt-0.5">
+            {k}
+          </dt>
+          <dd className="font-mono text-foreground break-all">
+            {typeof v === "object" ? (
+              <pre className="text-[11px] text-muted-foreground whitespace-pre-wrap">
+                {JSON.stringify(v, null, 2)}
+              </pre>
+            ) : (
+              String(v)
+            )}
+          </dd>
+        </Fragment>
+      ))}
+    </dl>
   );
 };
 
