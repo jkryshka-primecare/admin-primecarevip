@@ -36,6 +36,7 @@ type RequestBody = {
 };
 
 const ALLOWED_RESOURCES = new Set([
+  // practice (provider) scope
   "patients",
   "memberships",
   "invoices",
@@ -44,6 +45,14 @@ const ALLOWED_RESOURCES = new Set([
   "practice",
   "subscriptions",
   "episodes",
+  // partner scope
+  "practices",
+  "partner",
+  "users",
+  "providers",
+  "memberships_summary",
+  "organizations",
+  "memberships_revenue",
 ]);
 
 Deno.serve(async (req) => {

@@ -10,8 +10,8 @@ type HintResource =
   | "invoices"
   | "plans"
   | "practice"
-  | "members"
-  | "subscriptions";
+  | "practices"
+  | "partner";
 
 interface HintResponse {
   source: string;
@@ -23,8 +23,9 @@ interface HintResponse {
   data: unknown;
 }
 
-// Resources available per scope. Practice API exposes the day-to-day
-// clinic resources; Partner API is for cross-practice / billing entities.
+// Resources available per scope. The Practice (provider) API exposes the
+// day-to-day clinic resources; the Partner API in Hint's staging sandbox
+// only exposes a list of integrated practices and the partner record itself.
 const RESOURCES_BY_SCOPE: Record<HintScope, { id: HintResource; label: string }[]> = {
   practice: [
     { id: "patients", label: "Patients" },
@@ -34,9 +35,8 @@ const RESOURCES_BY_SCOPE: Record<HintScope, { id: HintResource; label: string }[
     { id: "practice", label: "Practice" },
   ],
   partner: [
-    { id: "members", label: "Members" },
-    { id: "subscriptions", label: "Subscriptions" },
-    { id: "invoices", label: "Invoices" },
+    { id: "practices", label: "Practices" },
+    { id: "partner", label: "Partner" },
   ],
 };
 
@@ -46,20 +46,18 @@ const SCOPE_BASE_PATH: Record<HintScope, string> = {
 };
 
 const PAGE_SIZE_OPTIONS = [10, 25, 50, 100] as const;
+// Singleton resources — Hint returns a single object, not a list. We don't
+// send pagination params to these.
+const SINGLETON_RESOURCES = new Set<HintResource>(["practice", "partner"]);
 const PAGINATED_RESOURCES = new Set<HintResource>([
   "patients",
   "memberships",
   "invoices",
   "plans",
-  "members",
-  "subscriptions",
+  "practices",
 ]);
 // Hint's API supports a `q` text-search param on these list endpoints.
-const SEARCHABLE_RESOURCES = new Set<HintResource>([
-  "patients",
-  "memberships",
-  "members",
-]);
+const SEARCHABLE_RESOURCES = new Set<HintResource>(["patients", "memberships"]);
 
 const HintSandbox = () => {
   const [scope, setScope] = useState<HintScope>("practice");
@@ -567,8 +565,8 @@ function extractRecords(
   if (Array.isArray(data)) return data as Record<string, unknown>[];
   if (typeof data === "object") {
     const obj = data as Record<string, unknown>;
-    // Practice is a single resource — render as one row, not its phones[] array.
-    if (resource === "practice") return [obj];
+    // Practice/Partner are single resources — render as one row.
+    if (resource && SINGLETON_RESOURCES.has(resource)) return [obj];
     // Hint sometimes wraps list responses with { patients: [...] } etc.
     for (const v of Object.values(obj)) {
       if (Array.isArray(v)) return v as Record<string, unknown>[];
