@@ -307,7 +307,13 @@ const HintSandbox = () => {
       <div className="grid grid-cols-3 gap-4">
         <SummaryCard
           label="Records returned"
-          value={records ? records.length.toString() : "—"}
+          value={
+            records
+              ? total !== null
+                ? `${records.length} of ${total}`
+                : records.length.toString()
+              : "—"
+          }
         />
         <SummaryCard label="Resource" value={resource} mono />
         <SummaryCard
@@ -324,7 +330,13 @@ const HintSandbox = () => {
             {PAGINATED_RESOURCES.has(resource) && (
               <>
                 {" · showing "}
-                {records?.length ?? 0}
+                <span className="text-foreground">{records?.length ?? 0}</span>
+                {total !== null && (
+                  <>
+                    {" of "}
+                    <span className="text-foreground">{total}</span>
+                  </>
+                )}
                 {" · offset "}
                 {offset}
                 {"–"}
