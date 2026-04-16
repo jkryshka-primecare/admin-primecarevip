@@ -384,7 +384,7 @@ const HintSandbox = () => {
                 toast.error("Row has no id field");
                 return;
               }
-              loadDetail(resource, id);
+              loadDetail(resource, scope, id);
             }}
           />
         ) : (
