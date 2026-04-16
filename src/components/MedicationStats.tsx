@@ -178,7 +178,11 @@ const MedicationStats = () => {
         </Table>
       </section>
 
-      <ReminderModal medication={reminderMed} onClose={() => setReminderMed(null)} />
+      <ReminderModal
+        medication={reminderMed}
+        groupedMedications={groupedForReminder}
+        onClose={() => setReminderMed(null)}
+      />
     </div>
   );
 };
