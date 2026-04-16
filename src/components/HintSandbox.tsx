@@ -201,7 +201,7 @@ const HintSandbox = () => {
             </span>
           </div>
           <p className="text-xs text-muted-foreground font-mono">
-            api.staging.hint.com/api/provider
+            {SCOPE_BASE_PATH[scope]}
             {response && (
               <>
                 <span className="mx-2 text-border">·</span>
@@ -215,29 +215,49 @@ const HintSandbox = () => {
           </p>
         </div>
 
-        <div className="flex items-center gap-2">
-          {RESOURCES.map((r) => (
+        <div className="flex flex-col items-end gap-2">
+          {/* Scope toggle: Practice (provider) vs Partner */}
+          <div className="flex items-center gap-1 p-0.5 rounded border border-border bg-secondary/30">
+            {(["practice", "partner"] as const).map((s) => (
+              <button
+                key={s}
+                onClick={() => setScope(s)}
+                className={
+                  "px-2.5 py-1 rounded text-[10px] font-bold tracking-widest uppercase transition-colors " +
+                  (scope === s
+                    ? "bg-sapphire/15 text-sapphire"
+                    : "text-muted-foreground hover:text-foreground")
+                }
+              >
+                {s}
+              </button>
+            ))}
+          </div>
+
+          <div className="flex items-center gap-2 flex-wrap justify-end">
+            {RESOURCES_BY_SCOPE[scope].map((r) => (
+              <button
+                key={r.id}
+                onClick={() => setResource(r.id)}
+                className={
+                  "px-3 py-1.5 rounded text-[10px] font-bold tracking-widest uppercase border transition-colors " +
+                  (resource === r.id
+                    ? "bg-sapphire/10 text-sapphire border-sapphire/30"
+                    : "text-muted-foreground border-border hover:text-foreground")
+                }
+              >
+                {r.label}
+              </button>
+            ))}
             <button
-              key={r.id}
-              onClick={() => setResource(r.id)}
-              className={
-                "px-3 py-1.5 rounded text-[10px] font-bold tracking-widest uppercase border transition-colors " +
-                (resource === r.id
-                  ? "bg-sapphire/10 text-sapphire border-sapphire/30"
-                  : "text-muted-foreground border-border hover:text-foreground")
-              }
+              onClick={() => load(resource, scope, limit, offset, search)}
+              disabled={loading}
+              className="px-3 py-1.5 rounded text-[10px] font-bold tracking-widest uppercase border border-border text-muted-foreground hover:text-foreground transition-colors flex items-center gap-1.5 disabled:opacity-50"
             >
-              {r.label}
+              <RefreshCw className={"size-3 " + (loading ? "animate-spin" : "")} />
+              Refresh
             </button>
-          ))}
-          <button
-            onClick={() => load(resource, limit, offset, search)}
-            disabled={loading}
-            className="px-3 py-1.5 rounded text-[10px] font-bold tracking-widest uppercase border border-border text-muted-foreground hover:text-foreground transition-colors flex items-center gap-1.5 disabled:opacity-50"
-          >
-            <RefreshCw className={"size-3 " + (loading ? "animate-spin" : "")} />
-            Refresh
-          </button>
+          </div>
         </div>
       </div>
 
