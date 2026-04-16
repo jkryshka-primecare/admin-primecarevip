@@ -43,6 +43,10 @@ const HintSandbox = () => {
   const [limit, setLimit] = useState(10);
   const [offset, setOffset] = useState(0);
 
+  // Search state (Hint's `q` param, debounced before firing)
+  const [searchInput, setSearchInput] = useState("");
+  const [search, setSearch] = useState("");
+
   // Detail drawer state
   const [detailOpen, setDetailOpen] = useState(false);
   const [detailLoading, setDetailLoading] = useState(false);
