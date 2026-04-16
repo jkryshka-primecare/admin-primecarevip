@@ -210,7 +210,7 @@ const MedicationStats = () => {
             {filtered.length === 0 && (
               <TableRow>
                 <TableCell colSpan={7} className="text-center text-muted-foreground py-8">
-                  No medications match the current filters.
+                  {loading ? "Loading sandbox FHIR data…" : "No medications match the current filters."}
                 </TableCell>
               </TableRow>
             )}
