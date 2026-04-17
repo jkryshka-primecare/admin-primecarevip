@@ -8,6 +8,7 @@ import ClaimsPipeline from "@/components/ClaimsPipeline";
 import MessagingAnalytics from "@/components/MessagingAnalytics";
 import MedicationStats from "@/components/MedicationStats";
 import HintSandbox from "@/components/HintSandbox";
+import ElationStatusCard from "@/components/ElationStatusCard";
 
 const sectionTitles: Record<string, string> = {
   overview: "Executive Registry",
@@ -68,7 +69,12 @@ const Index = () => {
           {activeSection === "claims" && <ClaimsPipeline />}
           {activeSection === "messaging" && <MessagingAnalytics />}
           {activeSection === "medications" && <MedicationStats />}
-          {activeSection === "hint" && <HintSandbox />}
+          {activeSection === "hint" && (
+            <>
+              <ElationStatusCard />
+              <HintSandbox />
+            </>
+          )}
         </div>
       </main>
     </div>
