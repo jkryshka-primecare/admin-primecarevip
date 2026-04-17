@@ -104,18 +104,17 @@ const MedicationStats = () => {
   }, []);
 
   const refreshAll = useCallback(async () => {
-    const [fhirRes, hintRes] = await Promise.all([
-      queryClient.refetchQueries({ queryKey: ["fhir", "medications"] }),
-      queryClient.refetchQueries({ queryKey: ["hint", "patients", "list"] }),
-    ]);
-    const fhirOk = !fhirRes.some((r) => r.status === "error");
-    const hintOk = !hintRes.some((r) => r.status === "error");
-    if (fhirOk && hintOk) {
+    try {
+      await Promise.all([
+        queryClient.refetchQueries({ queryKey: ["fhir", "medications"] }),
+        queryClient.refetchQueries({ queryKey: ["hint", "patients", "list"] }),
+      ]);
       toast.success("Sandbox data refreshed", {
         description: `${rawMedications.length} Rx · ${hintPatients.length} Hint patients`,
       });
-    } else {
-      toast.error("Sandbox refresh had errors — see console");
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : "Refresh failed";
+      toast.error("Sandbox refresh failed", { description: msg });
     }
   }, [queryClient, rawMedications.length, hintPatients.length]);
 
