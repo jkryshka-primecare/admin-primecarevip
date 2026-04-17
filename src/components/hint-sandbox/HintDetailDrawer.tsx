@@ -1,5 +1,5 @@
 import { Fragment } from "react";
-import { Loader2 } from "lucide-react";
+import { ExternalLink, Loader2 } from "lucide-react";
 import type { HintResource, HintResponse } from "./types";
 
 interface Props {
