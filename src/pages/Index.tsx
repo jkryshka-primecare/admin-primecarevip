@@ -30,32 +30,33 @@ const Index = () => {
 
       <main className="flex-1 overflow-y-auto">
         {/* Header */}
-        <header className="h-16 border-b border-border flex items-center justify-between px-8 sticky top-0 bg-background/80 backdrop-blur-md z-10">
+        <header className="h-20 border-b border-border flex items-center justify-between px-10 sticky top-0 bg-background/85 backdrop-blur-md z-10">
           <div className="flex items-center gap-4">
-            <h1 className="text-xl font-light tracking-tight text-foreground">
+            <h1 className="font-serif text-2xl font-bold tracking-tight text-foreground">
               {sectionTitles[activeSection]}
             </h1>
-            <span className="px-3 py-1 rounded bg-cyan-clinical/10 text-cyan-clinical border border-cyan-clinical/20 text-[10px] font-bold tracking-widest uppercase">
+            <span className="px-2.5 py-1 rounded-full bg-success/10 text-success border border-success/20 text-[10px] font-semibold tracking-wider uppercase inline-flex items-center gap-1.5">
+              <span className="size-1.5 rounded-full bg-success animate-pulse" />
               Live
             </span>
           </div>
           <div className="flex items-center gap-6">
             <div className="flex flex-col items-end">
-              <span className="text-[10px] text-muted-foreground uppercase font-bold tracking-tighter">Data Sources</span>
-              <span className="text-sm font-mono text-cyan-clinical">Elation • Hint • Messaging</span>
+              <span className="text-[10px] text-muted-foreground uppercase font-semibold tracking-wider">Data Sources</span>
+              <span className="text-sm font-mono text-primary">Elation • Hint • Messaging</span>
             </div>
-            <button className="px-6 py-3 bg-foreground text-background text-xs font-bold rounded hover:opacity-90 transition-opacity">
+            <button className="px-5 py-2.5 bg-accent text-accent-foreground text-xs font-semibold uppercase tracking-wider rounded-full hover:bg-accent/90 transition-colors shadow-sm">
               Generate Report
             </button>
           </div>
         </header>
 
-        <div className="p-8 max-w-7xl mx-auto space-y-8">
+        <div className="p-10 max-w-7xl mx-auto space-y-8">
           {activeSection === "overview" && (
             <>
-              <section className="grid grid-cols-4 gap-6">
-                <KPICard label="Weighted HCC Risk" value="1.84" delta="+0.024 Δ" deltaType="negative" progress={84} progressColor="bg-hcc-alert" />
-                <KPICard label="Engagement Rate" value="64.8%" delta="Normal" deltaType="positive" progress={64.8} progressColor="bg-cyan-clinical" />
+              <section className="grid grid-cols-4 gap-5">
+                <KPICard label="Weighted HCC Risk" value="1.84" delta="+0.024 Δ" deltaType="negative" progress={84} progressColor="bg-destructive" />
+                <KPICard label="Engagement Rate" value="64.8%" delta="Normal" deltaType="positive" progress={64.8} progressColor="bg-success" />
                 <KPICard label="Annualized Savings" value="$3.55M" subtitle="Combined PrimeCare VIP + Hero" />
                 <KPICard label="Claims Accuracy" value="99.1%" subtitle="14,102 claims processed" />
               </section>
