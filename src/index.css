@@ -1,58 +1,84 @@
-@import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@300;400;500;600;700&family=IBM+Plex+Mono:wght@400;500&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Roboto:wght@300;400;500;700&family=Roboto+Mono:wght@400;500&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Tinos:ital,wght@0,400;0,700;1,700&display=swap');
 
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
 
+/*
+  Prime Care VIP — Brand-aligned light theme
+  Midnight Care #04244C · Pulse Blue (Bright Aqua) #00B8FF
+  Pure Calm #F5F4EE · WellSpring #00C853 · Accent Pink #EB3774
+*/
+
 @layer base {
   :root {
-    --background: 220 20% 2%;
-    --foreground: 214 32% 91%;
+    /* Surfaces */
+    --background: 42 30% 96%;            /* Pure Calm #F5F4EE */
+    --foreground: 215 90% 15%;           /* Midnight Care #04244C */
 
-    --card: 220 25% 5%;
-    --card-foreground: 214 32% 91%;
+    --card: 0 0% 100%;
+    --card-foreground: 215 90% 15%;
 
-    --popover: 220 25% 5%;
-    --popover-foreground: 214 32% 91%;
+    --popover: 0 0% 100%;
+    --popover-foreground: 215 90% 15%;
 
-    --primary: 217 91% 60%;
+    /* Brand */
+    --primary: 215 90% 15%;              /* Midnight Care navy */
     --primary-foreground: 0 0% 100%;
 
-    --secondary: 220 20% 8%;
-    --secondary-foreground: 214 32% 91%;
+    --secondary: 42 30% 92%;
+    --secondary-foreground: 215 90% 15%;
 
-    --muted: 220 15% 12%;
-    --muted-foreground: 215 14% 45%;
+    --muted: 42 25% 90%;
+    --muted-foreground: 215 25% 40%;
 
-    --accent: 187 86% 53%;
-    --accent-foreground: 220 20% 2%;
+    --accent: 197 100% 50%;              /* Pulse Blue / Bright Aqua #00B8FF */
+    --accent-foreground: 0 0% 100%;
 
-    --destructive: 350 89% 60%;
+    --destructive: 339 82% 57%;          /* Accent Pink #EB3774 */
     --destructive-foreground: 0 0% 100%;
 
-    --border: 215 20% 15%;
-    --input: 215 20% 15%;
-    --ring: 217 91% 60%;
+    --success: 145 100% 39%;             /* WellSpring #00C853 */
+    --success-foreground: 0 0% 100%;
 
-    --radius: 0.5rem;
+    --border: 215 30% 88%;
+    --input: 215 30% 88%;
+    --ring: 197 100% 50%;
 
-    /* Custom tokens */
-    --obsidian: 220 50% 2%;
-    --slate-glass: 220 30% 4%;
-    --titanium: 214 32% 91%;
-    --sapphire: 217 91% 60%;
-    --cyan-clinical: 187 86% 53%;
-    --hcc-alert: 350 89% 60%;
-    --surface-glass: linear-gradient(135deg, hsl(220 25% 8% / 0.8) 0%, hsl(220 50% 2% / 0.9) 100%);
+    --radius: 0.875rem;
 
-    --sidebar-background: 220 30% 4%;
-    --sidebar-foreground: 214 32% 91%;
-    --sidebar-primary: 217 91% 60%;
-    --sidebar-primary-foreground: 0 0% 100%;
-    --sidebar-accent: 220 15% 12%;
-    --sidebar-accent-foreground: 214 32% 91%;
-    --sidebar-border: 215 20% 15%;
-    --sidebar-ring: 217 91% 60%;
+    /* Brand custom tokens (kept for backwards compat) */
+    --obsidian: 215 90% 15%;
+    --slate-glass: 0 0% 100%;
+    --titanium: 215 90% 15%;
+    --sapphire: 197 100% 50%;            /* now Pulse Blue */
+    --cyan-clinical: 145 100% 39%;       /* now WellSpring green */
+    --hcc-alert: 339 82% 57%;            /* now Accent Pink */
+
+    --midnight: 215 90% 15%;
+    --pulse: 197 100% 50%;
+    --wellspring: 145 100% 39%;
+    --wellness-sky: 197 100% 92%;
+    --pink-accent: 339 82% 57%;
+
+    --surface-glass: linear-gradient(135deg, hsl(0 0% 100%) 0%, hsl(42 40% 98%) 100%);
+    --gradient-hero: linear-gradient(135deg, hsl(215 90% 15%) 0%, hsl(215 80% 25%) 100%);
+    --gradient-accent: linear-gradient(135deg, hsl(197 100% 50%) 0%, hsl(197 100% 60%) 100%);
+
+    --shadow-soft: 0 1px 2px hsl(215 90% 15% / 0.04), 0 4px 16px hsl(215 90% 15% / 0.04);
+    --shadow-card: 0 2px 4px hsl(215 90% 15% / 0.04), 0 8px 24px hsl(215 90% 15% / 0.06);
+    --shadow-elevated: 0 4px 8px hsl(215 90% 15% / 0.06), 0 16px 40px hsl(215 90% 15% / 0.10);
+
+    /* Sidebar */
+    --sidebar-background: 215 90% 15%;
+    --sidebar-foreground: 0 0% 100%;
+    --sidebar-primary: 197 100% 50%;
+    --sidebar-primary-foreground: 215 90% 15%;
+    --sidebar-accent: 215 80% 22%;
+    --sidebar-accent-foreground: 0 0% 100%;
+    --sidebar-border: 215 60% 25%;
+    --sidebar-ring: 197 100% 50%;
   }
 }
 
@@ -62,23 +88,51 @@
   }
 
   body {
-    @apply bg-background text-foreground font-sans antialiased;
-    font-family: 'IBM Plex Sans', sans-serif;
+    @apply bg-background text-foreground antialiased;
+    font-family: 'Roboto', system-ui, sans-serif;
+    font-feature-settings: "kern", "liga";
+  }
+
+  h1, h2, h3, h4 {
+    font-family: 'Tinos', 'Times New Roman', serif;
+    letter-spacing: -0.01em;
   }
 }
 
 @layer utilities {
   .glass-panel {
-    background: var(--surface-glass);
-    border: 1px solid hsl(var(--titanium) / 0.08);
-    box-shadow: inset 0 1px 1px hsl(0 0% 100% / 0.05);
+    background: hsl(var(--card));
+    border: 1px solid hsl(var(--border));
+    box-shadow: var(--shadow-card);
+    border-radius: var(--radius);
   }
 
   .titanium-border {
-    border: 1px solid hsl(var(--titanium) / 0.15);
+    border: 1px solid hsl(var(--border));
   }
 
   .font-mono-data {
-    font-family: 'IBM Plex Mono', monospace;
+    font-family: 'Roboto Mono', ui-monospace, monospace;
+    font-variant-numeric: tabular-nums;
+  }
+
+  .font-serif-brand {
+    font-family: 'Tinos', 'Times New Roman', serif;
+  }
+
+  .shadow-card {
+    box-shadow: var(--shadow-card);
+  }
+
+  .shadow-elevated {
+    box-shadow: var(--shadow-elevated);
+  }
+
+  .gradient-hero {
+    background: var(--gradient-hero);
+  }
+
+  .gradient-accent {
+    background: var(--gradient-accent);
   }
 }

@@ -14,8 +14,9 @@ export default {
     },
     extend: {
       fontFamily: {
-        sans: ["IBM Plex Sans", "sans-serif"],
-        mono: ["IBM Plex Mono", "monospace"],
+        sans: ["Roboto", "system-ui", "sans-serif"],
+        mono: ["Roboto Mono", "ui-monospace", "monospace"],
+        serif: ["Tinos", "Times New Roman", "serif"],
       },
       colors: {
         border: "hsl(var(--border))",
@@ -57,6 +58,15 @@ export default {
         sapphire: "hsl(var(--sapphire))",
         "cyan-clinical": "hsl(var(--cyan-clinical))",
         "hcc-alert": "hsl(var(--hcc-alert))",
+        midnight: "hsl(var(--midnight))",
+        pulse: "hsl(var(--pulse))",
+        wellspring: "hsl(var(--wellspring))",
+        "wellness-sky": "hsl(var(--wellness-sky))",
+        "pink-accent": "hsl(var(--pink-accent))",
+        success: {
+          DEFAULT: "hsl(var(--success))",
+          foreground: "hsl(var(--success-foreground))",
+        },
         sidebar: {
           DEFAULT: "hsl(var(--sidebar-background))",
           foreground: "hsl(var(--sidebar-foreground))",
