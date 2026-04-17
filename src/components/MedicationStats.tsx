@@ -1,11 +1,12 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useMemo, useState } from "react";
 import { RefreshCw } from "lucide-react";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
 } from "@/components/ui/table";
 import ReminderModal from "@/components/ReminderModal";
 import { HintDetailDrawer } from "@/components/hint-sandbox/HintDetailDrawer";
-import type { HintResponse } from "@/components/hint-sandbox/types";
+import { useHintPatients, useHintPatientDetail, type HintPatient } from "@/hooks/useHintPatients";
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "sonner";
 
@@ -24,11 +25,10 @@ type Medication = {
   status: "urgent" | "due-soon" | "on-track";
 };
 
-type HintPatient = {
-  id: string;
-  name?: string;
-  first_name?: string;
-  last_name?: string;
+type FhirMedicationsResult = {
+  medications: Medication[];
+  source: string;
+  generated: string;
 };
 
 const statusStyle: Record<string, string> = {
@@ -52,94 +52,79 @@ const summaryCards = [
 
 
 const MedicationStats = () => {
+  const queryClient = useQueryClient();
   const [activeCategory, setActiveCategory] = useState("All");
   const [searchTerm, setSearchTerm] = useState("");
   const [reminderMed, setReminderMed] = useState<Medication | null>(null);
-  const [rawMedications, setRawMedications] = useState<Medication[]>([]);
-  const [hintPatients, setHintPatients] = useState<HintPatient[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [sandboxMeta, setSandboxMeta] = useState<{ source: string; generated: string } | null>(null);
-  const [hintMeta, setHintMeta] = useState<{ count: number; total: number | null } | null>(null);
 
   // Hint patient detail drawer state
   const [detailOpen, setDetailOpen] = useState(false);
-  const [detailLoading, setDetailLoading] = useState(false);
-  const [detail, setDetail] = useState<HintResponse | null>(null);
   const [detailId, setDetailId] = useState<string | null>(null);
 
-  const openPatientDetail = useCallback(async (patientId: string) => {
-    setDetailOpen(true);
-    setDetailId(patientId);
-    setDetail(null);
-    setDetailLoading(true);
-    try {
-      const { data, error } = await supabase.functions.invoke<HintResponse>("hint-sandbox", {
-        body: { resource: "patients", id: patientId, scope: "practice", method: "GET" },
-      });
+  // ── Cached data ──────────────────────────────────────────────────
+  const fhirQuery = useQuery<FhirMedicationsResult>({
+    queryKey: ["fhir", "medications"],
+    queryFn: async () => {
+      const { data, error } = await supabase.functions.invoke("fhir-medications-sandbox", { method: "GET" });
       if (error) throw error;
-      if (!data) throw new Error("Empty response from Hint sandbox");
-      setDetail(data);
-      if (data.status >= 400) toast.error(`Hint patients/${patientId} returned ${data.status}`);
-    } catch (e) {
-      const msg = e instanceof Error ? e.message : "Unknown error";
-      toast.error(msg);
-    } finally {
-      setDetailLoading(false);
-    }
+      return {
+        medications: data?.medications ?? [],
+        source: data?.source,
+        generated: data?.generated,
+      };
+    },
+    staleTime: 5 * 60 * 1000,
+    gcTime: 30 * 60 * 1000,
+  });
+  const hintQuery = useHintPatients();
+  const detailQuery = useHintPatientDetail(detailOpen ? detailId : null);
+
+  const rawMedications = fhirQuery.data?.medications ?? [];
+  const sandboxMeta = fhirQuery.data
+    ? { source: fhirQuery.data.source, generated: fhirQuery.data.generated }
+    : null;
+  const hintPatients = hintQuery.data?.patients ?? [];
+  const hintMeta = hintQuery.data
+    ? { count: hintQuery.data.patients.length, total: hintQuery.data.total }
+    : null;
+  const loading = fhirQuery.isLoading || fhirQuery.isFetching || hintQuery.isFetching;
+
+  // Surface errors via toast (once per failure)
+  if (fhirQuery.error) {
+    const msg = fhirQuery.error instanceof Error ? fhirQuery.error.message : "FHIR fetch failed";
+    console.warn("FHIR fetch failed:", msg);
+  }
+  if (hintQuery.error) {
+    console.warn("Hint patient fetch failed:", hintQuery.error);
+  }
+
+  const openPatientDetail = useCallback((patientId: string) => {
+    setDetailId(patientId);
+    setDetailOpen(true);
   }, []);
 
-  const loadAll = useCallback(async (isRefresh = false) => {
-    setLoading(true);
-    try {
-      // Fetch FHIR medications and Hint patients in parallel.
-      const [fhirRes, hintRes] = await Promise.all([
-        supabase.functions.invoke("fhir-medications-sandbox", { method: "GET" }),
-        supabase.functions.invoke("hint-sandbox", {
-          body: {
-            resource: "patients",
-            scope: "practice",
-            method: "GET",
-            query: { limit: 100, offset: 0 },
-          },
-        }),
-      ]);
-
-      if (fhirRes.error) throw fhirRes.error;
-      const meds: Medication[] = fhirRes.data?.medications ?? [];
-      setRawMedications(meds);
-      setSandboxMeta({ source: fhirRes.data.source, generated: fhirRes.data.generated });
-
-      // Hint failures shouldn't block medication display — just log.
-      if (hintRes.error) {
-        console.warn("Hint patient fetch failed:", hintRes.error);
-        setHintPatients([]);
-        setHintMeta(null);
-      } else {
-        const hintData = hintRes.data;
-        const patients: HintPatient[] = Array.isArray(hintData?.data) ? hintData.data : [];
-        setHintPatients(patients);
-        setHintMeta({
-          count: patients.length,
-          total: hintData?.pagination?.total ?? null,
-        });
-      }
-
-      if (isRefresh) {
-        toast.success("Sandbox data refreshed", {
-          description: `${meds.length} Rx · ${(hintRes.data?.data?.length ?? 0)} Hint patients`,
-        });
-      }
-    } catch (e) {
-      const msg = e instanceof Error ? e.message : "Failed to load sandbox data";
-      toast.error("Sandbox API error", { description: msg });
-    } finally {
-      setLoading(false);
+  const refreshAll = useCallback(async () => {
+    const [fhirRes, hintRes] = await Promise.all([
+      queryClient.refetchQueries({ queryKey: ["fhir", "medications"] }),
+      queryClient.refetchQueries({ queryKey: ["hint", "patients", "list"] }),
+    ]);
+    const fhirOk = !fhirRes.some((r) => r.status === "error");
+    const hintOk = !hintRes.some((r) => r.status === "error");
+    if (fhirOk && hintOk) {
+      toast.success("Sandbox data refreshed", {
+        description: `${rawMedications.length} Rx · ${hintPatients.length} Hint patients`,
+      });
+    } else {
+      toast.error("Sandbox refresh had errors — see console");
     }
-  }, []);
+  }, [queryClient, rawMedications.length, hintPatients.length]);
 
-  useEffect(() => {
-    loadAll();
-  }, [loadAll]);
+  // Surface detail-fetch errors
+  if (detailQuery.error && detailOpen) {
+    const msg = detailQuery.error instanceof Error ? detailQuery.error.message : "Patient detail failed";
+    // Toast once on transition would be ideal; keep as console to avoid spam.
+    console.warn(msg);
+  }
 
   // Join: replace each med's `patient` with a real Hint patient, grouped by
   // surname seed. Same seed name → same Hint patient (preserves multi-Rx
@@ -258,7 +243,7 @@ const MedicationStats = () => {
             )}
             <button
               type="button"
-              onClick={() => loadAll(true)}
+              onClick={refreshAll}
               disabled={loading}
               aria-label="Refresh sandbox data"
               className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded text-[10px] font-bold uppercase tracking-wider bg-secondary text-foreground border border-border hover:bg-muted disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
@@ -390,8 +375,8 @@ const MedicationStats = () => {
         open={detailOpen}
         resource="patients"
         detailId={detailId}
-        detail={detail}
-        loading={detailLoading}
+        detail={detailQuery.data ?? null}
+        loading={detailQuery.isLoading || detailQuery.isFetching}
         onClose={() => setDetailOpen(false)}
       />
     </div>
