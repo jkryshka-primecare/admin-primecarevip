@@ -53,6 +53,7 @@ const HintSandbox = () => {
       nextLimit: number,
       nextOffset: number,
       nextSearch: string,
+      opts?: { force?: boolean },
     ) => {
       const requestId = ++requestIdRef.current;
       setLoading(true);
@@ -63,24 +64,55 @@ const HintSandbox = () => {
           query.limit = nextLimit;
           query.offset = nextOffset;
         }
-        if (SEARCHABLE_RESOURCES.has(which) && nextSearch.trim()) {
-          query.q = nextSearch.trim();
-        }
-        const { data, error: invokeError } = await supabase.functions.invoke<HintResponse>(
-          "hint-sandbox",
-          {
-            body: {
-              resource: which,
-              scope: whichScope,
-              method: "GET",
-              query: Object.keys(query).length > 0 ? query : undefined,
+        const trimmedSearch = SEARCHABLE_RESOURCES.has(which) ? nextSearch.trim() : "";
+        if (trimmedSearch) query.q = trimmedSearch;
+
+        const fetcher = async (): Promise<HintResponse> => {
+          const { data, error: invokeError } = await supabase.functions.invoke<HintResponse>(
+            "hint-sandbox",
+            {
+              body: {
+                resource: which,
+                scope: whichScope,
+                method: "GET",
+                query: Object.keys(query).length > 0 ? query : undefined,
+              },
             },
+          );
+          if (invokeError) throw invokeError;
+          if (!data) throw new Error("Empty response from Hint sandbox");
+          return data;
+        };
+
+        // Cache list responses through TanStack Query. The key shape matches
+        // useHintPatients exactly for `practice/patients/limit=100/offset=0`,
+        // so navigating to Hint Sandbox after Medication Stats hits the cache.
+        const cacheKey = [
+          "hint",
+          which,
+          "list",
+          {
+            scope: whichScope,
+            limit: PAGINATED_RESOURCES.has(which) ? nextLimit : null,
+            offset: PAGINATED_RESOURCES.has(which) ? nextOffset : null,
+            q: trimmedSearch || null,
           },
-        );
+        ] as const;
+
+        if (opts?.force) {
+          // Refresh button → bypass cache and force a refetch.
+          queryClient.removeQueries({ queryKey: cacheKey });
+        }
+
+        const data = await queryClient.fetchQuery<HintResponse>({
+          queryKey: cacheKey,
+          queryFn: fetcher,
+          staleTime: 5 * 60 * 1000,
+          gcTime: 30 * 60 * 1000,
+        });
+
         // Drop stale responses — a newer load has superseded this one.
         if (requestId !== requestIdRef.current) return;
-        if (invokeError) throw invokeError;
-        if (!data) throw new Error("Empty response from Hint sandbox");
         setResponse(data);
         if (data.status >= 400) {
           toast.error(`Hint API returned ${data.status}`);
@@ -96,7 +128,7 @@ const HintSandbox = () => {
         if (requestId === requestIdRef.current) setLoading(false);
       }
     },
-    [],
+    [queryClient],
   );
 
   const loadDetail = useCallback(
