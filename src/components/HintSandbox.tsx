@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
+import { useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { supabase } from "@/integrations/supabase/client";
 import { HintScopeToggle } from "./hint-sandbox/HintScopeToggle";
@@ -18,6 +19,7 @@ import {
 } from "./hint-sandbox/types";
 
 const HintSandbox = () => {
+  const queryClient = useQueryClient();
   const [scope, setScope] = useState<HintScope>("practice");
   const [resource, setResource] = useState<HintResource>("patients");
   const [response, setResponse] = useState<HintResponse | null>(null);
@@ -104,12 +106,25 @@ const HintSandbox = () => {
       setDetail(null);
       setDetailLoading(true);
       try {
-        const { data, error: invokeError } = await supabase.functions.invoke<HintResponse>(
-          "hint-sandbox",
-          { body: { resource: which, id, scope: whichScope, method: "GET" } },
-        );
-        if (invokeError) throw invokeError;
-        if (!data) throw new Error("Empty response from Hint sandbox");
+        // Share the patient-detail cache with MedicationStats so reopening
+        // the same patient is instant across views.
+        const useCache = which === "patients" && whichScope === "practice";
+        const fetcher = async (): Promise<HintResponse> => {
+          const { data, error: invokeError } = await supabase.functions.invoke<HintResponse>(
+            "hint-sandbox",
+            { body: { resource: which, id, scope: whichScope, method: "GET" } },
+          );
+          if (invokeError) throw invokeError;
+          if (!data) throw new Error("Empty response from Hint sandbox");
+          return data;
+        };
+        const data = useCache
+          ? await queryClient.fetchQuery<HintResponse>({
+              queryKey: ["hint", "patients", "detail", id],
+              queryFn: fetcher,
+              staleTime: 5 * 60 * 1000,
+            })
+          : await fetcher();
         setDetail(data);
         if (data.status >= 400) toast.error(`Hint ${which}/${id} returned ${data.status}`);
         else toast.success(`${which}/${id} fetched in ${data.elapsedMs}ms`);
@@ -120,7 +135,7 @@ const HintSandbox = () => {
         setDetailLoading(false);
       }
     },
-    [],
+    [queryClient],
   );
 
   // When scope changes, snap to that scope's first available resource.
