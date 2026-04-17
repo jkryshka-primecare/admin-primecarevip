@@ -42,12 +42,32 @@ export const HintDetailDrawer = ({
               </div>
             )}
           </div>
-          <button
-            onClick={onClose}
-            className="px-3 py-1.5 rounded text-[10px] font-bold tracking-widest uppercase border border-border text-muted-foreground hover:text-foreground"
-          >
-            Close
-          </button>
+          <div className="flex items-center gap-2">
+            {(() => {
+              const link =
+                detail && typeof detail.data === "object" && detail.data !== null
+                  ? (detail.data as Record<string, unknown>).provider_web_link
+                  : null;
+              if (typeof link !== "string" || !link) return null;
+              return (
+                <a
+                  href={link}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded text-[10px] font-bold tracking-widest uppercase border border-cyan-clinical/30 bg-cyan-clinical/10 text-cyan-clinical hover:bg-cyan-clinical/20 transition-colors"
+                >
+                  <ExternalLink className="size-3" />
+                  View in Hint
+                </a>
+              );
+            })()}
+            <button
+              onClick={onClose}
+              className="px-3 py-1.5 rounded text-[10px] font-bold tracking-widest uppercase border border-border text-muted-foreground hover:text-foreground"
+            >
+              Close
+            </button>
+          </div>
         </div>
         <div className="p-6">
           {loading ? (
