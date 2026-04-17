@@ -26,8 +26,10 @@ const HintSandbox = () => {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  // Pagination state (Hint uses limit + offset; default 10, max 100)
-  const [limit, setLimit] = useState(10);
+  // Pagination state. Default page size is 100 (Hint's max) so the initial
+  // patients/practice load shares a cache key with MedicationStats's
+  // useHintPatients hook → hitting the cache on cross-view navigation.
+  const [limit, setLimit] = useState(100);
   const [offset, setOffset] = useState(0);
 
   // Search state (Hint's `q` param, debounced before firing)
