@@ -19,6 +19,7 @@ import {
 } from "./hint-sandbox/types";
 
 const HintSandbox = () => {
+  const queryClient = useQueryClient();
   const [scope, setScope] = useState<HintScope>("practice");
   const [resource, setResource] = useState<HintResource>("patients");
   const [response, setResponse] = useState<HintResponse | null>(null);
