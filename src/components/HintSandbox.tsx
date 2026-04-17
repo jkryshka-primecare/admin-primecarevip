@@ -238,7 +238,7 @@ const HintSandbox = () => {
             resource={resource}
             loading={loading}
             onResourceChange={setResource}
-            onRefresh={() => load(resource, scope, limit, offset, search)}
+            onRefresh={() => load(resource, scope, limit, offset, search, { force: true })}
           />
         </div>
       </div>
