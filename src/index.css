@@ -80,6 +80,58 @@
     --sidebar-border: 215 60% 25%;
     --sidebar-ring: 197 100% 50%;
   }
+
+  .dark {
+    /* Dark Navy variant — Midnight Care surfaces, brand accents preserved */
+    --background: 215 60% 9%;            /* Deep navy page */
+    --foreground: 42 30% 96%;            /* Pure Calm text */
+
+    --card: 215 55% 13%;
+    --card-foreground: 42 30% 96%;
+
+    --popover: 215 55% 13%;
+    --popover-foreground: 42 30% 96%;
+
+    --primary: 197 100% 50%;             /* Pulse Blue as primary in dark */
+    --primary-foreground: 215 90% 10%;
+
+    --secondary: 215 45% 18%;
+    --secondary-foreground: 42 30% 96%;
+
+    --muted: 215 40% 16%;
+    --muted-foreground: 215 20% 70%;
+
+    --accent: 197 100% 50%;
+    --accent-foreground: 215 90% 10%;
+
+    --destructive: 339 82% 60%;
+    --destructive-foreground: 0 0% 100%;
+
+    --success: 145 90% 45%;
+    --success-foreground: 215 90% 10%;
+
+    --border: 215 40% 22%;
+    --input: 215 40% 22%;
+    --ring: 197 100% 50%;
+
+    --surface-glass: linear-gradient(135deg, hsl(215 55% 13%) 0%, hsl(215 50% 16%) 100%);
+    --gradient-hero: linear-gradient(135deg, hsl(215 70% 6%) 0%, hsl(215 60% 14%) 100%);
+    --gradient-accent: linear-gradient(135deg, hsl(197 100% 50%) 0%, hsl(197 100% 60%) 100%);
+
+    --shadow-soft: 0 1px 2px hsl(0 0% 0% / 0.3), 0 4px 16px hsl(0 0% 0% / 0.25);
+    --shadow-card: 0 2px 4px hsl(0 0% 0% / 0.3), 0 8px 24px hsl(0 0% 0% / 0.35);
+    --shadow-elevated: 0 4px 8px hsl(0 0% 0% / 0.4), 0 16px 40px hsl(0 0% 0% / 0.5);
+
+    /* Sidebar stays navy but slightly deeper, with subtle borders */
+    --sidebar-background: 215 70% 6%;
+    --sidebar-foreground: 42 30% 96%;
+    --sidebar-primary: 197 100% 50%;
+    --sidebar-primary-foreground: 215 90% 10%;
+    --sidebar-accent: 215 55% 14%;
+    --sidebar-accent-foreground: 42 30% 96%;
+    --sidebar-border: 215 50% 18%;
+    --sidebar-ring: 197 100% 50%;
+  }
 }
 
 @layer base {
