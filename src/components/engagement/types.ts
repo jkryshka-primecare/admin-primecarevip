@@ -2,6 +2,7 @@ export interface EngagementPatient {
   id: string;
   name: string;
   employer: string;
+  dpc: string;
   physician: string;
   lastEncounter: string;
   encounters: number;
