@@ -19,15 +19,15 @@ const mockPatients: PatientRisk[] = [
 ];
 
 const severityColor = {
-  critical: "bg-hcc-alert",
-  moderate: "bg-amber-500",
-  low: "bg-cyan-clinical",
+  critical: "bg-destructive",
+  moderate: "bg-accent",
+  low: "bg-success",
 };
 
 const scoreColor = {
-  critical: "text-hcc-alert",
-  moderate: "text-amber-500",
-  low: "text-cyan-clinical",
+  critical: "text-destructive",
+  moderate: "text-accent",
+  low: "text-success",
 };
 
 const RiskTable = () => {
@@ -52,7 +52,7 @@ const RiskTable = () => {
           </thead>
           <tbody className="divide-y divide-border font-mono text-xs">
             {mockPatients.map((patient) => (
-              <tr key={patient.id} className="hover:bg-sapphire/5 transition-colors cursor-pointer">
+              <tr key={patient.id} className="hover:bg-accent/5 transition-colors cursor-pointer">
                 <td className="px-6 py-4 font-medium text-foreground">{patient.id}</td>
                 <td className="px-6 py-4 text-muted-foreground font-sans text-[11px]">{patient.entity}</td>
                 <td className="px-6 py-4">
