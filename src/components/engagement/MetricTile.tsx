@@ -1,12 +1,15 @@
 import { ChevronRight } from "lucide-react";
-import type { MetricTile as MetricTileType } from "./mockData";
 
 interface Props {
-  tile: MetricTileType;
+  title: string;
+  primary: string;
+  primaryUnit?: string;
+  secondary?: { value: string; label: string }[];
+  description: string;
   onClick: () => void;
 }
 
-const MetricTile = ({ tile, onClick }: Props) => {
+const MetricTile = ({ title, primary, primaryUnit, secondary, description, onClick }: Props) => {
   return (
     <button
       onClick={onClick}
@@ -14,7 +17,7 @@ const MetricTile = ({ tile, onClick }: Props) => {
     >
       <div className="flex items-start justify-between gap-2">
         <h4 className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground leading-tight">
-          {tile.title}
+          {title}
         </h4>
         <ChevronRight className="size-4 text-muted-foreground group-hover:text-accent transition-colors shrink-0" />
       </div>
@@ -22,16 +25,16 @@ const MetricTile = ({ tile, onClick }: Props) => {
       <div className="mt-4 space-y-2">
         <div className="flex items-baseline gap-1">
           <span className="font-mono text-3xl font-bold text-foreground tabular-nums">
-            {tile.primary}
+            {primary}
           </span>
-          {tile.primaryUnit && (
-            <span className="font-mono text-base text-muted-foreground">{tile.primaryUnit}</span>
+          {primaryUnit && (
+            <span className="font-mono text-base text-muted-foreground">{primaryUnit}</span>
           )}
         </div>
 
-        {tile.secondary && tile.secondary.length > 0 && (
+        {secondary && secondary.length > 0 && (
           <div className="flex flex-wrap gap-x-3 gap-y-1">
-            {tile.secondary.map((s) => (
+            {secondary.map((s) => (
               <div key={s.label} className="flex items-baseline gap-1">
                 <span className="font-mono text-xs font-semibold text-accent">{s.value}</span>
                 <span className="text-[10px] uppercase tracking-wider text-muted-foreground">
@@ -42,7 +45,7 @@ const MetricTile = ({ tile, onClick }: Props) => {
           </div>
         )}
 
-        <p className="text-[10px] text-muted-foreground leading-snug pt-1">{tile.description}</p>
+        <p className="text-[10px] text-muted-foreground leading-snug pt-1">{description}</p>
       </div>
     </button>
   );
