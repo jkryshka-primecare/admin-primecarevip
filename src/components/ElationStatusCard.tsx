@@ -130,31 +130,31 @@ const STATUS_CONFIG: Record<
   connected: {
     label: "Connected",
     Icon: CheckCircle2,
-    iconClass: "text-cyan-clinical",
-    bgClass: "bg-cyan-clinical/5",
-    borderClass: "border-cyan-clinical/30",
+    iconClass: "text-success",
+    bgClass: "bg-success/5",
+    borderClass: "border-success/30",
     badgeClass:
-      "bg-cyan-clinical/15 text-cyan-clinical border-cyan-clinical/30",
+      "bg-success/15 text-success border-success/30",
     description: () =>
       "Elation OAuth credentials are configured. The proxy is reaching Elation's sandbox.",
   },
   awaiting: {
     label: "Awaiting Credentials",
     Icon: Clock,
-    iconClass: "text-yellow-400",
-    bgClass: "bg-yellow-500/5",
-    borderClass: "border-yellow-500/30",
-    badgeClass: "bg-yellow-500/15 text-yellow-400 border-yellow-500/30",
+    iconClass: "text-accent",
+    bgClass: "bg-accent/5",
+    borderClass: "border-accent/30",
+    badgeClass: "bg-accent/15 text-accent border-accent/30",
     description: () =>
       "Edge function deployed. Add ELATION_SANDBOX_CLIENT_ID and ELATION_SANDBOX_CLIENT_SECRET secrets once Elation provisions sandbox access.",
   },
   error: {
     label: "Error",
     Icon: AlertCircle,
-    iconClass: "text-hcc-alert",
-    bgClass: "bg-hcc-alert/5",
-    borderClass: "border-hcc-alert/30",
-    badgeClass: "bg-hcc-alert/15 text-hcc-alert border-hcc-alert/30",
+    iconClass: "text-destructive",
+    bgClass: "bg-destructive/5",
+    borderClass: "border-destructive/30",
+    badgeClass: "bg-destructive/15 text-destructive border-destructive/30",
     description: (msg) => msg ?? "Elation status probe failed unexpectedly.",
   },
 };

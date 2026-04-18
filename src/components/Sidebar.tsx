@@ -35,14 +35,14 @@ const Sidebar = ({ activeSection, onSectionChange }: SidebarProps) => {
             className={cn(
               "w-full flex items-center gap-3 px-4 py-2.5 rounded-lg text-left transition-all",
               activeSection === item.id
-                ? "bg-pulse text-primary font-medium shadow-sm"
+                ? "bg-accent text-accent-foreground font-medium shadow-sm"
                 : "text-sidebar-foreground/75 hover:text-sidebar-foreground hover:bg-sidebar-accent"
             )}
           >
             <div
               className={cn(
                 "size-1.5 rounded-full transition-colors",
-                activeSection === item.id ? "bg-primary" : "bg-sidebar-foreground/30"
+                activeSection === item.id ? "bg-accent-foreground" : "bg-sidebar-foreground/30"
               )}
             />
             <span className="text-sm">{item.label}</span>
@@ -52,7 +52,7 @@ const Sidebar = ({ activeSection, onSectionChange }: SidebarProps) => {
 
       <div className="p-4 border-t border-sidebar-border">
         <div className="flex items-center gap-3 p-3 rounded-lg bg-sidebar-accent">
-          <div className="size-9 rounded-full bg-pulse flex items-center justify-center text-xs font-bold text-primary">
+          <div className="size-9 rounded-full bg-accent flex items-center justify-center text-xs font-bold text-accent-foreground">
             AD
           </div>
           <div className="min-w-0">

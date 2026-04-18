@@ -10,7 +10,7 @@ interface KPICardProps {
   progressColor?: string;
 }
 
-const KPICard = ({ label, value, subtitle, delta, deltaType = "neutral", progress, progressColor = "bg-pulse" }: KPICardProps) => {
+const KPICard = ({ label, value, subtitle, delta, deltaType = "neutral", progress, progressColor = "bg-accent" }: KPICardProps) => {
   return (
     <div className="bg-card rounded-2xl p-6 border border-border shadow-card hover:shadow-elevated transition-shadow">
       <p className="text-[10px] font-semibold text-muted-foreground uppercase tracking-[0.16em] mb-3">{label}</p>
