@@ -103,7 +103,7 @@ const ReminderModal = ({ medication, groupedMedications, onClose }: ReminderModa
   const btnClass = (active: boolean) =>
     `px-4 py-2.5 rounded text-xs font-bold uppercase tracking-wider transition-colors ${
       active
-        ? "bg-sapphire text-primary-foreground"
+        ? "bg-accent text-primary-foreground"
         : "bg-secondary text-muted-foreground hover:text-foreground border border-border"
     }`;
 
@@ -117,7 +117,7 @@ const ReminderModal = ({ medication, groupedMedications, onClose }: ReminderModa
           <DialogDescription className="text-muted-foreground text-sm">
             {medication && (
               <>
-                <span className="text-cyan-clinical font-mono">{medication.patient}</span>
+                <span className="text-accent font-mono">{medication.patient}</span>
                 {isGrouped ? (
                   <> — {meds.length} medications · Refill date <span className="font-mono">{medication.refillDate}</span></>
                 ) : (
@@ -131,8 +131,8 @@ const ReminderModal = ({ medication, groupedMedications, onClose }: ReminderModa
         <div className="space-y-5 pt-2">
           {/* Grouped notice */}
           {isGrouped && (
-            <div className="rounded border border-cyan-clinical/30 bg-cyan-clinical/10 p-4 space-y-2">
-              <p className="text-[10px] font-bold uppercase tracking-widest text-cyan-clinical">
+            <div className="rounded border border-accent/30 bg-accent/10 p-4 space-y-2">
+              <p className="text-[10px] font-bold uppercase tracking-widest text-accent">
                 Consolidated into one message
               </p>
               <p className="text-xs text-muted-foreground leading-relaxed">
@@ -159,10 +159,10 @@ const ReminderModal = ({ medication, groupedMedications, onClose }: ReminderModa
                   className={`px-5 py-3 rounded text-xs font-bold uppercase tracking-wider transition-colors ${
                     patientConsent === opt
                       ? opt === "yes"
-                        ? "bg-cyan-clinical/20 text-cyan-clinical border border-cyan-clinical/30"
+                        ? "bg-accent/20 text-accent border border-accent/30"
                         : opt === "no"
-                        ? "bg-hcc-alert/15 text-hcc-alert border border-hcc-alert/30"
-                        : "bg-yellow-500/15 text-yellow-400 border border-yellow-500/30"
+                        ? "bg-destructive/15 text-destructive border border-destructive/30"
+                        : "bg-muted text-muted-foreground border border-border"
                       : "bg-secondary text-muted-foreground hover:text-foreground border border-border"
                   }`}
                 >
@@ -184,7 +184,7 @@ const ReminderModal = ({ medication, groupedMedications, onClose }: ReminderModa
                   onClick={() => setPharmacySelection(ph.id)}
                   className={`w-full px-4 py-3 rounded text-xs font-bold transition-colors text-left ${
                     pharmacySelection === ph.id
-                      ? "bg-cyan-clinical/15 text-cyan-clinical border border-cyan-clinical/30"
+                      ? "bg-accent/15 text-accent border border-accent/30"
                       : "bg-secondary text-muted-foreground hover:text-foreground border border-border"
                   }`}
                 >
@@ -195,7 +195,7 @@ const ReminderModal = ({ medication, groupedMedications, onClose }: ReminderModa
                 onClick={() => setPharmacySelection("other")}
                 className={`w-full px-4 py-3 rounded text-xs font-bold transition-colors text-left ${
                   pharmacySelection === "other"
-                    ? "bg-cyan-clinical/15 text-cyan-clinical border border-cyan-clinical/30"
+                    ? "bg-accent/15 text-accent border border-accent/30"
                     : "bg-secondary text-muted-foreground hover:text-foreground border border-border"
                 }`}
               >
@@ -207,7 +207,7 @@ const ReminderModal = ({ medication, groupedMedications, onClose }: ReminderModa
                   value={customPharmacy}
                   onChange={(e) => setCustomPharmacy(e.target.value)}
                   placeholder="Enter pharmacy name and address…"
-                  className="w-full px-4 py-3 rounded bg-secondary border border-border text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-cyan-clinical/40"
+                  className="w-full px-4 py-3 rounded bg-secondary border border-border text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-accent/40"
                 />
               )}
             </div>
@@ -216,13 +216,13 @@ const ReminderModal = ({ medication, groupedMedications, onClose }: ReminderModa
           {/* Reminder Message */}
           <div className="space-y-2">
             <label className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground">
-              Reminder Message {isGrouped && <span className="text-cyan-clinical">(consolidated)</span>}
+              Reminder Message {isGrouped && <span className="text-accent">(consolidated)</span>}
             </label>
             <textarea
               value={messageText}
               onChange={(e) => setMessageText(e.target.value)}
               rows={isGrouped ? 8 : 4}
-              className="w-full px-4 py-3 rounded bg-secondary border border-border text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-cyan-clinical/40 resize-none leading-relaxed"
+              className="w-full px-4 py-3 rounded bg-secondary border border-border text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-accent/40 resize-none leading-relaxed"
             />
             <button
               onClick={() => setMessageText(buildDefaultMessage(meds))}
@@ -253,7 +253,7 @@ const ReminderModal = ({ medication, groupedMedications, onClose }: ReminderModa
                   max={90}
                   value={customDays}
                   onChange={(e) => setCustomDays(e.target.value)}
-                  className="w-16 px-3 py-2 rounded bg-secondary border border-border text-sm text-foreground font-mono text-center focus:outline-none focus:ring-1 focus:ring-cyan-clinical/40"
+                  className="w-16 px-3 py-2 rounded bg-secondary border border-border text-sm text-foreground font-mono text-center focus:outline-none focus:ring-1 focus:ring-accent/40"
                 />
                 <span className="text-xs text-muted-foreground">days</span>
               </div>
@@ -272,7 +272,7 @@ const ReminderModal = ({ medication, groupedMedications, onClose }: ReminderModa
                   onClick={() => toggleMethod(method.id)}
                   className={`px-4 py-3 rounded text-xs font-bold transition-colors text-left ${
                     selectedMethods.includes(method.id)
-                      ? "bg-cyan-clinical/15 text-cyan-clinical border border-cyan-clinical/30"
+                      ? "bg-accent/15 text-accent border border-accent/30"
                       : "bg-secondary text-muted-foreground hover:text-foreground border border-border"
                   }`}
                 >
@@ -292,7 +292,7 @@ const ReminderModal = ({ medication, groupedMedications, onClose }: ReminderModa
               onChange={(e) => setNotes(e.target.value)}
               placeholder="e.g. Patient prefers morning reminders…"
               rows={2}
-              className="w-full px-4 py-3 rounded bg-secondary border border-border text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-cyan-clinical/40 resize-none"
+              className="w-full px-4 py-3 rounded bg-secondary border border-border text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-accent/40 resize-none"
             />
           </div>
 
@@ -300,7 +300,7 @@ const ReminderModal = ({ medication, groupedMedications, onClose }: ReminderModa
           <div className="flex gap-3 pt-1">
             <button
               onClick={handleSave}
-              className="flex-1 px-6 py-3 bg-sapphire text-primary-foreground text-xs font-bold uppercase tracking-wider rounded hover:opacity-90 transition-opacity"
+              className="flex-1 px-6 py-3 bg-accent text-primary-foreground text-xs font-bold uppercase tracking-wider rounded hover:opacity-90 transition-opacity"
             >
               {isGrouped ? `Save Consolidated Reminder (${meds.length})` : "Save Reminder"}
             </button>
