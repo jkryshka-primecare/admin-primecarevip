@@ -38,7 +38,7 @@ const EngagementPanel = () => {
           </div>
           <div>
             <p className="text-xs text-muted-foreground">Conversion Rate</p>
-            <p className="text-2xl font-mono text-cyan-clinical">{engagementData.onboardingStats.conversionRate}%</p>
+            <p className="text-2xl font-mono text-accent">{engagementData.onboardingStats.conversionRate}%</p>
           </div>
           <div>
             <p className="text-xs text-muted-foreground">Avg. Days to Onboard</p>
@@ -54,10 +54,10 @@ const EngagementPanel = () => {
         </h3>
         <div className="space-y-5">
           {[
-            { label: "Primary Care Visits", value: engagementData.utilizationMetrics.primaryCareVisits, max: 5000, color: "bg-sapphire" },
-            { label: "Telehealth Sessions", value: engagementData.utilizationMetrics.telehealth, max: 5000, color: "bg-cyan-clinical" },
-            { label: "Urgent Care Diversions", value: engagementData.utilizationMetrics.urgentCare, max: 5000, color: "bg-amber-500" },
-            { label: "Patient Messages", value: engagementData.utilizationMetrics.messaging, max: 10000, color: "bg-sapphire/60" },
+            { label: "Primary Care Visits", value: engagementData.utilizationMetrics.primaryCareVisits, max: 5000, color: "bg-primary" },
+            { label: "Telehealth Sessions", value: engagementData.utilizationMetrics.telehealth, max: 5000, color: "bg-accent" },
+            { label: "Urgent Care Diversions", value: engagementData.utilizationMetrics.urgentCare, max: 5000, color: "bg-destructive" },
+            { label: "Patient Messages", value: engagementData.utilizationMetrics.messaging, max: 10000, color: "bg-success" },
           ].map((item) => (
             <div key={item.label}>
               <div className="flex justify-between mb-1.5">
@@ -87,7 +87,7 @@ const EngagementPanel = () => {
                 </div>
                 <div className="h-2 w-full bg-muted rounded-full overflow-hidden">
                   <div
-                    className={`h-full rounded-full ${gap.completed >= 60 ? "bg-cyan-clinical" : gap.completed >= 40 ? "bg-amber-500" : "bg-hcc-alert"}`}
+                    className={`h-full rounded-full ${gap.completed >= 60 ? "bg-success" : gap.completed >= 40 ? "bg-accent" : "bg-destructive"}`}
                     style={{ width: `${gap.completed}%` }}
                   />
                 </div>

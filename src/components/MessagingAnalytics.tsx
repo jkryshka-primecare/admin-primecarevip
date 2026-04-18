@@ -26,7 +26,7 @@ const MessagingAnalytics = () => {
         </div>
         <div className="glass-panel rounded-lg p-6">
           <p className="text-[10px] font-bold text-muted-foreground uppercase tracking-widest mb-2">Response Rate</p>
-          <p className="text-3xl font-mono tracking-tighter text-cyan-clinical">{messagingData.responseRate}%</p>
+          <p className="text-3xl font-mono tracking-tighter text-success">{messagingData.responseRate}%</p>
         </div>
         <div className="glass-panel rounded-lg p-6">
           <p className="text-[10px] font-bold text-muted-foreground uppercase tracking-widest mb-2">Avg Response Time</p>
@@ -47,8 +47,8 @@ const MessagingAnalytics = () => {
               <div key={i} className="flex-1 flex flex-col items-center gap-2">
                 <span className="text-[10px] font-mono text-muted-foreground">{val}</span>
                 <div
-                  className="w-full bg-sapphire/40 rounded-t hover:bg-sapphire/60 transition-colors"
-                  style={{ height: `${(val / maxWeekly) * 100}%` }}
+                  className="w-full bg-accent/60 rounded-t hover:bg-accent transition-colors"
+                  style={{ height: `${(val / maxWeekly) * 100}%`, minHeight: "4px" }}
                 />
                 <span className="text-[9px] text-muted-foreground">W{i + 1}</span>
               </div>
@@ -67,7 +67,7 @@ const MessagingAnalytics = () => {
                   <span className="text-xs font-mono text-muted-foreground">{t.pct}%</span>
                 </div>
                 <div className="h-1.5 bg-muted rounded-full overflow-hidden">
-                  <div className="h-full bg-cyan-clinical/60 rounded-full" style={{ width: `${t.pct}%` }} />
+                  <div className="h-full bg-accent rounded-full" style={{ width: `${t.pct}%` }} />
                 </div>
               </div>
             ))}

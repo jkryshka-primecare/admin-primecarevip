@@ -32,9 +32,9 @@ type FhirMedicationsResult = {
 };
 
 const statusStyle: Record<string, string> = {
-  urgent: "bg-hcc-alert/15 text-hcc-alert border-hcc-alert/30",
-  "due-soon": "bg-yellow-500/15 text-yellow-400 border-yellow-500/30",
-  "on-track": "bg-cyan-clinical/15 text-cyan-clinical border-cyan-clinical/30",
+  urgent: "bg-destructive/15 text-destructive border-destructive/30",
+  "due-soon": "bg-accent/15 text-accent border-accent/30",
+  "on-track": "bg-success/15 text-success border-success/30",
 };
 
 const statusLabel: Record<string, string> = {
@@ -231,11 +231,11 @@ const MedicationStats = () => {
             <h2 className="text-sm font-bold uppercase tracking-widest text-muted-foreground">
               Refill Tracker
             </h2>
-            <span className="px-2 py-0.5 rounded text-[9px] font-bold uppercase tracking-wider bg-sapphire/15 text-sapphire border border-sapphire/30">
+            <span className="px-2 py-0.5 rounded text-[9px] font-bold uppercase tracking-wider bg-primary/10 text-primary border border-primary/30">
               Sandbox FHIR API
             </span>
             {hintMeta && (
-              <span className="px-2 py-0.5 rounded text-[9px] font-bold uppercase tracking-wider bg-cyan-clinical/15 text-cyan-clinical border border-cyan-clinical/30">
+              <span className="px-2 py-0.5 rounded text-[9px] font-bold uppercase tracking-wider bg-accent/15 text-accent border border-accent/30">
                 Hint · {hintMeta.count}
                 {hintMeta.total !== null ? `/${hintMeta.total}` : ""} patients
               </span>
@@ -266,7 +266,7 @@ const MedicationStats = () => {
             placeholder="Search patient or medication…"
             value={searchTerm}
             onChange={(e) => setSearchTerm(e.target.value)}
-            className="px-4 py-3 rounded bg-secondary border border-border text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-cyan-clinical/40 w-72"
+            className="px-4 py-3 rounded bg-secondary border border-border text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-accent/40 w-72"
           />
         </div>
 
@@ -277,7 +277,7 @@ const MedicationStats = () => {
               onClick={() => setActiveCategory(cat)}
               className={`px-5 py-3 rounded text-xs font-bold uppercase tracking-wider transition-colors ${
                 activeCategory === cat
-                  ? "bg-sapphire text-primary-foreground"
+                  ? "bg-primary text-primary-foreground"
                   : "bg-secondary text-muted-foreground hover:text-foreground border border-border"
               }`}
             >
@@ -308,7 +308,7 @@ const MedicationStats = () => {
                       onClick={() => openPatientDetail(med.patientId!)}
                       className="text-left group"
                     >
-                      <div className="font-mono text-sm text-cyan-clinical group-hover:underline">
+                      <div className="font-mono text-sm text-accent group-hover:underline">
                         {med.patient}
                       </div>
                       <div className="text-[10px] font-mono text-muted-foreground mt-0.5 group-hover:text-foreground">
@@ -329,7 +329,7 @@ const MedicationStats = () => {
                   <div className="flex items-center gap-2">
                     {med.refillDate}
                     {groupCounts[`${med.patient}|${med.refillDate}`] > 1 && (
-                      <span className="px-2 py-0.5 rounded text-[9px] font-bold uppercase tracking-wider bg-cyan-clinical/15 text-cyan-clinical border border-cyan-clinical/30">
+                      <span className="px-2 py-0.5 rounded text-[9px] font-bold uppercase tracking-wider bg-success/15 text-success border border-success/30">
                         +{groupCounts[`${med.patient}|${med.refillDate}`] - 1} same day
                       </span>
                     )}
@@ -344,7 +344,7 @@ const MedicationStats = () => {
                 <TableCell>
                   <button
                     onClick={() => openReminder(med)}
-                    className="px-4 py-2.5 rounded bg-sapphire/10 text-sapphire border border-sapphire/20 text-xs font-bold hover:bg-sapphire/20 transition-colors whitespace-nowrap"
+                    className="px-4 py-2.5 rounded bg-accent/10 text-accent border border-accent/30 text-xs font-bold hover:bg-accent/20 transition-colors whitespace-nowrap"
                   >
                     {groupCounts[`${med.patient}|${med.refillDate}`] > 1
                       ? `Set Reminder (${groupCounts[`${med.patient}|${med.refillDate}`]})`
