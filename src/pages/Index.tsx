@@ -9,6 +9,7 @@ import MessagingAnalytics from "@/components/MessagingAnalytics";
 import MedicationStats from "@/components/MedicationStats";
 import HintSandbox from "@/components/HintSandbox";
 import ElationStatusCard from "@/components/ElationStatusCard";
+import ThemeToggle from "@/components/ThemeToggle";
 
 const sectionTitles: Record<string, string> = {
   overview: "Executive Registry",
@@ -45,6 +46,7 @@ const Index = () => {
               <span className="text-[10px] text-muted-foreground uppercase font-semibold tracking-wider">Data Sources</span>
               <span className="text-sm font-mono text-primary">Elation • Hint • Messaging</span>
             </div>
+            <ThemeToggle />
             <button className="px-5 py-2.5 bg-accent text-accent-foreground text-xs font-semibold uppercase tracking-wider rounded-full hover:bg-accent/90 transition-colors shadow-sm">
               Generate Report
             </button>
