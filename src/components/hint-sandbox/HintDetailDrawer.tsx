@@ -54,7 +54,7 @@ export const HintDetailDrawer = ({
                   href={link}
                   target="_blank"
                   rel="noopener noreferrer"
-                  className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded text-[10px] font-bold tracking-widest uppercase border border-cyan-clinical/30 bg-cyan-clinical/10 text-cyan-clinical hover:bg-cyan-clinical/20 transition-colors"
+                  className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded text-[10px] font-bold tracking-widest uppercase border border-accent/30 bg-accent/10 text-accent hover:bg-accent/20 transition-colors"
                 >
                   <ExternalLink className="size-3" />
                   View in Hint

@@ -145,7 +145,7 @@ const RecordsTableBody = ({
                 className={
                   "border-b border-border/50 transition-colors " +
                   (clickable
-                    ? "cursor-pointer hover:bg-sapphire/10"
+                    ? "cursor-pointer hover:bg-accent/10"
                     : "hover:bg-secondary/20")
                 }
               >
