@@ -24,7 +24,7 @@ export const HintResourceTabs = ({
         className={
           "px-3 py-1.5 rounded text-[10px] font-bold tracking-widest uppercase border transition-colors " +
           (resource === r.id
-            ? "bg-sapphire/10 text-sapphire border-sapphire/30"
+            ? "bg-accent/10 text-accent border-accent/30"
             : "text-muted-foreground border-border hover:text-foreground")
         }
       >

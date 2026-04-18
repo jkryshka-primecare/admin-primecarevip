@@ -212,7 +212,7 @@ const HintSandbox = () => {
             <h2 className="text-lg font-light tracking-tight text-foreground">
               Hint Health · Staging Sandbox
             </h2>
-            <span className="px-2.5 py-0.5 rounded bg-cyan-clinical/10 text-cyan-clinical border border-cyan-clinical/20 text-[10px] font-bold tracking-widest uppercase">
+            <span className="px-2.5 py-0.5 rounded bg-accent/10 text-accent border border-accent/20 text-[10px] font-bold tracking-widest uppercase">
               Live API
             </span>
           </div>
@@ -255,7 +255,7 @@ const HintSandbox = () => {
 
       {/* Status / error */}
       {error && (
-        <div className="p-4 rounded border border-hcc-alert/30 bg-hcc-alert/5 text-hcc-alert text-sm">
+        <div className="p-4 rounded border border-destructive/30 bg-destructive/5 text-destructive text-sm">
           {error}
         </div>
       )}
@@ -334,7 +334,7 @@ const SummaryCard = ({
   value: string;
   mono?: boolean;
 }) => (
-  <div className="p-4 border border-border rounded bg-slate-glass">
+  <div className="p-4 border border-border rounded bg-card">
     <div className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground">
       {label}
     </div>

@@ -23,7 +23,7 @@ export const HintSearchBar = ({
         value={inputValue}
         onChange={(e) => onInputChange(e.target.value)}
         placeholder={`Search ${resource} by name, email, ID…`}
-        className="w-full bg-background border border-border rounded px-3 py-2 text-xs font-mono text-foreground placeholder:text-muted-foreground/60 focus:outline-none focus:border-sapphire/50 focus:ring-1 focus:ring-sapphire/30"
+        className="w-full bg-background border border-border rounded px-3 py-2 text-xs font-mono text-foreground placeholder:text-muted-foreground/60 focus:outline-none focus:border-accent/50 focus:ring-1 focus:ring-accent/30"
       />
       {inputValue && (
         <button
@@ -37,7 +37,7 @@ export const HintSearchBar = ({
     </div>
     {committedValue && (
       <span className="text-[10px] font-mono text-muted-foreground">
-        q=<span className="text-sapphire">{committedValue}</span>
+        q=<span className="text-accent">{committedValue}</span>
       </span>
     )}
   </div>
