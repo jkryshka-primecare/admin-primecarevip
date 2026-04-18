@@ -103,7 +103,7 @@ const ReminderModal = ({ medication, groupedMedications, onClose }: ReminderModa
   const btnClass = (active: boolean) =>
     `px-4 py-2.5 rounded text-xs font-bold uppercase tracking-wider transition-colors ${
       active
-        ? "bg-accent text-primary-foreground"
+        ? "bg-accent text-accent-foreground"
         : "bg-secondary text-muted-foreground hover:text-foreground border border-border"
     }`;
 
@@ -300,7 +300,7 @@ const ReminderModal = ({ medication, groupedMedications, onClose }: ReminderModa
           <div className="flex gap-3 pt-1">
             <button
               onClick={handleSave}
-              className="flex-1 px-6 py-3 bg-accent text-primary-foreground text-xs font-bold uppercase tracking-wider rounded hover:opacity-90 transition-opacity"
+              className="flex-1 px-6 py-3 bg-accent text-accent-foreground text-xs font-bold uppercase tracking-wider rounded hover:opacity-90 transition-opacity"
             >
               {isGrouped ? `Save Consolidated Reminder (${meds.length})` : "Save Reminder"}
             </button>
