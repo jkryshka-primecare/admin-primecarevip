@@ -4,6 +4,7 @@ import { messageThreads, channelLabel, avgResponseMin, slaRate, WEEKDAY_SLA_MIN,
 import type { MessagingChannel, MessagingDrilldownContext } from "./messaging/types";
 import MessagingDrilldownDrawer from "./messaging/MessagingDrilldownDrawer";
 import MessagingFilterBar, { type MessagingFilters, messagingFilterDefaults } from "./messaging/MessagingFilterBar";
+import ResponderLeaderboard from "./messaging/ResponderLeaderboard";
 
 const channelIcon: Record<MessagingChannel, typeof MessageSquare> = {
   chat: MessageSquare,
@@ -266,6 +267,19 @@ const MessagingAnalytics = () => {
           </div>
         </button>
       </div>
+
+      <ResponderLeaderboard
+        threads={filteredThreads}
+        onSelectResponder={(responder, threads) =>
+          open({
+            metric: "Responder",
+            title: `${responder} · ${threads.length} threads`,
+            description: `All messages handled by ${responder} in the current filter window.`,
+            threads,
+            defaultTab: "threads",
+          })
+        }
+      />
 
       <MessagingDrilldownDrawer context={context} onClose={() => setContext(null)} />
     </div>
