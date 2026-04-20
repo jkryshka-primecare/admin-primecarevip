@@ -11,6 +11,10 @@ import HintSandbox from "@/components/HintSandbox";
 import ElationStatusCard from "@/components/ElationStatusCard";
 import LabOrders from "@/components/LabOrders";
 import ThemeToggle from "@/components/ThemeToggle";
+import { LogOut, ShieldCheck } from "lucide-react";
+import { useAuth } from "@/hooks/useAuth";
+import { useIdleTimeout } from "@/hooks/useIdleTimeout";
+import { toast } from "sonner";
 
 const sectionTitles: Record<string, string> = {
   overview: "Executive Registry",
@@ -26,6 +30,13 @@ const sectionTitles: Record<string, string> = {
 
 const Index = () => {
   const [activeSection, setActiveSection] = useState("overview");
+  const { user, signOut } = useAuth();
+
+  // HIPAA-style 15-minute idle auto-logout for PHI workstations.
+  useIdleTimeout(15 * 60 * 1000, async () => {
+    toast.info("Signed out for inactivity (15 min).");
+    await signOut();
+  });
 
   return (
     <div className="flex min-h-screen bg-background">
@@ -43,14 +54,24 @@ const Index = () => {
               Live
             </span>
           </div>
-          <div className="flex items-center gap-6">
-            <div className="flex flex-col items-end">
-              <span className="text-[10px] text-muted-foreground uppercase font-semibold tracking-wider">Data Sources</span>
-              <span className="text-sm font-mono text-primary">Elation • Hint • Messaging</span>
+          <div className="flex items-center gap-5">
+            <div className="hidden md:inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-destructive/10 text-destructive border border-destructive/20 text-[10px] font-semibold tracking-wider uppercase">
+              <ShieldCheck className="size-3" />
+              PHI · Logged
+            </div>
+            <div className="hidden lg:flex flex-col items-end">
+              <span className="text-[10px] text-muted-foreground uppercase font-semibold tracking-wider">Signed in</span>
+              <span className="text-sm font-mono text-primary truncate max-w-[180px]" title={user?.email ?? ""}>
+                {user?.email ?? ""}
+              </span>
             </div>
             <ThemeToggle />
-            <button className="px-5 py-2.5 bg-accent text-accent-foreground text-xs font-semibold uppercase tracking-wider rounded-full hover:bg-accent/90 transition-colors shadow-sm">
-              Generate Report
+            <button
+              onClick={() => signOut()}
+              className="px-4 py-2.5 border border-border text-foreground text-xs font-semibold uppercase tracking-wider rounded-full hover:bg-muted transition-colors inline-flex items-center gap-2"
+            >
+              <LogOut className="size-3.5" />
+              Sign out
             </button>
           </div>
         </header>
