@@ -1,5 +1,6 @@
 import { cn } from "@/lib/utils";
 import logo from "@/assets/primecare-logo.jpg";
+import { useAuth } from "@/hooks/useAuth";
 
 const navItems = [
   { label: "Executive Registry", id: "overview" },
@@ -13,12 +14,16 @@ const navItems = [
   { label: "Hint Sandbox", id: "hint" },
 ];
 
+const adminItems = [{ label: "Users", id: "admin-users" }];
+
 interface SidebarProps {
   activeSection: string;
   onSectionChange: (id: string) => void;
 }
 
 const Sidebar = ({ activeSection, onSectionChange }: SidebarProps) => {
+  const { roles } = useAuth();
+  const isAdmin = roles.includes("admin");
   return (
     <aside className="w-64 bg-sidebar text-sidebar-foreground flex flex-col shrink-0 border-r border-sidebar-border">
       <div className="p-6 border-b border-sidebar-border bg-white">
