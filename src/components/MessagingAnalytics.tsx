@@ -92,7 +92,7 @@ const MessagingAnalytics = () => {
             metric: "Overall SLA",
             title: `Within-target responses · ${stats.overallSla.toFixed(1)}%`,
             description: `Weekday target: ≤${WEEKDAY_SLA_MIN} min. Weekend (Fri 6pm – Mon 8am): ${WEEKEND_SLA_BAND[0]}–${WEEKEND_SLA_BAND[1]} min.`,
-            threads: messageThreads.filter((t) => t.responseMinutes !== null),
+            threads: filteredThreads.filter((t) => t.responseMinutes !== null),
             defaultTab: "threads",
           })}
           className="text-left glass-panel rounded-lg p-6 hover:border-accent/50 transition-colors"
