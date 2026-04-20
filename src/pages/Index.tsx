@@ -11,6 +11,7 @@ import HintSandbox from "@/components/HintSandbox";
 import ElationStatusCard from "@/components/ElationStatusCard";
 import LabOrders from "@/components/LabOrders";
 import UsersAdmin from "@/components/admin/UsersAdmin";
+import PhiAuditLog from "@/components/admin/PhiAuditLog";
 import ThemeToggle from "@/components/ThemeToggle";
 import { LogOut, ShieldCheck } from "lucide-react";
 import { useAuth } from "@/hooks/useAuth";
