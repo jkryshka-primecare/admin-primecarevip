@@ -2,8 +2,9 @@ import { useMemo, useState } from "react";
 import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetDescription } from "@/components/ui/sheet";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import { X, MessageSquare, Smartphone, Phone, Voicemail } from "lucide-react";
-import type { MessagingChannel, MessagingDrilldownContext } from "./types";
+import type { MessageThread, MessagingChannel, MessagingDrilldownContext } from "./types";
 import { channelLabel, formatResponse } from "./mockData";
+import ConversationView from "./ConversationView";
 
 interface Props {
   context: MessagingDrilldownContext | null;
@@ -19,6 +20,7 @@ const channelIcon: Record<MessagingChannel, typeof MessageSquare> = {
 
 const MessagingDrilldownDrawer = ({ context, onClose }: Props) => {
   const [tab, setTab] = useState<"patients" | "threads">(context?.defaultTab ?? "patients");
+  const [activeThread, setActiveThread] = useState<MessageThread | null>(null);
 
   const patientRows = useMemo(() => {
     if (!context) return [];
@@ -141,7 +143,11 @@ const MessagingDrilldownDrawer = ({ context, onClose }: Props) => {
                   const Icon = channelIcon[t.channel];
                   const breach = t.responseMinutes !== null && !t.withinSla;
                   return (
-                    <tr key={t.id} className="border-b border-border hover:bg-accent/10 transition-colors">
+                    <tr
+                      key={t.id}
+                      onClick={() => setActiveThread(t)}
+                      className="border-b border-border hover:bg-accent/10 transition-colors cursor-pointer"
+                    >
                       <td className="px-6 py-3">
                         <span className="inline-flex items-center gap-1.5 text-xs">
                           <Icon className="size-3.5 text-accent" />
@@ -189,6 +195,7 @@ const MessagingDrilldownDrawer = ({ context, onClose }: Props) => {
           </TabsContent>
         </Tabs>
       </SheetContent>
+      <ConversationView thread={activeThread} onClose={() => setActiveThread(null)} />
     </Sheet>
   );
 };
