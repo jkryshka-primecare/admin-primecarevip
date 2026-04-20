@@ -3,6 +3,7 @@ import { MessageSquare, Smartphone, Phone, Voicemail, Clock, AlertTriangle, Chec
 import { messageThreads, channelLabel, avgResponseMin, slaRate, WEEKDAY_SLA_MIN, WEEKEND_SLA_BAND } from "./messaging/mockData";
 import type { MessagingChannel, MessagingDrilldownContext } from "./messaging/types";
 import MessagingDrilldownDrawer from "./messaging/MessagingDrilldownDrawer";
+import MessagingFilterBar, { type MessagingFilters, messagingFilterDefaults } from "./messaging/MessagingFilterBar";
 
 const channelIcon: Record<MessagingChannel, typeof MessageSquare> = {
   chat: MessageSquare,
