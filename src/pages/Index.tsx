@@ -107,6 +107,7 @@ const Index = () => {
             </>
           )}
           {activeSection === "admin-users" && <UsersAdmin />}
+          {activeSection === "admin-audit" && <PhiAuditLog />}
         </div>
       </main>
     </div>
