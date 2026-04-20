@@ -80,7 +80,7 @@ const ElationStatusCard = () => {
       <div className="flex-1 min-w-0">
         <div className="flex items-center gap-2 flex-wrap">
           <span className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground">
-            Elation Sandbox
+            Elation Sandbox · Read-Only
           </span>
           <span
             className={`px-1.5 py-0.5 rounded text-[9px] font-bold uppercase tracking-wider border ${cfg.badgeClass}`}
