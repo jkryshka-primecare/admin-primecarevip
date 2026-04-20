@@ -14,15 +14,32 @@ const channelIcon: Record<MessagingChannel, typeof MessageSquare> = {
 
 const MessagingAnalytics = () => {
   const [context, setContext] = useState<MessagingDrilldownContext | null>(null);
+  const [filters, setFilters] = useState<MessagingFilters>(() => ({
+    ...messagingFilterDefaults,
+    channels: new Set(messagingFilterDefaults.channels),
+  }));
+
+  // Apply date + channel filters to the dataset before any aggregation
+  const filteredThreads = useMemo(() => {
+    const start = new Date(filters.startDate);
+    start.setHours(0, 0, 0, 0);
+    const end = new Date(filters.endDate);
+    end.setHours(23, 59, 59, 999);
+    return messageThreads.filter((t) => {
+      if (!filters.channels.has(t.channel)) return false;
+      const ts = new Date(t.receivedAt).getTime();
+      return ts >= start.getTime() && ts <= end.getTime();
+    });
+  }, [filters]);
 
   const stats = useMemo(() => {
-    const total = messageThreads.length;
-    const weekday = messageThreads.filter((t) => !t.isWeekend);
-    const weekend = messageThreads.filter((t) => t.isWeekend);
-    const open = messageThreads.filter((t) => t.responseMinutes === null);
+    const total = filteredThreads.length;
+    const weekday = filteredThreads.filter((t) => !t.isWeekend);
+    const weekend = filteredThreads.filter((t) => t.isWeekend);
+    const open = filteredThreads.filter((t) => t.responseMinutes === null);
 
     const byChannel = (Object.keys(channelLabel) as MessagingChannel[]).map((ch) => {
-      const list = messageThreads.filter((t) => t.channel === ch);
+      const list = filteredThreads.filter((t) => t.channel === ch);
       return {
         channel: ch,
         count: list.length,
@@ -37,11 +54,11 @@ const MessagingAnalytics = () => {
       open: open.length,
       weekday: { count: weekday.length, avg: avgResponseMin(weekday), sla: slaRate(weekday), threads: weekday },
       weekend: { count: weekend.length, avg: avgResponseMin(weekend), sla: slaRate(weekend), threads: weekend },
-      overallSla: slaRate(messageThreads),
+      overallSla: slaRate(filteredThreads),
       byChannel,
       openThreads: open,
     };
-  }, []);
+  }, [filteredThreads]);
 
   // Hourly volume — last 7 days bucketed by day for the trend bar
   const dailyTrend = useMemo(() => {
