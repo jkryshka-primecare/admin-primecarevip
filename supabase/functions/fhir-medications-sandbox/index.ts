@@ -2,11 +2,7 @@
 // Returns mock medication/refill data shaped like a FHIR Bundle, then
 // flattens to the shape the MedicationStats UI expects.
 
-const corsHeaders = {
-  "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Headers":
-    "authorization, x-client-info, apikey, content-type",
-};
+import { corsHeaders, requireStaff, logPhiAccess } from "../_shared/auth.ts";
 
 type FhirMedicationRequest = {
   resourceType: "MedicationRequest";

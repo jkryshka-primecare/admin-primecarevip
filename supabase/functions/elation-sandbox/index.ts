@@ -28,12 +28,7 @@
 //   ELATION_SANDBOX_REST_BASE  = https://sandbox.elationemr.com/api/2.0
 //   ELATION_SANDBOX_FHIR_BASE  = https://sandboxfhir.elationemr.com
 
-const corsHeaders = {
-  "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Headers":
-    "authorization, x-client-info, apikey, content-type",
-  "Access-Control-Allow-Methods": "POST, OPTIONS",
-};
+import { corsHeaders, requireStaff, logPhiAccess } from "../_shared/auth.ts";
 
 const DEFAULT_TOKEN_URL =
   "https://sandbox.elationemr.com/api/2.0/oauth2/token/";
