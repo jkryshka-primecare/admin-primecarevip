@@ -63,7 +63,7 @@ const MessagingAnalytics = () => {
   // Hourly volume — last 7 days bucketed by day for the trend bar
   const dailyTrend = useMemo(() => {
     const map = new Map<string, number>();
-    for (const t of messageThreads) {
+    for (const t of filteredThreads) {
       const key = t.receivedAt.slice(0, 10);
       map.set(key, (map.get(key) ?? 0) + 1);
     }
@@ -71,7 +71,21 @@ const MessagingAnalytics = () => {
       .sort(([a], [b]) => a.localeCompare(b))
       .slice(-7)
       .map(([date, count]) => ({ date, count }));
-  }, []);
+  }, [filteredThreads]);
+  const maxDaily = Math.max(...dailyTrend.map((d) => d.count), 1);
+
+  const open = (ctx: MessagingDrilldownContext) => setContext(ctx);
+
+  return (
+    <div className="space-y-8">
+      <MessagingFilterBar
+        filters={filters}
+        onChange={setFilters}
+        matchedCount={filteredThreads.length}
+        totalCount={messageThreads.length}
+      />
+
+      {/* SLA Hero */}
   const maxDaily = Math.max(...dailyTrend.map((d) => d.count), 1);
 
   const open = (ctx: MessagingDrilldownContext) => setContext(ctx);
