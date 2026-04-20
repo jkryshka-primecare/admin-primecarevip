@@ -243,6 +243,16 @@ Deno.serve(async (req) => {
       if (typeof obj.previous === "string") previous = obj.previous;
     }
 
+
+    await logPhiAccess(auth, req, {
+      source: "elation-sandbox",
+      resource,
+      scope,
+      resource_id: body.id,
+      http_status: upstream.status,
+      row_count: total,
+    });
+
     return json(
       {
         source: "sandbox.elation.lovable.local",
