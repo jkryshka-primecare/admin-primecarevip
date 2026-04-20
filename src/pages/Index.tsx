@@ -12,6 +12,7 @@ import ElationStatusCard from "@/components/ElationStatusCard";
 import LabOrders from "@/components/LabOrders";
 import UsersAdmin from "@/components/admin/UsersAdmin";
 import PhiAuditLog from "@/components/admin/PhiAuditLog";
+import AllowedDomainsAdmin from "@/components/admin/AllowedDomainsAdmin";
 import ThemeToggle from "@/components/ThemeToggle";
 import { LogOut, ShieldCheck } from "lucide-react";
 import { useAuth } from "@/hooks/useAuth";
@@ -30,6 +31,7 @@ const sectionTitles: Record<string, string> = {
   hint: "Hint Health · Sandbox API",
   "admin-users": "Administration · Users",
   "admin-audit": "Administration · PHI Audit Log",
+  "admin-domains": "Administration · Signup Domains",
 };
 
 const Index = () => {
@@ -108,6 +110,7 @@ const Index = () => {
           )}
           {activeSection === "admin-users" && <UsersAdmin />}
           {activeSection === "admin-audit" && <PhiAuditLog />}
+          {activeSection === "admin-domains" && <AllowedDomainsAdmin />}
         </div>
       </main>
     </div>
