@@ -144,6 +144,10 @@ Deno.serve(async (req) => {
     return new Response("ok", { headers: corsHeaders });
   }
 
+  // PHI gate: require signed-in staff/clinician/admin.
+  const auth = await requireStaff(req);
+  if (auth instanceof Response) return auth;
+
   try {
     const clientId = Deno.env.get("ELATION_SANDBOX_CLIENT_ID");
     const clientSecret = Deno.env.get("ELATION_SANDBOX_CLIENT_SECRET");
