@@ -159,13 +159,17 @@ Deno.serve(async (req) => {
       Deno.env.get("ELATION_SANDBOX_FHIR_BASE") ?? DEFAULT_FHIR_BASE;
 
     if (!clientId || !clientSecret) {
+      // Return 200 with `configured: false` so the client can render an
+      // "awaiting credentials" state. Using a non-2xx here causes the
+      // Supabase JS client to throw and discard the body.
       return json(
         {
+          status: "awaiting_credentials",
+          configured: false,
           error:
             "Elation sandbox credentials are not configured. Add ELATION_SANDBOX_CLIENT_ID and ELATION_SANDBOX_CLIENT_SECRET as secrets once Elation provisions your sandbox.",
-          configured: false,
         },
-        503,
+        200,
       );
     }
 
