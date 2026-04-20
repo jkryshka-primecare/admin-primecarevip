@@ -1,5 +1,6 @@
 import { cn } from "@/lib/utils";
 import logo from "@/assets/primecare-logo.jpg";
+import { useAuth } from "@/hooks/useAuth";
 
 const navItems = [
   { label: "Executive Registry", id: "overview" },
@@ -13,12 +14,16 @@ const navItems = [
   { label: "Hint Sandbox", id: "hint" },
 ];
 
+const adminItems = [{ label: "Users", id: "admin-users" }];
+
 interface SidebarProps {
   activeSection: string;
   onSectionChange: (id: string) => void;
 }
 
 const Sidebar = ({ activeSection, onSectionChange }: SidebarProps) => {
+  const { roles } = useAuth();
+  const isAdmin = roles.includes("admin");
   return (
     <aside className="w-64 bg-sidebar text-sidebar-foreground flex flex-col shrink-0 border-r border-sidebar-border">
       <div className="p-6 border-b border-sidebar-border bg-white">
@@ -49,6 +54,34 @@ const Sidebar = ({ activeSection, onSectionChange }: SidebarProps) => {
             <span className="text-sm">{item.label}</span>
           </button>
         ))}
+
+        {isAdmin && (
+          <>
+            <div className="text-[10px] font-semibold text-sidebar-foreground/50 uppercase tracking-[0.18em] px-3 mb-3 mt-6">
+              Administration
+            </div>
+            {adminItems.map((item) => (
+              <button
+                key={item.id}
+                onClick={() => onSectionChange(item.id)}
+                className={cn(
+                  "w-full flex items-center gap-3 px-4 py-2.5 rounded-lg text-left transition-all",
+                  activeSection === item.id
+                    ? "bg-accent text-accent-foreground font-medium shadow-sm"
+                    : "text-sidebar-foreground/75 hover:text-sidebar-foreground hover:bg-sidebar-accent"
+                )}
+              >
+                <div
+                  className={cn(
+                    "size-1.5 rounded-full transition-colors",
+                    activeSection === item.id ? "bg-accent-foreground" : "bg-sidebar-foreground/30"
+                  )}
+                />
+                <span className="text-sm">{item.label}</span>
+              </button>
+            ))}
+          </>
+        )}
       </nav>
 
       <div className="p-4 border-t border-sidebar-border">

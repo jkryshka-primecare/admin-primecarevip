@@ -10,6 +10,7 @@ import MedicationStats from "@/components/MedicationStats";
 import HintSandbox from "@/components/HintSandbox";
 import ElationStatusCard from "@/components/ElationStatusCard";
 import LabOrders from "@/components/LabOrders";
+import UsersAdmin from "@/components/admin/UsersAdmin";
 import ThemeToggle from "@/components/ThemeToggle";
 import { LogOut, ShieldCheck } from "lucide-react";
 import { useAuth } from "@/hooks/useAuth";
@@ -26,6 +27,7 @@ const sectionTitles: Record<string, string> = {
   medications: "Medication Statistics",
   labs: "Laboratory Orders · Pipeline",
   hint: "Hint Health · Sandbox API",
+  "admin-users": "Administration · Users",
 };
 
 const Index = () => {
@@ -102,6 +104,7 @@ const Index = () => {
               <HintSandbox />
             </>
           )}
+          {activeSection === "admin-users" && <UsersAdmin />}
         </div>
       </main>
     </div>
