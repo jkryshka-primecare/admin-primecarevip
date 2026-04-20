@@ -154,6 +154,20 @@ Deno.serve(async (req) => {
       paginationHeaders["total"];
     const total = totalRaw !== undefined ? Number(totalRaw) : undefined;
 
+    // Best-effort row count for audit
+    const rowCount = Array.isArray((parsed as { data?: unknown })?.data ?? parsed)
+      ? (Array.isArray(parsed) ? parsed.length : null)
+      : (Array.isArray(parsed) ? parsed.length : null);
+
+    await logPhiAccess(auth, req, {
+      source: "hint-sandbox",
+      resource,
+      scope,
+      resource_id: body.id,
+      http_status: upstream.status,
+      row_count: Number.isFinite(total) ? Number(total) : rowCount,
+    });
+
     return json(
       {
         source: "sandbox.hint.lovable.local",
