@@ -9,6 +9,7 @@ import MessagingAnalytics from "@/components/MessagingAnalytics";
 import MedicationStats from "@/components/MedicationStats";
 import HintSandbox from "@/components/HintSandbox";
 import ElationStatusCard from "@/components/ElationStatusCard";
+import LabOrders from "@/components/LabOrders";
 import ThemeToggle from "@/components/ThemeToggle";
 
 const sectionTitles: Record<string, string> = {
@@ -19,6 +20,7 @@ const sectionTitles: Record<string, string> = {
   claims: "Claims Pipeline",
   messaging: "Messaging Analytics",
   medications: "Medication Statistics",
+  labs: "Laboratory Orders · Pipeline",
   hint: "Hint Health · Sandbox API",
 };
 
@@ -72,6 +74,7 @@ const Index = () => {
           {activeSection === "claims" && <ClaimsPipeline />}
           {activeSection === "messaging" && <MessagingAnalytics />}
           {activeSection === "medications" && <MedicationStats />}
+          {activeSection === "labs" && <LabOrders />}
           {activeSection === "hint" && (
             <>
               <ElationStatusCard />
