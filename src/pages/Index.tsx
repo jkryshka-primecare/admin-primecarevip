@@ -29,6 +29,7 @@ const sectionTitles: Record<string, string> = {
   labs: "Laboratory Orders · Pipeline",
   hint: "Hint Health · Sandbox API",
   "admin-users": "Administration · Users",
+  "admin-audit": "Administration · PHI Audit Log",
 };
 
 const Index = () => {
