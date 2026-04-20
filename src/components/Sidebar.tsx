@@ -17,6 +17,7 @@ const navItems = [
 const adminItems = [
   { label: "Users", id: "admin-users" },
   { label: "PHI Audit Log", id: "admin-audit" },
+  { label: "Signup Domains", id: "admin-domains" },
 ];
 
 interface SidebarProps {
