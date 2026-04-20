@@ -28,12 +28,7 @@
 //   ELATION_SANDBOX_REST_BASE  = https://sandbox.elationemr.com/api/2.0
 //   ELATION_SANDBOX_FHIR_BASE  = https://sandboxfhir.elationemr.com
 
-const corsHeaders = {
-  "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Headers":
-    "authorization, x-client-info, apikey, content-type",
-  "Access-Control-Allow-Methods": "POST, OPTIONS",
-};
+import { corsHeaders, requireStaff, logPhiAccess } from "../_shared/auth.ts";
 
 const DEFAULT_TOKEN_URL =
   "https://sandbox.elationemr.com/api/2.0/oauth2/token/";
@@ -149,6 +144,10 @@ Deno.serve(async (req) => {
     return new Response("ok", { headers: corsHeaders });
   }
 
+  // PHI gate: require signed-in staff/clinician/admin.
+  const auth = await requireStaff(req);
+  if (auth instanceof Response) return auth;
+
   try {
     const clientId = Deno.env.get("ELATION_SANDBOX_CLIENT_ID");
     const clientSecret = Deno.env.get("ELATION_SANDBOX_CLIENT_SECRET");
@@ -243,6 +242,16 @@ Deno.serve(async (req) => {
       if (typeof obj.next === "string") next = obj.next;
       if (typeof obj.previous === "string") previous = obj.previous;
     }
+
+
+    await logPhiAccess(auth, req, {
+      source: "elation-sandbox",
+      resource,
+      scope,
+      resource_id: body.id,
+      http_status: upstream.status,
+      row_count: total,
+    });
 
     return json(
       {

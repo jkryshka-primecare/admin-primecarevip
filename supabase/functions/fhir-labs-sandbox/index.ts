@@ -2,11 +2,7 @@
 // Returns mock lab order pipeline data shaped like a FHIR Bundle, then
 // flattens to the shape the LabOrders UI expects.
 
-const corsHeaders = {
-  "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Headers":
-    "authorization, x-client-info, apikey, content-type",
-};
+import { corsHeaders, requireStaff, logPhiAccess } from "../_shared/auth.ts";
 
 type LabStage =
   | "ordered"
@@ -231,6 +227,10 @@ Deno.serve(async (req) => {
     return new Response("ok", { headers: corsHeaders });
   }
 
+  // PHI gate.
+  const auth = await requireStaff(req);
+  if (auth instanceof Response) return auth;
+
   try {
     const url = new URL(req.url);
     const format = url.searchParams.get("format") ?? "ui";
@@ -281,6 +281,14 @@ Deno.serve(async (req) => {
       notified: 0,
     };
     for (const r of seed) counts[r.stage] += 1;
+
+    await logPhiAccess(auth, req, {
+      source: "fhir-labs-sandbox",
+      resource: "ServiceRequest",
+      scope: format,
+      http_status: 200,
+      row_count: resources.length,
+    });
 
     return new Response(
       JSON.stringify({

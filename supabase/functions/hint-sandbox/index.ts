@@ -15,12 +15,7 @@
 //   - "practice" (default) → uses HINT_PRACTICE_API_KEY
 //   - "partner"            → uses HINT_PARTNER_API_KEY
 
-const corsHeaders = {
-  "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Headers":
-    "authorization, x-client-info, apikey, content-type",
-  "Access-Control-Allow-Methods": "POST, OPTIONS",
-};
+import { corsHeaders, requireStaff, logPhiAccess } from "../_shared/auth.ts";
 
 const HINT_HOST = "https://api.staging.hint.com";
 const HINT_PRACTICE_BASE = `${HINT_HOST}/api/provider`;
@@ -59,6 +54,10 @@ Deno.serve(async (req) => {
   if (req.method === "OPTIONS") {
     return new Response("ok", { headers: corsHeaders });
   }
+
+  // PHI gate: require signed-in staff/clinician/admin.
+  const auth = await requireStaff(req);
+  if (auth instanceof Response) return auth;
 
   try {
     const practiceKey = Deno.env.get("HINT_PRACTICE_API_KEY");
@@ -154,6 +153,20 @@ Deno.serve(async (req) => {
       paginationHeaders["x-total"] ??
       paginationHeaders["total"];
     const total = totalRaw !== undefined ? Number(totalRaw) : undefined;
+
+    // Best-effort row count for audit
+    const rowCount = Array.isArray((parsed as { data?: unknown })?.data ?? parsed)
+      ? (Array.isArray(parsed) ? parsed.length : null)
+      : (Array.isArray(parsed) ? parsed.length : null);
+
+    await logPhiAccess(auth, req, {
+      source: "hint-sandbox",
+      resource,
+      scope,
+      resource_id: body.id,
+      http_status: upstream.status,
+      row_count: Number.isFinite(total) ? Number(total) : rowCount,
+    });
 
     return json(
       {

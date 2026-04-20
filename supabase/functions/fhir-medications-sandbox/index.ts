@@ -2,11 +2,7 @@
 // Returns mock medication/refill data shaped like a FHIR Bundle, then
 // flattens to the shape the MedicationStats UI expects.
 
-const corsHeaders = {
-  "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Headers":
-    "authorization, x-client-info, apikey, content-type",
-};
+import { corsHeaders, requireStaff, logPhiAccess } from "../_shared/auth.ts";
 
 type FhirMedicationRequest = {
   resourceType: "MedicationRequest";
@@ -83,6 +79,10 @@ Deno.serve(async (req) => {
     return new Response("ok", { headers: corsHeaders });
   }
 
+  // PHI gate.
+  const auth = await requireStaff(req);
+  if (auth instanceof Response) return auth;
+
   try {
     const url = new URL(req.url);
     const format = url.searchParams.get("format") ?? "ui"; // "ui" | "fhir"
@@ -134,6 +134,14 @@ Deno.serve(async (req) => {
         daysLeft,
         status: statusFor(daysLeft),
       };
+    });
+
+    await logPhiAccess(auth, req, {
+      source: "fhir-medications-sandbox",
+      resource: "MedicationRequest",
+      scope: format,
+      http_status: 200,
+      row_count: medications.length,
     });
 
     return new Response(
