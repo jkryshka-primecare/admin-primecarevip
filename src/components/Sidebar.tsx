@@ -14,7 +14,10 @@ const navItems = [
   { label: "Hint Sandbox", id: "hint" },
 ];
 
-const adminItems = [{ label: "Users", id: "admin-users" }];
+const adminItems = [
+  { label: "Users", id: "admin-users" },
+  { label: "PHI Audit Log", id: "admin-audit" },
+];
 
 interface SidebarProps {
   activeSection: string;
