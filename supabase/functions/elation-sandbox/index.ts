@@ -1,4 +1,11 @@
-// Elation Health sandbox proxy.
+// Elation Health sandbox proxy — READ-ONLY.
+//
+// IMPORTANT: This integration is analytics-only. We never push data back into
+// Elation or to patients. The function therefore:
+//   - Only issues GET requests to Elation
+//   - Rejects any client-supplied method other than GET
+//   - Excludes patient-facing/write resources (messages, letters, bills,
+//     DocumentReference, etc.) from the allow-list
 //
 // Mirrors the hint-sandbox pattern (resource/scope routing, pagination,
 // error handling) but adapts to Elation's auth model:
@@ -37,14 +44,14 @@ type Scope = "rest" | "fhir";
 type RequestBody = {
   resource?: string;
   id?: string;
-  method?: "GET" | "POST" | "PATCH" | "DELETE";
+  // `method` is intentionally ignored — we always issue GET to Elation.
+  method?: string;
   scope?: Scope;
   query?: Record<string, string | number | boolean>;
-  payload?: unknown;
 };
 
-// Resource allow-list — keep this tight to avoid the function being used as
-// an open-proxy. Elation publishes many more endpoints; add as needed.
+// Read-only allow-list. Resources that imply patient-facing writes
+// (messages, letters, bills, DocumentReference) are intentionally excluded.
 const ALLOWED_RESOURCES: Record<Scope, Set<string>> = {
   rest: new Set([
     "patients",
@@ -59,9 +66,6 @@ const ALLOWED_RESOURCES: Record<Scope, Set<string>> = {
     "lab_reports",
     "vitals",
     "visit_notes",
-    "letters",
-    "messages",
-    "bills",
     "insurances",
   ]),
   fhir: new Set([
@@ -73,8 +77,6 @@ const ALLOWED_RESOURCES: Record<Scope, Set<string>> = {
     "AllergyIntolerance",
     "MedicationRequest",
     "Observation",
-    "DiagnosticReport",
-    "DocumentReference",
     "Organization",
     "Location",
   ]),
@@ -171,13 +173,23 @@ Deno.serve(async (req) => {
     const body: RequestBody = req.method === "POST" ? await req.json() : {};
     const scope: Scope = body.scope === "fhir" ? "fhir" : "rest";
     const resource = body.resource ?? (scope === "fhir" ? "Patient" : "patients");
-    const method = body.method ?? "GET";
+
+    // Hard-enforce read-only. Any non-GET method from the client is rejected.
+    if (body.method && body.method.toUpperCase() !== "GET") {
+      return json(
+        {
+          error:
+            "elation-sandbox is read-only. Only GET requests to Elation are permitted (analytics pull only — no writes back to patients).",
+        },
+        405,
+      );
+    }
 
     const allowed = ALLOWED_RESOURCES[scope];
     if (!allowed.has(resource)) {
       return json(
         {
-          error: `Unsupported resource "${resource}" for scope "${scope}". Allowed: ${[...allowed].join(", ")}`,
+          error: `Unsupported resource "${resource}" for scope "${scope}". Allowed (read-only): ${[...allowed].join(", ")}`,
         },
         400,
       );
@@ -202,16 +214,11 @@ Deno.serve(async (req) => {
 
     const started = Date.now();
     const upstream = await fetch(url.toString(), {
-      method,
+      method: "GET",
       headers: {
         Accept: isFhir ? "application/fhir+json" : "application/json",
-        "Content-Type": isFhir ? "application/fhir+json" : "application/json",
         Authorization: `Bearer ${accessToken}`,
       },
-      body:
-        method === "GET" || method === "DELETE"
-          ? undefined
-          : JSON.stringify(body.payload ?? {}),
     });
 
     const elapsedMs = Date.now() - started;
