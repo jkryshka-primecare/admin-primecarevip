@@ -86,13 +86,6 @@ const MessagingAnalytics = () => {
       />
 
       {/* SLA Hero */}
-  const maxDaily = Math.max(...dailyTrend.map((d) => d.count), 1);
-
-  const open = (ctx: MessagingDrilldownContext) => setContext(ctx);
-
-  return (
-    <div className="space-y-8">
-      {/* SLA Hero */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         <button
           onClick={() => open({
