@@ -179,6 +179,7 @@ export default function UsersAdmin() {
               <RefreshCw className={loading ? "size-3.5 animate-spin" : "size-3.5"} />
               Refresh
             </Button>
+            <InviteUserDialog onInvited={load} />
           </div>
         </div>
 
