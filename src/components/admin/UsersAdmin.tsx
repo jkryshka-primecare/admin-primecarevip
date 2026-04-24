@@ -14,6 +14,7 @@ import {
 } from "@/components/ui/table";
 import { toast } from "sonner";
 import { Loader2, ShieldAlert, RefreshCw, Search } from "lucide-react";
+import InviteUserDialog from "./InviteUserDialog";
 
 type ProfileRow = {
   user_id: string;
@@ -178,6 +179,7 @@ export default function UsersAdmin() {
               <RefreshCw className={loading ? "size-3.5 animate-spin" : "size-3.5"} />
               Refresh
             </Button>
+            <InviteUserDialog onInvited={load} />
           </div>
         </div>
 
