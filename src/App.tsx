@@ -11,7 +11,11 @@ import PhiAcknowledgmentDialog from "@/components/auth/PhiAcknowledgmentDialog";
 import Auth from "./pages/Auth.tsx";
 import NotFound from "./pages/NotFound.tsx";
 import DashboardHome from "./pages/DashboardHome.tsx";
-import PharmacyHome from "./pages/pharmacy/PharmacyHome.tsx";
+import PharmacyLayout from "./pages/pharmacy/PharmacyLayout.tsx";
+import DispenseQueue from "./pages/pharmacy/DispenseQueue.tsx";
+import Inventory from "./pages/pharmacy/Inventory.tsx";
+import RefillRequests from "./pages/pharmacy/RefillRequests.tsx";
+import Adherence from "./pages/pharmacy/Adherence.tsx";
 import CareHome from "./pages/care/CareHome.tsx";
 import HrHome from "./pages/hr/HrHome.tsx";
 import InsightsHome from "./pages/insights/InsightsHome.tsx";
@@ -42,15 +46,21 @@ const App = () => (
                 }
               />
 
-              {/* Pharmacy */}
+              {/* Pharmacy — nested sub-tabs */}
               <Route
-                path="/pharmacy/*"
+                path="/pharmacy"
                 element={
                   <ProtectedRoute allowedRoles={["super_admin", "admin", "pharmacy"]}>
-                    <PharmacyHome />
+                    <PharmacyLayout />
                   </ProtectedRoute>
                 }
-              />
+              >
+                <Route index element={<DispenseQueue />} />
+                <Route path="dispense" element={<DispenseQueue />} />
+                <Route path="inventory" element={<Inventory />} />
+                <Route path="refills" element={<RefillRequests />} />
+                <Route path="adherence" element={<Adherence />} />
+              </Route>
 
               {/* Care Connect */}
               <Route
