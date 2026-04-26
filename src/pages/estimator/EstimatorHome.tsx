@@ -87,8 +87,8 @@ function EstimatorContent() {
             </div>
             <p className="text-sm font-medium text-foreground">Search to get started</p>
             <p className="text-xs text-muted-foreground mt-1 max-w-xs">
-              Enter a CPT code, service name, or ICD-10 code (3+ characters), or search by
-              provider name to find pricing.
+              Enter a CPT code, service name, or ICD-10 code (3+ characters), search by
+              provider name, or filter by NHSN procedure category to find pricing.
             </p>
           </div>
         ) : servicesLoading ? (
