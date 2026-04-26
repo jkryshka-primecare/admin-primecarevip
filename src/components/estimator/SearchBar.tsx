@@ -21,6 +21,9 @@ interface SearchBarProps {
   onLocationChange: (value: string) => void;
   providerSearch: string;
   onProviderSearchChange: (value: string) => void;
+  nhsnCategory: string;
+  onNhsnCategoryChange: (value: string) => void;
+  nhsnCategories: string[];
 }
 
 export function SearchBar({
