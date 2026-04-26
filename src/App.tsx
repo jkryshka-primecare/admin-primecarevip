@@ -23,6 +23,7 @@ import HrHome from "./pages/hr/HrHome.tsx";
 import InsightsHome from "./pages/insights/InsightsHome.tsx";
 import PatientsHome from "./pages/patients/PatientsHome.tsx";
 import AdminHome from "./pages/admin/AdminHome.tsx";
+import EstimatorHome from "./pages/estimator/EstimatorHome.tsx";
 
 const queryClient = new QueryClient();
 
@@ -102,6 +103,16 @@ const App = () => (
                 element={
                   <ProtectedRoute allowedRoles={["super_admin", "admin", "pharmacy", "clinical"]}>
                     <PatientsHome />
+                  </ProtectedRoute>
+                }
+              />
+
+              {/* Cost Estimator */}
+              <Route
+                path="/estimator/*"
+                element={
+                  <ProtectedRoute allowedRoles={["super_admin", "admin", "pharmacy", "clinical", "billing"]}>
+                    <EstimatorHome />
                   </ProtectedRoute>
                 }
               />
