@@ -3,6 +3,7 @@ import { CheckCircle2, Loader2, AlertCircle, Clock } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
 
 type Status = "checking" | "connected" | "awaiting" | "error";
+type Env = "live" | "sandbox";
 
 type Probe = {
   status: Status;
@@ -12,35 +13,29 @@ type Probe = {
 };
 
 const ElationStatusCard = () => {
+  const [env, setEnv] = useState<Env>("sandbox");
   const [probe, setProbe] = useState<Probe>({ status: "checking" });
 
   useEffect(() => {
     let cancelled = false;
+    setProbe({ status: "checking" });
     const start = performance.now();
-    // Use a tiny ping payload — the function will short-circuit at the
-    // credentials check (503) without ever hitting Elation upstream.
+    const fnName = env === "live" ? "elation-live" : "elation-sandbox";
+
     supabase.functions
-      .invoke("elation-sandbox", {
+      .invoke(fnName, {
         body: { resource: "patients", scope: "rest", method: "GET" },
       })
       .then(({ data, error }) => {
         if (cancelled) return;
         const elapsedMs = Math.round(performance.now() - start);
 
-        // The Supabase JS client puts non-2xx responses on `error` (a
-        // FunctionsHttpError) but the original JSON body is still in `data`.
-        // Treat 503 + `configured: false` as the "awaiting credentials"
-        // state, anything 2xx as connected, everything else as an error.
         const body = (data ?? null) as
           | { configured?: boolean; status?: number; error?: string }
           | null;
 
         if (!error && body && body.configured !== false) {
-          setProbe({
-            status: "connected",
-            httpStatus: 200,
-            elapsedMs,
-          });
+          setProbe({ status: "connected", httpStatus: 200, elapsedMs });
           return;
         }
 
@@ -64,9 +59,10 @@ const ElationStatusCard = () => {
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [env]);
 
   const cfg = STATUS_CONFIG[probe.status];
+  const envLabel = env === "live" ? "Elation Live · Read-Only" : "Elation Sandbox · Read-Only";
 
   return (
     <div
@@ -80,7 +76,7 @@ const ElationStatusCard = () => {
       <div className="flex-1 min-w-0">
         <div className="flex items-center gap-2 flex-wrap">
           <span className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground">
-            Elation Sandbox · Read-Only
+            {envLabel}
           </span>
           <span
             className={`px-1.5 py-0.5 rounded text-[9px] font-bold uppercase tracking-wider border ${cfg.badgeClass}`}
@@ -101,6 +97,34 @@ const ElationStatusCard = () => {
         <p className="text-xs text-muted-foreground mt-0.5 truncate">
           {cfg.description(probe.message)}
         </p>
+      </div>
+
+      {/* Env toggle — small segmented control */}
+      <div className="flex items-center rounded border border-border overflow-hidden shrink-0">
+        <button
+          type="button"
+          onClick={() => setEnv("sandbox")}
+          className={`px-2 py-1 text-[10px] font-bold uppercase tracking-wider transition-colors ${
+            env === "sandbox"
+              ? "bg-primary text-primary-foreground"
+              : "bg-background text-muted-foreground hover:bg-secondary"
+          }`}
+          aria-pressed={env === "sandbox"}
+        >
+          Sandbox
+        </button>
+        <button
+          type="button"
+          onClick={() => setEnv("live")}
+          className={`px-2 py-1 text-[10px] font-bold uppercase tracking-wider transition-colors ${
+            env === "live"
+              ? "bg-primary text-primary-foreground"
+              : "bg-background text-muted-foreground hover:bg-secondary"
+          }`}
+          aria-pressed={env === "live"}
+        >
+          Live
+        </button>
       </div>
     </div>
   );
@@ -125,7 +149,7 @@ const STATUS_CONFIG: Record<
     bgClass: "bg-secondary/30",
     borderClass: "border-border",
     badgeClass: "bg-secondary text-muted-foreground border-border",
-    description: () => "Pinging elation-sandbox edge function…",
+    description: () => "Pinging Elation edge function…",
   },
   connected: {
     label: "Connected",
@@ -133,10 +157,9 @@ const STATUS_CONFIG: Record<
     iconClass: "text-success",
     bgClass: "bg-success/5",
     borderClass: "border-success/30",
-    badgeClass:
-      "bg-success/15 text-success border-success/30",
+    badgeClass: "bg-success/15 text-success border-success/30",
     description: () =>
-      "Elation OAuth credentials are configured. The proxy is reaching Elation's sandbox.",
+      "Elation OAuth credentials are configured. The proxy is reaching Elation.",
   },
   awaiting: {
     label: "Awaiting Credentials",
@@ -145,8 +168,8 @@ const STATUS_CONFIG: Record<
     bgClass: "bg-accent/5",
     borderClass: "border-accent/30",
     badgeClass: "bg-accent/15 text-accent border-accent/30",
-    description: () =>
-      "Edge function deployed. Add ELATION_SANDBOX_CLIENT_ID and ELATION_SANDBOX_CLIENT_SECRET secrets once Elation provisions sandbox access.",
+    description: (msg) =>
+      msg ?? "Add the Elation OAuth credentials as Cloud secrets to enable this environment.",
   },
   error: {
     label: "Error",
