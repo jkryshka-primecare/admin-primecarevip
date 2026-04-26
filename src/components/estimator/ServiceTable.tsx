@@ -339,6 +339,19 @@ function SortableServiceCard({
       <div className="px-4 py-2.5 border-b border-border bg-muted/30">
         <div className="flex items-baseline gap-3 flex-wrap">
           <h3 className="text-sm font-semibold text-foreground font-serif">{service.name}</h3>
+          {service.cpt_code && (
+            <span className="inline-flex px-1.5 py-0.5 rounded bg-primary/10 text-[11px] font-mono text-primary tabular-nums">
+              CPT {service.cpt_code}
+            </span>
+          )}
+          {service.nhsn_category && (
+            <span
+              className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-accent/15 text-[11px] font-mono text-accent"
+              title="NHSN-approved operative procedure"
+            >
+              ✓ NHSN · {service.nhsn_category}
+            </span>
+          )}
           {service.id.startsWith("lab-") && (
             <span className="inline-flex px-1.5 py-0.5 rounded bg-muted text-[11px] font-mono text-muted-foreground">
               #{service.id.replace("lab-", "")}

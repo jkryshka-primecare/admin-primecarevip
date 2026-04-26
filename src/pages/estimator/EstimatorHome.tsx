@@ -8,7 +8,7 @@ import { AuditLogPanel } from "@/components/estimator/AuditLogPanel";
 import { EstimatePanel } from "@/components/estimator/EstimatePanel";
 import { ImportPricingDialog } from "@/components/estimator/ImportPricingDialog";
 import { EstimateProvider, useEstimate } from "@/contexts/EstimateContext";
-import { useServices, useProviders } from "@/hooks/useEstimatorDb";
+import { useServices, useProviders, useNhsnCategories } from "@/hooks/useEstimatorDb";
 import { useAuth } from "@/hooks/useAuth";
 
 function EstimatorContent() {
@@ -16,17 +16,21 @@ function EstimatorContent() {
   const [searchQuery, setSearchQuery] = useState("");
   const [locationFilter, setLocationFilter] = useState("");
   const [providerSearch, setProviderSearch] = useState("");
+  const [nhsnCategory, setNhsnCategory] = useState("");
   const { items, clearAll } = useEstimate();
   const { isAdmin } = useAuth();
 
   const hasProviderSearch = providerSearch.trim().length > 0;
-  const hasSearch = searchQuery.trim().length >= 3 || hasProviderSearch;
+  const hasNhsnFilter = nhsnCategory.trim().length > 0;
+  const hasSearch = searchQuery.trim().length >= 3 || hasProviderSearch || hasNhsnFilter;
   const { data: filteredServices = [], isLoading: servicesLoading } = useServices(
     activeSpecialty,
     searchQuery,
-    providerSearch
+    providerSearch,
+    nhsnCategory
   );
   const { data: providerList = [] } = useProviders(activeSpecialty, locationFilter);
+  const { data: nhsnCategories = [] } = useNhsnCategories();
 
   return (
     <div className="flex gap-6 items-start">
@@ -70,6 +74,9 @@ function EstimatorContent() {
             onLocationChange={setLocationFilter}
             providerSearch={providerSearch}
             onProviderSearchChange={setProviderSearch}
+            nhsnCategory={nhsnCategory}
+            onNhsnCategoryChange={setNhsnCategory}
+            nhsnCategories={nhsnCategories}
           />
         </div>
 
@@ -80,8 +87,8 @@ function EstimatorContent() {
             </div>
             <p className="text-sm font-medium text-foreground">Search to get started</p>
             <p className="text-xs text-muted-foreground mt-1 max-w-xs">
-              Enter a CPT code, service name, or ICD-10 code (3+ characters), or search by
-              provider name to find pricing.
+              Enter a CPT code, service name, or ICD-10 code (3+ characters), search by
+              provider name, or filter by NHSN procedure category to find pricing.
             </p>
           </div>
         ) : servicesLoading ? (

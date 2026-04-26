@@ -42,18 +42,36 @@ export function useProviders(specialtyId: string, locationFilter?: string) {
   });
 }
 
+export function useNhsnCategories() {
+  return useQuery({
+    queryKey: ["estimator", "nhsn-categories"],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from("cpt_codes")
+        .select("category")
+        .order("category");
+      if (error) throw error;
+      const unique = Array.from(new Set((data ?? []).map((r) => r.category)));
+      return unique;
+    },
+  });
+}
+
 export function useServices(
   specialtyId: string,
   searchQuery: string,
-  providerSearch: string = ""
+  providerSearch: string = "",
+  nhsnCategory: string = ""
 ) {
   const trimmed = searchQuery.trim();
   const provTrimmed = providerSearch.trim();
+  const nhsnTrimmed = nhsnCategory.trim();
   const hasProviderFilter = provTrimmed.length > 0;
-  const enabled = trimmed.length >= 3 || hasProviderFilter;
+  const hasNhsnFilter = nhsnTrimmed.length > 0;
+  const enabled = trimmed.length >= 3 || hasProviderFilter || hasNhsnFilter;
 
   return useQuery({
-    queryKey: ["estimator", "services", specialtyId, trimmed, provTrimmed],
+    queryKey: ["estimator", "services", specialtyId, trimmed, provTrimmed, nhsnTrimmed],
     enabled,
     queryFn: async () => {
       let providerIds: string[] | null = null;
@@ -82,10 +100,11 @@ export function useServices(
       let query = supabase.from("services").select("*");
       if (specialtyId !== "all") query = query.eq("specialty_id", specialtyId);
       if (serviceIdFilter) query = query.in("id", serviceIdFilter.slice(0, 200));
+      if (hasNhsnFilter) query = query.eq("nhsn_category", nhsnTrimmed);
 
       if (trimmed.length >= 3) {
         const q = trimmed.toLowerCase();
-        query = query.or(`name.ilike.%${q}%,description.ilike.%${q}%,id.ilike.%${q}%`);
+        query = query.or(`name.ilike.%${q}%,description.ilike.%${q}%,id.ilike.%${q}%,cpt_code.ilike.%${q.toUpperCase()}%`);
       }
 
       const { data, error } = await query.order("name").limit(50);
@@ -96,6 +115,7 @@ export function useServices(
         let icdQuery = supabase.from("services").select("*").contains("icd10_codes", [q]);
         if (specialtyId !== "all") icdQuery = icdQuery.eq("specialty_id", specialtyId);
         if (serviceIdFilter) icdQuery = icdQuery.in("id", serviceIdFilter.slice(0, 200));
+        if (hasNhsnFilter) icdQuery = icdQuery.eq("nhsn_category", nhsnTrimmed);
         const { data: icdData, error: icdError } = await icdQuery.limit(50);
         if (icdError) throw icdError;
 
