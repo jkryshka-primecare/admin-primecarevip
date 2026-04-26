@@ -74,6 +74,9 @@ function EstimatorContent() {
             onLocationChange={setLocationFilter}
             providerSearch={providerSearch}
             onProviderSearchChange={setProviderSearch}
+            nhsnCategory={nhsnCategory}
+            onNhsnCategoryChange={setNhsnCategory}
+            nhsnCategories={nhsnCategories}
           />
         </div>
 
