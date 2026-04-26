@@ -100,10 +100,11 @@ export function useServices(
       let query = supabase.from("services").select("*");
       if (specialtyId !== "all") query = query.eq("specialty_id", specialtyId);
       if (serviceIdFilter) query = query.in("id", serviceIdFilter.slice(0, 200));
+      if (hasNhsnFilter) query = query.eq("nhsn_category", nhsnTrimmed);
 
       if (trimmed.length >= 3) {
         const q = trimmed.toLowerCase();
-        query = query.or(`name.ilike.%${q}%,description.ilike.%${q}%,id.ilike.%${q}%`);
+        query = query.or(`name.ilike.%${q}%,description.ilike.%${q}%,id.ilike.%${q}%,cpt_code.ilike.%${q.toUpperCase()}%`);
       }
 
       const { data, error } = await query.order("name").limit(50);
@@ -114,6 +115,7 @@ export function useServices(
         let icdQuery = supabase.from("services").select("*").contains("icd10_codes", [q]);
         if (specialtyId !== "all") icdQuery = icdQuery.eq("specialty_id", specialtyId);
         if (serviceIdFilter) icdQuery = icdQuery.in("id", serviceIdFilter.slice(0, 200));
+        if (hasNhsnFilter) icdQuery = icdQuery.eq("nhsn_category", nhsnTrimmed);
         const { data: icdData, error: icdError } = await icdQuery.limit(50);
         if (icdError) throw icdError;
 
