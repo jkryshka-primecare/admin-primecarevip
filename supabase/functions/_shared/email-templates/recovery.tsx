@@ -8,10 +8,15 @@ import {
   Container,
   Head,
   Heading,
+  Hr,
   Html,
+  Img,
   Preview,
+  Section,
   Text,
 } from 'npm:@react-email/components@0.0.22'
+
+import { BRAND, styles } from './_brand.ts'
 
 interface RecoveryEmailProps {
   siteName: string
@@ -24,48 +29,42 @@ export const RecoveryEmail = ({
 }: RecoveryEmailProps) => (
   <Html lang="en" dir="ltr">
     <Head />
-    <Preview>Reset your password for {siteName}</Preview>
-    <Body style={main}>
-      <Container style={container}>
-        <Heading style={h1}>Reset your password</Heading>
-        <Text style={text}>
-          We received a request to reset your password for {siteName}. Click
-          the button below to choose a new password.
-        </Text>
-        <Button style={button} href={confirmationUrl}>
-          Reset Password
-        </Button>
-        <Text style={footer}>
-          If you didn't request a password reset, you can safely ignore this
-          email. Your password will not be changed.
-        </Text>
+    <Preview>Reset your {siteName} password</Preview>
+    <Body style={styles.main}>
+      <Container style={styles.container}>
+        <Section style={styles.header}>
+          <Img src={BRAND.logoUrl} alt="Prime Care VIP" style={styles.logo} />
+          <Text style={styles.brandLine}>Prime Care VIP · Admin</Text>
+        </Section>
+        <Section style={styles.body}>
+          <Heading style={styles.h1}>Reset your password</Heading>
+          <Text style={styles.text}>
+            We received a request to reset the password on your {siteName}{' '}
+            account. Click below to choose a new one.
+          </Text>
+          <Section style={styles.buttonWrap}>
+            <Button style={styles.button} href={confirmationUrl}>
+              Reset password
+            </Button>
+          </Section>
+          <Text style={styles.textMuted}>
+            For your security, this link expires shortly. After resetting,
+            you'll need to sign in again on every device.
+          </Text>
+          <Hr style={styles.divider} />
+          <Text style={styles.footer}>
+            If you didn't request a password reset, you can safely ignore this
+            email — your password will not change.
+          </Text>
+        </Section>
+        <Section style={styles.footerSection}>
+          <Text style={styles.footer}>
+            Prime Care VIP · Concierge primary care for Texas
+          </Text>
+        </Section>
       </Container>
     </Body>
   </Html>
 )
 
 export default RecoveryEmail
-
-const main = { backgroundColor: '#ffffff', fontFamily: 'Arial, sans-serif' }
-const container = { padding: '20px 25px' }
-const h1 = {
-  fontSize: '22px',
-  fontWeight: 'bold' as const,
-  color: '#000000',
-  margin: '0 0 20px',
-}
-const text = {
-  fontSize: '14px',
-  color: '#55575d',
-  lineHeight: '1.5',
-  margin: '0 0 25px',
-}
-const button = {
-  backgroundColor: '#000000',
-  color: '#ffffff',
-  fontSize: '14px',
-  borderRadius: '8px',
-  padding: '12px 20px',
-  textDecoration: 'none',
-}
-const footer = { fontSize: '12px', color: '#999999', margin: '30px 0 0' }
