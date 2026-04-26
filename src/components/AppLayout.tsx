@@ -10,6 +10,7 @@ import {
   Settings,
   LogOut,
   ShieldCheck,
+  Calculator,
 } from "lucide-react";
 import {
   Sidebar,
@@ -48,6 +49,7 @@ const MODULES: ModuleItem[] = [
   { title: "HR", url: "/hr", icon: Users2, roles: ["super_admin", "admin", "hr", "billing"] },
   { title: "Insights", url: "/insights", icon: BarChart3, roles: ["super_admin", "admin", "clinical"] },
   { title: "Patients", url: "/patients", icon: UserSquare2, roles: ["super_admin", "admin", "pharmacy", "clinical"] },
+  { title: "Cost Estimator", url: "/estimator", icon: Calculator, roles: ["super_admin", "admin", "pharmacy", "clinical", "billing"] },
   { title: "Admin", url: "/admin", icon: Settings, roles: ["super_admin", "admin"] },
 ];
 
