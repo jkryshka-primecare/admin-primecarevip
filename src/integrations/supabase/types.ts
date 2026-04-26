@@ -14,27 +14,45 @@ export type Database = {
   }
   public: {
     Tables: {
-      allowed_signup_domains: {
+      invitations: {
         Row: {
           created_at: string
           created_by: string | null
-          domain: string
+          email: string
+          first_name: string
           id: string
-          notes: string | null
+          last_name: string
+          role: Database["public"]["Enums"]["app_role"]
+          status: string
+          token: string
+          used_at: string | null
+          used_by: string | null
         }
         Insert: {
           created_at?: string
           created_by?: string | null
-          domain: string
+          email: string
+          first_name: string
           id?: string
-          notes?: string | null
+          last_name: string
+          role?: Database["public"]["Enums"]["app_role"]
+          status?: string
+          token?: string
+          used_at?: string | null
+          used_by?: string | null
         }
         Update: {
           created_at?: string
           created_by?: string | null
-          domain?: string
+          email?: string
+          first_name?: string
           id?: string
-          notes?: string | null
+          last_name?: string
+          role?: Database["public"]["Enums"]["app_role"]
+          status?: string
+          token?: string
+          used_at?: string | null
+          used_by?: string | null
         }
         Relationships: []
       }
@@ -152,7 +170,15 @@ export type Database = {
       is_staff: { Args: { _user_id: string }; Returns: boolean }
     }
     Enums: {
-      app_role: "admin" | "clinician" | "staff" | "pending"
+      app_role:
+        | "super_admin"
+        | "admin"
+        | "pharmacy"
+        | "clinical"
+        | "hr"
+        | "billing"
+        | "staff"
+        | "pending"
     }
     CompositeTypes: {
       [_ in never]: never
@@ -280,7 +306,16 @@ export type CompositeTypes<
 export const Constants = {
   public: {
     Enums: {
-      app_role: ["admin", "clinician", "staff", "pending"],
+      app_role: [
+        "super_admin",
+        "admin",
+        "pharmacy",
+        "clinical",
+        "hr",
+        "billing",
+        "staff",
+        "pending",
+      ],
     },
   },
 } as const

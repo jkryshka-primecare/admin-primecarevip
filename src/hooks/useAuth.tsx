@@ -1,14 +1,32 @@
-import { createContext, useContext, useEffect, useState, type ReactNode } from "react";
+import { createContext, useContext, useEffect, useMemo, useState, type ReactNode } from "react";
 import type { Session, User } from "@supabase/supabase-js";
 import { supabase } from "@/integrations/supabase/client";
 
-export type AppRole = "admin" | "clinician" | "staff" | "pending";
+export type AppRole =
+  | "super_admin"
+  | "admin"
+  | "pharmacy"
+  | "clinical"
+  | "hr"
+  | "billing"
+  | "staff"
+  | "pending";
+
+/**
+ * Roles that are allowed to view PHI dashboards (matches the server-side
+ * is_staff() definition: super_admin, admin, clinical, pharmacy, billing).
+ * HR and the generic "staff" role intentionally do NOT count here.
+ */
+const PHI_ROLES: AppRole[] = ["super_admin", "admin", "clinical", "pharmacy", "billing"];
 
 type AuthContextValue = {
   session: Session | null;
   user: User | null;
   roles: AppRole[];
-  isStaff: boolean;        // any of admin/clinician/staff
+  isStaff: boolean;          // can hit PHI edge functions
+  isAdmin: boolean;          // admin or super_admin
+  isSuperAdmin: boolean;
+  hasAnyRole: (allowed: AppRole[]) => boolean;
   phiAcknowledgedAt: string | null;
   loading: boolean;
   signOut: () => Promise<void>;
@@ -34,12 +52,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }
 
   useEffect(() => {
-    // 1. Subscribe FIRST to avoid missing the initial event
     const { data: sub } = supabase.auth.onAuthStateChange((_event, newSession) => {
       setSession(newSession);
       setUser(newSession?.user ?? null);
       if (newSession?.user) {
-        // defer to avoid deadlock with onAuthStateChange callback
         setTimeout(() => loadProfile(newSession.user.id), 0);
       } else {
         setRoles([]);
@@ -47,7 +63,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       }
     });
 
-    // 2. Then load existing session
     supabase.auth.getSession().then(({ data: { session: existing } }) => {
       setSession(existing);
       setUser(existing?.user ?? null);
@@ -61,28 +76,30 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     return () => sub.subscription.unsubscribe();
   }, []);
 
-  const isStaff = roles.some((r) => r === "admin" || r === "clinician" || r === "staff");
+  const value = useMemo<AuthContextValue>(() => {
+    const isAdmin = roles.includes("admin") || roles.includes("super_admin");
+    const isSuperAdmin = roles.includes("super_admin");
+    const isStaff = roles.some((r) => PHI_ROLES.includes(r));
+    return {
+      session,
+      user,
+      roles,
+      isStaff,
+      isAdmin,
+      isSuperAdmin,
+      hasAnyRole: (allowed) => roles.some((r) => allowed.includes(r)),
+      phiAcknowledgedAt,
+      loading,
+      signOut: async () => {
+        await supabase.auth.signOut();
+      },
+      refreshProfile: async () => {
+        if (user) await loadProfile(user.id);
+      },
+    };
+  }, [session, user, roles, phiAcknowledgedAt, loading]);
 
-  return (
-    <AuthContext.Provider
-      value={{
-        session,
-        user,
-        roles,
-        isStaff,
-        phiAcknowledgedAt,
-        loading,
-        signOut: async () => {
-          await supabase.auth.signOut();
-        },
-        refreshProfile: async () => {
-          if (user) await loadProfile(user.id);
-        },
-      }}
-    >
-      {children}
-    </AuthContext.Provider>
-  );
+  return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
 }
 
 export function useAuth() {
