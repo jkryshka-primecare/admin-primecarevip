@@ -5,3 +5,9 @@ project_id = "imewkweatgvqledptdna"
     verify_jwt = false
   [functions.process-email-queue]
     verify_jwt = true
+  [functions.import-pricing]
+    verify_jwt = false
+  [functions.peek-csv]
+    verify_jwt = false
+  [functions.peek-json]
+    verify_jwt = false
