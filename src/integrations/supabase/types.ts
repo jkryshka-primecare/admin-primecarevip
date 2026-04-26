@@ -101,6 +101,95 @@ export type Database = {
         }
         Relationships: []
       }
+      icd10_codes: {
+        Row: {
+          code: string
+          created_at: string
+          long_description: string | null
+          short_description: string
+        }
+        Insert: {
+          code: string
+          created_at?: string
+          long_description?: string | null
+          short_description: string
+        }
+        Update: {
+          code?: string
+          created_at?: string
+          long_description?: string | null
+          short_description?: string
+        }
+        Relationships: []
+      }
+      import_jobs: {
+        Row: {
+          byte_offset: number
+          created_at: string
+          created_by: string | null
+          error_message: string | null
+          hospital_address: string | null
+          hospital_city: string | null
+          hospital_name: string | null
+          hospital_state: string | null
+          hospital_zip: string | null
+          id: string
+          provider_id: string | null
+          rows_imported: number
+          status: string
+          total_bytes: number | null
+          total_rows: number | null
+          updated_at: string
+          url: string
+        }
+        Insert: {
+          byte_offset?: number
+          created_at?: string
+          created_by?: string | null
+          error_message?: string | null
+          hospital_address?: string | null
+          hospital_city?: string | null
+          hospital_name?: string | null
+          hospital_state?: string | null
+          hospital_zip?: string | null
+          id?: string
+          provider_id?: string | null
+          rows_imported?: number
+          status?: string
+          total_bytes?: number | null
+          total_rows?: number | null
+          updated_at?: string
+          url: string
+        }
+        Update: {
+          byte_offset?: number
+          created_at?: string
+          created_by?: string | null
+          error_message?: string | null
+          hospital_address?: string | null
+          hospital_city?: string | null
+          hospital_name?: string | null
+          hospital_state?: string | null
+          hospital_zip?: string | null
+          id?: string
+          provider_id?: string | null
+          rows_imported?: number
+          status?: string
+          total_bytes?: number | null
+          total_rows?: number | null
+          updated_at?: string
+          url?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "import_jobs_provider_id_fkey"
+            columns: ["provider_id"]
+            isOneToOne: false
+            referencedRelation: "providers"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       invitations: {
         Row: {
           created_at: string
@@ -188,6 +277,45 @@ export type Database = {
         }
         Relationships: []
       }
+      price_audit_log: {
+        Row: {
+          changed_at: string
+          changed_by: string | null
+          changed_by_name: string | null
+          component: string
+          id: string
+          new_price: number
+          old_price: number
+          provider_id: string
+          service_id: string
+          service_price_id: string
+        }
+        Insert: {
+          changed_at?: string
+          changed_by?: string | null
+          changed_by_name?: string | null
+          component: string
+          id?: string
+          new_price: number
+          old_price: number
+          provider_id: string
+          service_id: string
+          service_price_id: string
+        }
+        Update: {
+          changed_at?: string
+          changed_by?: string | null
+          changed_by_name?: string | null
+          component?: string
+          id?: string
+          new_price?: number
+          old_price?: number
+          provider_id?: string
+          service_id?: string
+          service_price_id?: string
+        }
+        Relationships: []
+      }
       profiles: {
         Row: {
           created_at: string
@@ -215,6 +343,166 @@ export type Database = {
           phi_acknowledged_at?: string | null
           updated_at?: string
           user_id?: string
+        }
+        Relationships: []
+      }
+      providers: {
+        Row: {
+          address: string | null
+          city: string
+          created_at: string
+          distance: number | null
+          id: string
+          last_price_update: string | null
+          name: string
+          phone: string
+          specialty_id: string
+          state: string
+          updated_at: string
+          zip: string | null
+        }
+        Insert: {
+          address?: string | null
+          city: string
+          created_at?: string
+          distance?: number | null
+          id?: string
+          last_price_update?: string | null
+          name: string
+          phone: string
+          specialty_id: string
+          state?: string
+          updated_at?: string
+          zip?: string | null
+        }
+        Update: {
+          address?: string | null
+          city?: string
+          created_at?: string
+          distance?: number | null
+          id?: string
+          last_price_update?: string | null
+          name?: string
+          phone?: string
+          specialty_id?: string
+          state?: string
+          updated_at?: string
+          zip?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "providers_specialty_id_fkey"
+            columns: ["specialty_id"]
+            isOneToOne: false
+            referencedRelation: "specialties"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      service_prices: {
+        Row: {
+          component: string
+          created_at: string
+          id: string
+          price: number
+          provider_id: string
+          service_id: string
+          updated_at: string
+        }
+        Insert: {
+          component: string
+          created_at?: string
+          id?: string
+          price: number
+          provider_id: string
+          service_id: string
+          updated_at?: string
+        }
+        Update: {
+          component?: string
+          created_at?: string
+          id?: string
+          price?: number
+          provider_id?: string
+          service_id?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "service_prices_provider_id_fkey"
+            columns: ["provider_id"]
+            isOneToOne: false
+            referencedRelation: "providers"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "service_prices_service_id_fkey"
+            columns: ["service_id"]
+            isOneToOne: false
+            referencedRelation: "services"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      services: {
+        Row: {
+          created_at: string
+          description: string | null
+          icd10_codes: string[]
+          id: string
+          name: string
+          specialty_id: string
+          updated_at: string
+        }
+        Insert: {
+          created_at?: string
+          description?: string | null
+          icd10_codes?: string[]
+          id: string
+          name: string
+          specialty_id: string
+          updated_at?: string
+        }
+        Update: {
+          created_at?: string
+          description?: string | null
+          icd10_codes?: string[]
+          id?: string
+          name?: string
+          specialty_id?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "services_specialty_id_fkey"
+            columns: ["specialty_id"]
+            isOneToOne: false
+            referencedRelation: "specialties"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      specialties: {
+        Row: {
+          created_at: string
+          icon: string
+          id: string
+          name: string
+          updated_at: string
+        }
+        Insert: {
+          created_at?: string
+          icon?: string
+          id: string
+          name: string
+          updated_at?: string
+        }
+        Update: {
+          created_at?: string
+          icon?: string
+          id?: string
+          name?: string
+          updated_at?: string
         }
         Relationships: []
       }
