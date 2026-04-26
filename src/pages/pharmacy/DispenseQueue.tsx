@@ -61,6 +61,36 @@ export default function DispenseQueue() {
 
   return (
     <div className="space-y-6">
+      <div
+        className={`flex items-center gap-3 px-4 py-2.5 rounded-lg border text-xs ${
+          status === "loading"
+            ? "bg-muted/40 border-border text-muted-foreground"
+            : source === "elation"
+            ? "bg-success/5 border-success/30 text-success"
+            : "bg-accent/5 border-accent/30 text-accent"
+        }`}
+      >
+        {status === "loading" ? (
+          <Loader2 className="h-3.5 w-3.5 animate-spin" />
+        ) : source === "elation" ? (
+          <Cloud className="h-3.5 w-3.5" />
+        ) : (
+          <Database className="h-3.5 w-3.5" />
+        )}
+        <span className="text-[10px] font-bold uppercase tracking-widest">
+          {status === "loading"
+            ? "Connecting to Elation Sandbox…"
+            : source === "elation"
+            ? "Live · Elation Sandbox (Read-Only)"
+            : "Demo Data · Elation credentials not configured"}
+        </span>
+        {message && status !== "loading" && (
+          <span className="text-[10px] font-mono text-muted-foreground truncate">
+            {message}
+          </span>
+        )}
+      </div>
+
       <section className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
         {queueStats.map((s) => (
           <div
