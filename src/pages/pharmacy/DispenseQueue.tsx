@@ -1,14 +1,13 @@
 import { useState } from "react";
-import { Pill, User, AlertTriangle, Check, ClipboardList, Clock, CheckCircle2 } from "lucide-react";
+import { Pill, User, AlertTriangle, Check, ClipboardList, Clock, CheckCircle2, Loader2, Database, Cloud } from "lucide-react";
 import { motion } from "framer-motion";
 import {
-  medications,
-  patients,
   dispenseRecords as seedRecords,
   type DispenseRecord,
 } from "./mockData";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { useElationPharmacy } from "@/hooks/useElationPharmacy";
 
 const queueStats = [
   { label: "In Verification", value: "14", icon: Clock, tone: "accent" },
@@ -30,6 +29,7 @@ export default function DispenseQueue() {
   const [selectedMed, setSelectedMed] = useState<string | null>(null);
   const [qty, setQty] = useState("1");
   const [dispensed, setDispensed] = useState<DispenseRecord[]>(seedRecords);
+  const { patients, medications, source, status, message } = useElationPharmacy();
 
   const matchedPatients =
     patientSearch.length > 1
