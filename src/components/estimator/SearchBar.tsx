@@ -1,4 +1,4 @@
-import { Search, MapPin, Building2, X, Check, ChevronsUpDown } from "lucide-react";
+import { Search, MapPin, Building2, X, Check, ChevronsUpDown, ShieldCheck } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
