@@ -14,6 +14,8 @@ import DashboardHome from "./pages/DashboardHome.tsx";
 import PharmacyLayout from "./pages/pharmacy/PharmacyLayout.tsx";
 import DispenseQueue from "./pages/pharmacy/DispenseQueue.tsx";
 import Inventory from "./pages/pharmacy/Inventory.tsx";
+import Scanner from "./pages/pharmacy/Scanner.tsx";
+import PharmacyPatients from "./pages/pharmacy/Patients.tsx";
 import RefillRequests from "./pages/pharmacy/RefillRequests.tsx";
 import Adherence from "./pages/pharmacy/Adherence.tsx";
 import CareHome from "./pages/care/CareHome.tsx";
@@ -57,7 +59,9 @@ const App = () => (
               >
                 <Route index element={<DispenseQueue />} />
                 <Route path="dispense" element={<DispenseQueue />} />
+                <Route path="scanner" element={<Scanner />} />
                 <Route path="inventory" element={<Inventory />} />
+                <Route path="patients" element={<PharmacyPatients />} />
                 <Route path="refills" element={<RefillRequests />} />
                 <Route path="adherence" element={<Adherence />} />
               </Route>

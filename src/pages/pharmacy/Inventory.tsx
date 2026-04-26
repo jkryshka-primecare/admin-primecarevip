@@ -1,54 +1,161 @@
-import { Package, AlertTriangle, ShieldCheck, TrendingDown } from "lucide-react";
-
-const stats = [
-  { label: "SKUs On Hand", value: "1,284", icon: Package, tone: "primary" },
-  { label: "Expiring < 90 days", value: "23", icon: AlertTriangle, tone: "warning" },
-  { label: "Controlled Substances", value: "47", icon: ShieldCheck, tone: "destructive" },
-  { label: "Below Reorder Point", value: "12", icon: TrendingDown, tone: "accent" },
-] as const;
-
-const toneClass: Record<string, string> = {
-  accent: "text-accent bg-accent/10 border-accent/20",
-  warning: "text-warning bg-warning/10 border-warning/20",
-  primary: "text-primary bg-primary/10 border-primary/20",
-  destructive: "text-destructive bg-destructive/10 border-destructive/20",
-};
+import { useState, useMemo } from "react";
+import { Search, Filter, ArrowUpDown } from "lucide-react";
+import { motion } from "framer-motion";
+import { medications } from "./mockData";
+import { Input } from "@/components/ui/input";
 
 export default function Inventory() {
+  const [search, setSearch] = useState("");
+  const [sortKey, setSortKey] = useState<"name" | "quantityOnHand" | "expirationDate">("name");
+  const [sortDir, setSortDir] = useState<"asc" | "desc">("asc");
+  const [formFilter, setFormFilter] = useState<string>("all");
+
+  const filtered = useMemo(() => {
+    let list = medications.filter(
+      (m) =>
+        m.name.toLowerCase().includes(search.toLowerCase()) ||
+        m.genericName.toLowerCase().includes(search.toLowerCase()) ||
+        m.ndc.includes(search),
+    );
+    if (formFilter !== "all") list = list.filter((m) => m.form === formFilter);
+    list = [...list].sort((a, b) => {
+      const aVal = a[sortKey];
+      const bVal = b[sortKey];
+      if (typeof aVal === "string" && typeof bVal === "string")
+        return sortDir === "asc" ? aVal.localeCompare(bVal) : bVal.localeCompare(aVal);
+      return sortDir === "asc" ? Number(aVal) - Number(bVal) : Number(bVal) - Number(aVal);
+    });
+    return list;
+  }, [search, sortKey, sortDir, formFilter]);
+
+  const toggleSort = (key: typeof sortKey) => {
+    if (sortKey === key) setSortDir((d) => (d === "asc" ? "desc" : "asc"));
+    else {
+      setSortKey(key);
+      setSortDir("asc");
+    }
+  };
+
+  const forms = ["all", ...Array.from(new Set(medications.map((m) => m.form)))];
+
   return (
     <div className="space-y-6">
-      <section className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-        {stats.map((s) => (
-          <div
-            key={s.label}
-            className="rounded-2xl bg-card border border-border p-5 shadow-soft"
+      <div className="flex flex-col sm:flex-row gap-3">
+        <div className="relative flex-1">
+          <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+          <Input
+            placeholder="Search by name, generic, or NDC..."
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            className="pl-10"
+          />
+        </div>
+        <div className="flex items-center gap-2">
+          <Filter className="h-4 w-4 text-muted-foreground" />
+          <select
+            value={formFilter}
+            onChange={(e) => setFormFilter(e.target.value)}
+            className="rounded-lg border border-input bg-card px-3 py-2 text-sm text-foreground"
           >
-            <div
-              className={`inline-flex items-center justify-center h-9 w-9 rounded-lg border ${toneClass[s.tone]} mb-3`}
-            >
-              <s.icon className="h-4 w-4" />
-            </div>
-            <p className="text-3xl font-mono font-light text-foreground">
-              {s.value}
-            </p>
-            <p className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground mt-1">
-              {s.label}
-            </p>
-          </div>
-        ))}
-      </section>
+            {forms.map((f) => (
+              <option key={f} value={f}>
+                {f === "all" ? "All Forms" : f.charAt(0).toUpperCase() + f.slice(1)}
+              </option>
+            ))}
+          </select>
+        </div>
+      </div>
 
-      <section className="rounded-2xl bg-card border border-border p-8 shadow-soft text-center">
-        <Package className="h-10 w-10 text-muted-foreground mx-auto mb-3" />
-        <h2 className="font-serif text-xl text-foreground mb-2">
-          Inventory & controlled-substance ledger
-        </h2>
-        <p className="text-sm text-muted-foreground max-w-md mx-auto">
-          Stock by NDC, lot/expiry tracker, and the DEA-2222 controlled-
-          substance audit trail. Pulls from MediScan once the ledger feed
-          is wired.
-        </p>
-      </section>
+      <motion.div
+        initial={{ opacity: 0 }}
+        animate={{ opacity: 1 }}
+        className="rounded-2xl border border-border bg-card overflow-hidden shadow-soft"
+      >
+        <div className="overflow-x-auto">
+          <table className="w-full text-sm">
+            <thead>
+              <tr className="border-b border-border bg-muted/40">
+                {[
+                  { key: "name" as const, label: "Medication" },
+                  { key: "name" as const, label: "NDC" },
+                  { key: "name" as const, label: "Dosage" },
+                  { key: "quantityOnHand" as const, label: "Qty" },
+                  { key: "expirationDate" as const, label: "Expires" },
+                  { key: "name" as const, label: "Location" },
+                  { key: "name" as const, label: "Status" },
+                ].map(({ key, label }, i) => (
+                  <th
+                    key={i}
+                    className="px-4 py-3 text-left text-[10px] font-bold uppercase tracking-widest text-muted-foreground cursor-pointer hover:text-foreground"
+                    onClick={() => toggleSort(key)}
+                  >
+                    <span className="flex items-center gap-1">
+                      {label}
+                      {sortKey === key && <ArrowUpDown className="h-3 w-3" />}
+                    </span>
+                  </th>
+                ))}
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-border">
+              {filtered.map((med) => {
+                const isLow = med.quantityOnHand <= med.reorderLevel;
+                const expDate = new Date(med.expirationDate);
+                const threeMonths = new Date();
+                threeMonths.setMonth(threeMonths.getMonth() + 3);
+                const isExpiring = expDate <= threeMonths;
+
+                return (
+                  <tr key={med.id} className="hover:bg-muted/30 transition-colors">
+                    <td className="px-4 py-3">
+                      <p className="font-medium text-foreground">{med.name}</p>
+                      <p className="text-xs text-muted-foreground">{med.genericName}</p>
+                    </td>
+                    <td className="px-4 py-3 font-mono text-xs text-muted-foreground">
+                      {med.ndc}
+                    </td>
+                    <td className="px-4 py-3 text-foreground">
+                      {med.dosage} · {med.form}
+                    </td>
+                    <td
+                      className={`px-4 py-3 font-mono font-semibold ${
+                        isLow ? "text-warning" : "text-foreground"
+                      }`}
+                    >
+                      {med.quantityOnHand}
+                    </td>
+                    <td
+                      className={`px-4 py-3 font-mono ${
+                        isExpiring ? "text-destructive font-medium" : "text-foreground"
+                      }`}
+                    >
+                      {med.expirationDate}
+                    </td>
+                    <td className="px-4 py-3 font-mono text-xs text-muted-foreground">
+                      {med.location}
+                    </td>
+                    <td className="px-4 py-3">
+                      {isLow ? (
+                        <span className="inline-flex rounded-full bg-warning/10 px-2.5 py-0.5 text-xs font-medium text-warning">
+                          Low Stock
+                        </span>
+                      ) : isExpiring ? (
+                        <span className="inline-flex rounded-full bg-destructive/10 px-2.5 py-0.5 text-xs font-medium text-destructive">
+                          Expiring
+                        </span>
+                      ) : (
+                        <span className="inline-flex rounded-full bg-success/10 px-2.5 py-0.5 text-xs font-medium text-success">
+                          In Stock
+                        </span>
+                      )}
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      </motion.div>
     </div>
   );
 }

@@ -1,5 +1,5 @@
 import { NavLink, Outlet, useLocation } from "react-router-dom";
-import { ClipboardList, Package, RefreshCw, Activity } from "lucide-react";
+import { ClipboardList, Package, RefreshCw, Activity, ScanBarcode, Users } from "lucide-react";
 import AppLayout from "@/components/AppLayout";
 import { cn } from "@/lib/utils";
 
@@ -11,10 +11,22 @@ const subTabs = [
     description: "Today's fills, ready-for-pickup, in-flight scripts",
   },
   {
+    to: "/pharmacy/scanner",
+    label: "Scanner",
+    icon: ScanBarcode,
+    description: "Individual or bulk barcode/NDC scan against inventory",
+  },
+  {
     to: "/pharmacy/inventory",
     label: "Inventory",
     icon: Package,
     description: "Stock on hand, expiring lots, controlled-substance ledger",
+  },
+  {
+    to: "/pharmacy/patients",
+    label: "Patients",
+    icon: Users,
+    description: "Patient directory with allergies and dispense history",
   },
   {
     to: "/pharmacy/refills",
