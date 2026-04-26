@@ -3,11 +3,13 @@ import AppLayout from "@/components/AppLayout";
 import UsersAdmin from "@/components/admin/UsersAdmin";
 import PhiAuditLog from "@/components/admin/PhiAuditLog";
 import IntegrationsAdmin from "@/components/admin/IntegrationsAdmin";
+import SeedDataPanel from "@/components/admin/SeedDataPanel";
 import { cn } from "@/lib/utils";
 
 const tabs = [
   { id: "users", label: "Users & Invitations" },
   { id: "integrations", label: "Integrations" },
+  { id: "seed", label: "Data Seeding" },
   { id: "audit", label: "PHI Audit Log" },
 ] as const;
 
@@ -38,6 +40,7 @@ export default function AdminHome() {
 
         {tab === "users" && <UsersAdmin />}
         {tab === "integrations" && <IntegrationsAdmin />}
+        {tab === "seed" && <SeedDataPanel />}
         {tab === "audit" && <PhiAuditLog />}
       </div>
     </AppLayout>

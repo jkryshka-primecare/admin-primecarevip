@@ -11,3 +11,7 @@ project_id = "imewkweatgvqledptdna"
     verify_jwt = false
   [functions.peek-json]
     verify_jwt = false
+  [functions.seed-labcorp]
+    verify_jwt = false
+  [functions.seed-rxvalet]
+    verify_jwt = false
