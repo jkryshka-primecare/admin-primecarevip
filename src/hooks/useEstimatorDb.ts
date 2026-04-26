@@ -42,18 +42,36 @@ export function useProviders(specialtyId: string, locationFilter?: string) {
   });
 }
 
+export function useNhsnCategories() {
+  return useQuery({
+    queryKey: ["estimator", "nhsn-categories"],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from("cpt_codes")
+        .select("category")
+        .order("category");
+      if (error) throw error;
+      const unique = Array.from(new Set((data ?? []).map((r) => r.category)));
+      return unique;
+    },
+  });
+}
+
 export function useServices(
   specialtyId: string,
   searchQuery: string,
-  providerSearch: string = ""
+  providerSearch: string = "",
+  nhsnCategory: string = ""
 ) {
   const trimmed = searchQuery.trim();
   const provTrimmed = providerSearch.trim();
+  const nhsnTrimmed = nhsnCategory.trim();
   const hasProviderFilter = provTrimmed.length > 0;
-  const enabled = trimmed.length >= 3 || hasProviderFilter;
+  const hasNhsnFilter = nhsnTrimmed.length > 0;
+  const enabled = trimmed.length >= 3 || hasProviderFilter || hasNhsnFilter;
 
   return useQuery({
-    queryKey: ["estimator", "services", specialtyId, trimmed, provTrimmed],
+    queryKey: ["estimator", "services", specialtyId, trimmed, provTrimmed, nhsnTrimmed],
     enabled,
     queryFn: async () => {
       let providerIds: string[] | null = null;
