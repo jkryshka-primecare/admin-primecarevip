@@ -2,10 +2,12 @@ import { useState } from "react";
 import AppLayout from "@/components/AppLayout";
 import UsersAdmin from "@/components/admin/UsersAdmin";
 import PhiAuditLog from "@/components/admin/PhiAuditLog";
+import IntegrationsAdmin from "@/components/admin/IntegrationsAdmin";
 import { cn } from "@/lib/utils";
 
 const tabs = [
   { id: "users", label: "Users & Invitations" },
+  { id: "integrations", label: "Integrations" },
   { id: "audit", label: "PHI Audit Log" },
 ] as const;
 
@@ -35,6 +37,7 @@ export default function AdminHome() {
         </nav>
 
         {tab === "users" && <UsersAdmin />}
+        {tab === "integrations" && <IntegrationsAdmin />}
         {tab === "audit" && <PhiAuditLog />}
       </div>
     </AppLayout>
