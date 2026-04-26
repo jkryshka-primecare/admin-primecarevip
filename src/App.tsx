@@ -7,9 +7,16 @@ import { ThemeProvider } from "@/components/ThemeProvider";
 import { AuthProvider } from "@/hooks/useAuth";
 import ProtectedRoute from "@/components/auth/ProtectedRoute";
 import PhiAcknowledgmentDialog from "@/components/auth/PhiAcknowledgmentDialog";
-import Index from "./pages/Index.tsx";
+
 import Auth from "./pages/Auth.tsx";
 import NotFound from "./pages/NotFound.tsx";
+import DashboardHome from "./pages/DashboardHome.tsx";
+import PharmacyHome from "./pages/pharmacy/PharmacyHome.tsx";
+import CareHome from "./pages/care/CareHome.tsx";
+import HrHome from "./pages/hr/HrHome.tsx";
+import InsightsHome from "./pages/insights/InsightsHome.tsx";
+import PatientsHome from "./pages/patients/PatientsHome.tsx";
+import AdminHome from "./pages/admin/AdminHome.tsx";
 
 const queryClient = new QueryClient();
 
@@ -24,14 +31,77 @@ const App = () => (
             <PhiAcknowledgmentDialog />
             <Routes>
               <Route path="/auth" element={<Auth />} />
+
+              {/* Dashboard — any signed-in user */}
               <Route
                 path="/"
                 element={
                   <ProtectedRoute>
-                    <Index />
+                    <DashboardHome />
                   </ProtectedRoute>
                 }
               />
+
+              {/* Pharmacy */}
+              <Route
+                path="/pharmacy/*"
+                element={
+                  <ProtectedRoute allowedRoles={["super_admin", "admin", "pharmacy"]}>
+                    <PharmacyHome />
+                  </ProtectedRoute>
+                }
+              />
+
+              {/* Care Connect */}
+              <Route
+                path="/care/*"
+                element={
+                  <ProtectedRoute allowedRoles={["super_admin", "admin", "clinical", "billing"]}>
+                    <CareHome />
+                  </ProtectedRoute>
+                }
+              />
+
+              {/* HR */}
+              <Route
+                path="/hr/*"
+                element={
+                  <ProtectedRoute allowedRoles={["super_admin", "admin", "hr", "billing"]}>
+                    <HrHome />
+                  </ProtectedRoute>
+                }
+              />
+
+              {/* Insights — old Index content lives here now */}
+              <Route
+                path="/insights/*"
+                element={
+                  <ProtectedRoute allowedRoles={["super_admin", "admin", "clinical"]}>
+                    <InsightsHome />
+                  </ProtectedRoute>
+                }
+              />
+
+              {/* Patients */}
+              <Route
+                path="/patients/*"
+                element={
+                  <ProtectedRoute allowedRoles={["super_admin", "admin", "pharmacy", "clinical"]}>
+                    <PatientsHome />
+                  </ProtectedRoute>
+                }
+              />
+
+              {/* Admin */}
+              <Route
+                path="/admin/*"
+                element={
+                  <ProtectedRoute allowedRoles={["super_admin", "admin"]}>
+                    <AdminHome />
+                  </ProtectedRoute>
+                }
+              />
+
               {/* ADD ALL CUSTOM ROUTES ABOVE THE CATCH-ALL "*" ROUTE */}
               <Route path="*" element={<NotFound />} />
             </Routes>
