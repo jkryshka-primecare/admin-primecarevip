@@ -14,6 +14,33 @@ export type Database = {
   }
   public: {
     Tables: {
+      cpt_codes: {
+        Row: {
+          category: string
+          code: string
+          created_at: string
+          description: string
+          status: string | null
+          updated_at: string
+        }
+        Insert: {
+          category: string
+          code: string
+          created_at?: string
+          description: string
+          status?: string | null
+          updated_at?: string
+        }
+        Update: {
+          category?: string
+          code?: string
+          created_at?: string
+          description?: string
+          status?: string | null
+          updated_at?: string
+        }
+        Relationships: []
+      }
       email_send_log: {
         Row: {
           created_at: string
@@ -446,29 +473,35 @@ export type Database = {
       }
       services: {
         Row: {
+          cpt_code: string | null
           created_at: string
           description: string | null
           icd10_codes: string[]
           id: string
           name: string
+          nhsn_category: string | null
           specialty_id: string
           updated_at: string
         }
         Insert: {
+          cpt_code?: string | null
           created_at?: string
           description?: string | null
           icd10_codes?: string[]
           id: string
           name: string
+          nhsn_category?: string | null
           specialty_id: string
           updated_at?: string
         }
         Update: {
+          cpt_code?: string | null
           created_at?: string
           description?: string | null
           icd10_codes?: string[]
           id?: string
           name?: string
+          nhsn_category?: string | null
           specialty_id?: string
           updated_at?: string
         }
