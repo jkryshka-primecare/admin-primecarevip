@@ -176,7 +176,70 @@ export function SearchBar({
         </PopoverContent>
       </Popover>
 
-      {/* Location filter */}
+      {/* NHSN procedure category combobox */}
+      <Popover open={nhsnOpen} onOpenChange={setNhsnOpen}>
+        <PopoverTrigger asChild>
+          <button
+            role="combobox"
+            aria-expanded={nhsnOpen}
+            className={cn(
+              "relative flex items-center w-52 pl-10 pr-8 py-2.5 text-sm bg-card border border-border rounded-lg",
+              "text-left transition-all duration-200",
+              "focus:outline-none focus:border-primary focus:ring-[3px] focus:ring-ring/20",
+              !nhsnCategory && "text-muted-foreground"
+            )}
+            title="Filter by NHSN approved procedure category"
+          >
+            <ShieldCheck className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+            <span className="truncate flex-1 font-mono">
+              {nhsnCategory || "NHSN category…"}
+            </span>
+            {nhsnCategory ? (
+              <span
+                role="button"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onNhsnCategoryChange("");
+                }}
+                className="absolute right-2.5 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+              >
+                <X className="h-3.5 w-3.5" />
+              </span>
+            ) : (
+              <ChevronsUpDown className="absolute right-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground" />
+            )}
+          </button>
+        </PopoverTrigger>
+        <PopoverContent className="w-52 p-0" align="start">
+          <Command>
+            <CommandInput placeholder="Search NHSN categories…" />
+            <CommandList>
+              <CommandEmpty>No categories found.</CommandEmpty>
+              <CommandGroup>
+                {nhsnCategories.map((cat) => (
+                  <CommandItem
+                    key={cat}
+                    value={cat}
+                    onSelect={(val) => {
+                      onNhsnCategoryChange(val.toUpperCase() === nhsnCategory ? "" : val.toUpperCase());
+                      setNhsnOpen(false);
+                    }}
+                  >
+                    <Check
+                      className={cn(
+                        "mr-2 h-4 w-4",
+                        nhsnCategory === cat ? "opacity-100" : "opacity-0"
+                      )}
+                    />
+                    <span className="font-mono">{cat}</span>
+                  </CommandItem>
+                ))}
+              </CommandGroup>
+            </CommandList>
+          </Command>
+        </PopoverContent>
+      </Popover>
+
       <div className="relative w-52">
         <MapPin className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
         <input
