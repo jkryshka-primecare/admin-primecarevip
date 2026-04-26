@@ -34,11 +34,15 @@ export function SearchBar({
   onLocationChange,
   providerSearch,
   onProviderSearchChange,
+  nhsnCategory,
+  onNhsnCategoryChange,
+  nhsnCategories,
 }: SearchBarProps) {
   const inputRef = useRef<HTMLInputElement>(null);
   const [localValue, setLocalValue] = useState(value);
   const debounceRef = useRef<ReturnType<typeof setTimeout>>();
   const [providerOpen, setProviderOpen] = useState(false);
+  const [nhsnOpen, setNhsnOpen] = useState(false);
 
   const { data: providers = [] } = useQuery({
     queryKey: ["estimator", "all-providers"],
