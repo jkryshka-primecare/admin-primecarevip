@@ -149,14 +149,27 @@ Deno.serve(async (req) => {
   if (auth instanceof Response) return auth;
 
   try {
-    const clientId = Deno.env.get("ELATION_SANDBOX_CLIENT_ID");
-    const clientSecret = Deno.env.get("ELATION_SANDBOX_CLIENT_SECRET");
+    // Use the global PrimeCare OS credentials shared across all modules.
+    // Fall back to legacy *_SANDBOX_* names if those are still configured.
+    const clientId =
+      Deno.env.get("ELATION_CLIENT_ID") ??
+      Deno.env.get("ELATION_SANDBOX_CLIENT_ID");
+    const clientSecret =
+      Deno.env.get("ELATION_CLIENT_SECRET") ??
+      Deno.env.get("ELATION_SANDBOX_CLIENT_SECRET");
     const tokenUrl =
-      Deno.env.get("ELATION_SANDBOX_TOKEN_URL") ?? DEFAULT_TOKEN_URL;
+      Deno.env.get("ELATION_TOKEN_URL") ??
+      Deno.env.get("ELATION_SANDBOX_TOKEN_URL") ??
+      DEFAULT_TOKEN_URL;
+    // ELATION_BASE_URL is the global REST base (e.g. https://sandbox.elationemr.com/api/2.0)
     const restBase =
-      Deno.env.get("ELATION_SANDBOX_REST_BASE") ?? DEFAULT_REST_BASE;
+      Deno.env.get("ELATION_BASE_URL") ??
+      Deno.env.get("ELATION_SANDBOX_REST_BASE") ??
+      DEFAULT_REST_BASE;
     const fhirBase =
-      Deno.env.get("ELATION_SANDBOX_FHIR_BASE") ?? DEFAULT_FHIR_BASE;
+      Deno.env.get("ELATION_FHIR_BASE") ??
+      Deno.env.get("ELATION_SANDBOX_FHIR_BASE") ??
+      DEFAULT_FHIR_BASE;
 
     if (!clientId || !clientSecret) {
       // Return 200 with `configured: false` so the client can render an
