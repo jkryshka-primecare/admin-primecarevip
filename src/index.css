@@ -1,14 +1,14 @@
-@import url('https://fonts.googleapis.com/css2?family=Roboto:wght@300;400;500;700&family=Roboto+Mono:wght@400;500&display=swap');
-@import url('https://fonts.googleapis.com/css2?family=Tinos:ital,wght@0,400;0,700;1,700&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Playfair+Display:ital,wght@0,400;0,600;0,700;1,400&display=swap');
 
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
 
 /*
-  Prime Care VIP — Brand-aligned light theme
-  Midnight Care #04244C · Pulse Blue (Bright Aqua) #00B8FF
-  Pure Calm #F5F4EE · WellSpring #00C853 · Accent Pink #EB3774
+  PrimeCare OS — Brand-aligned light theme
+  Midnight Care #04244C · Pulse Blue #00B8FF · WellSpring #00C853
+  Warning #F59E0B · Pure Calm bg #F5F4EE · Pink alert #EB3774
 */
 
 @layer base {
@@ -33,14 +33,17 @@
     --muted: 42 25% 90%;
     --muted-foreground: 215 25% 40%;
 
-    --accent: 197 100% 50%;              /* Pulse Blue / Bright Aqua #00B8FF */
+    --accent: 197 100% 50%;              /* Pulse Blue #00B8FF */
     --accent-foreground: 0 0% 100%;
 
-    --destructive: 339 82% 57%;          /* Accent Pink #EB3774 */
+    --destructive: 339 82% 57%;          /* Pink alert #EB3774 */
     --destructive-foreground: 0 0% 100%;
 
     --success: 145 100% 39%;             /* WellSpring #00C853 */
     --success-foreground: 0 0% 100%;
+
+    --warning: 38 92% 50%;               /* Amber #F59E0B */
+    --warning-foreground: 215 90% 15%;
 
     --border: 215 30% 88%;
     --input: 215 30% 88%;
@@ -48,29 +51,14 @@
 
     --radius: 0.875rem;
 
-    /* Brand custom tokens (kept for backwards compat) */
-    --obsidian: 215 90% 15%;
-    --slate-glass: 0 0% 100%;
-    --titanium: 215 90% 15%;
-    --sapphire: 197 100% 50%;            /* now Pulse Blue */
-    --cyan-clinical: 145 100% 39%;       /* now WellSpring green */
-    --hcc-alert: 339 82% 57%;            /* now Accent Pink */
-
-    --midnight: 215 90% 15%;
-    --pulse: 197 100% 50%;
-    --wellspring: 145 100% 39%;
-    --wellness-sky: 197 100% 92%;
-    --pink-accent: 339 82% 57%;
-
-    --surface-glass: linear-gradient(135deg, hsl(0 0% 100%) 0%, hsl(42 40% 98%) 100%);
-    --gradient-hero: linear-gradient(135deg, hsl(215 90% 15%) 0%, hsl(215 80% 25%) 100%);
-    --gradient-accent: linear-gradient(135deg, hsl(197 100% 50%) 0%, hsl(197 100% 60%) 100%);
-
     --shadow-soft: 0 1px 2px hsl(215 90% 15% / 0.04), 0 4px 16px hsl(215 90% 15% / 0.04);
     --shadow-card: 0 2px 4px hsl(215 90% 15% / 0.04), 0 8px 24px hsl(215 90% 15% / 0.06);
     --shadow-elevated: 0 4px 8px hsl(215 90% 15% / 0.06), 0 16px 40px hsl(215 90% 15% / 0.10);
 
-    /* Sidebar */
+    --gradient-hero: linear-gradient(135deg, hsl(215 90% 15%) 0%, hsl(215 80% 25%) 100%);
+    --gradient-accent: linear-gradient(135deg, hsl(197 100% 50%) 0%, hsl(197 100% 60%) 100%);
+
+    /* Sidebar — navy on light bg */
     --sidebar-background: 215 90% 15%;
     --sidebar-foreground: 0 0% 100%;
     --sidebar-primary: 197 100% 50%;
@@ -82,9 +70,8 @@
   }
 
   .dark {
-    /* Dark Navy variant — Midnight Care surfaces, brand accents preserved */
-    --background: 215 60% 9%;            /* Deep navy page */
-    --foreground: 42 30% 96%;            /* Pure Calm text */
+    --background: 215 60% 9%;
+    --foreground: 42 30% 96%;
 
     --card: 215 55% 13%;
     --card-foreground: 42 30% 96%;
@@ -92,7 +79,7 @@
     --popover: 215 55% 13%;
     --popover-foreground: 42 30% 96%;
 
-    --primary: 197 100% 50%;             /* Pulse Blue as primary in dark */
+    --primary: 197 100% 50%;
     --primary-foreground: 215 90% 10%;
 
     --secondary: 215 45% 18%;
@@ -110,11 +97,13 @@
     --success: 145 90% 45%;
     --success-foreground: 215 90% 10%;
 
+    --warning: 38 92% 55%;
+    --warning-foreground: 215 90% 10%;
+
     --border: 215 40% 22%;
     --input: 215 40% 22%;
     --ring: 197 100% 50%;
 
-    --surface-glass: linear-gradient(135deg, hsl(215 55% 13%) 0%, hsl(215 50% 16%) 100%);
     --gradient-hero: linear-gradient(135deg, hsl(215 70% 6%) 0%, hsl(215 60% 14%) 100%);
     --gradient-accent: linear-gradient(135deg, hsl(197 100% 50%) 0%, hsl(197 100% 60%) 100%);
 
@@ -122,7 +111,6 @@
     --shadow-card: 0 2px 4px hsl(0 0% 0% / 0.3), 0 8px 24px hsl(0 0% 0% / 0.35);
     --shadow-elevated: 0 4px 8px hsl(0 0% 0% / 0.4), 0 16px 40px hsl(0 0% 0% / 0.5);
 
-    /* Sidebar stays navy but slightly deeper, with subtle borders */
     --sidebar-background: 215 70% 6%;
     --sidebar-foreground: 42 30% 96%;
     --sidebar-primary: 197 100% 50%;
@@ -141,13 +129,14 @@
 
   body {
     @apply bg-background text-foreground antialiased;
-    font-family: 'Roboto', system-ui, sans-serif;
-    font-feature-settings: "kern", "liga";
+    font-family: 'Inter', system-ui, -apple-system, sans-serif;
+    font-feature-settings: "kern", "liga", "ss01";
   }
 
   h1, h2, h3, h4 {
-    font-family: 'Tinos', 'Times New Roman', serif;
-    letter-spacing: -0.01em;
+    font-family: 'Playfair Display', 'Times New Roman', serif;
+    letter-spacing: -0.015em;
+    font-weight: 600;
   }
 }
 
@@ -159,32 +148,17 @@
     border-radius: var(--radius);
   }
 
-  .titanium-border {
-    border: 1px solid hsl(var(--border));
-  }
-
   .font-mono-data {
-    font-family: 'Roboto Mono', ui-monospace, monospace;
+    font-family: 'JetBrains Mono', ui-monospace, monospace;
     font-variant-numeric: tabular-nums;
   }
 
   .font-serif-brand {
-    font-family: 'Tinos', 'Times New Roman', serif;
+    font-family: 'Playfair Display', 'Times New Roman', serif;
   }
 
-  .shadow-card {
-    box-shadow: var(--shadow-card);
-  }
-
-  .shadow-elevated {
-    box-shadow: var(--shadow-elevated);
-  }
-
-  .gradient-hero {
-    background: var(--gradient-hero);
-  }
-
-  .gradient-accent {
-    background: var(--gradient-accent);
-  }
+  .shadow-card { box-shadow: var(--shadow-card); }
+  .shadow-elevated { box-shadow: var(--shadow-elevated); }
+  .gradient-hero { background: var(--gradient-hero); }
+  .gradient-accent { background: var(--gradient-accent); }
 }

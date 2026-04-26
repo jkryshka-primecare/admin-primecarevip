@@ -8,15 +8,13 @@ export default {
     container: {
       center: true,
       padding: "2rem",
-      screens: {
-        "2xl": "1400px",
-      },
+      screens: { "2xl": "1400px" },
     },
     extend: {
       fontFamily: {
-        sans: ["Roboto", "system-ui", "sans-serif"],
-        mono: ["Roboto Mono", "ui-monospace", "monospace"],
-        serif: ["Tinos", "Times New Roman", "serif"],
+        sans: ["Inter", "system-ui", "sans-serif"],
+        mono: ["JetBrains Mono", "ui-monospace", "monospace"],
+        serif: ["Playfair Display", "Times New Roman", "serif"],
       },
       colors: {
         border: "hsl(var(--border))",
@@ -52,20 +50,13 @@ export default {
           DEFAULT: "hsl(var(--card))",
           foreground: "hsl(var(--card-foreground))",
         },
-        obsidian: "hsl(var(--obsidian))",
-        "slate-glass": "hsl(var(--slate-glass))",
-        titanium: "hsl(var(--titanium))",
-        sapphire: "hsl(var(--sapphire))",
-        "cyan-clinical": "hsl(var(--cyan-clinical))",
-        "hcc-alert": "hsl(var(--hcc-alert))",
-        midnight: "hsl(var(--midnight))",
-        pulse: "hsl(var(--pulse))",
-        wellspring: "hsl(var(--wellspring))",
-        "wellness-sky": "hsl(var(--wellness-sky))",
-        "pink-accent": "hsl(var(--pink-accent))",
         success: {
           DEFAULT: "hsl(var(--success))",
           foreground: "hsl(var(--success-foreground))",
+        },
+        warning: {
+          DEFAULT: "hsl(var(--warning))",
+          foreground: "hsl(var(--warning-foreground))",
         },
         sidebar: {
           DEFAULT: "hsl(var(--sidebar-background))",

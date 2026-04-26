@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { useLocation } from "react-router-dom";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -8,16 +9,25 @@ import { useAuth } from "@/hooks/useAuth";
 import { toast } from "sonner";
 
 /**
- * First-login modal. Required acknowledgment that PHI access is being
- * monitored. Records the acceptance timestamp in profiles.phi_acknowledged_at
- * so the modal only appears once per user.
+ * PHI acknowledgment modal — only triggered on routes that touch PHI:
+ * /pharmacy/*, /care/*, /insights/*, /patients/*. HR + Admin pages
+ * never trigger it.
  */
+const PHI_ROUTE_PREFIXES = ["/pharmacy", "/care", "/insights", "/patients"];
+
+function isPhiRoute(pathname: string): boolean {
+  return PHI_ROUTE_PREFIXES.some(
+    (p) => pathname === p || pathname.startsWith(`${p}/`),
+  );
+}
+
 export default function PhiAcknowledgmentDialog() {
   const { user, phiAcknowledgedAt, refreshProfile, signOut } = useAuth();
+  const location = useLocation();
   const [agreed, setAgreed] = useState(false);
   const [submitting, setSubmitting] = useState(false);
 
-  const open = !!user && !phiAcknowledgedAt;
+  const open = !!user && !phiAcknowledgedAt && isPhiRoute(location.pathname);
 
   async function handleAccept() {
     if (!user || !agreed) return;
@@ -51,9 +61,9 @@ export default function PhiAcknowledgmentDialog() {
             </DialogTitle>
           </div>
           <DialogDescription className="pt-2 text-sm leading-relaxed">
-            This system contains Protected Health Information (PHI / HPI) under
-            HIPAA. Access is restricted to authorized Prime Care VIP staff and
-            is logged for audit. Misuse, disclosure, or unauthorized sharing
+            This area contains Protected Health Information under HIPAA.
+            Access is restricted to authorized PrimeCare VIP staff and is
+            logged for audit. Misuse, disclosure, or unauthorized sharing
             may result in disciplinary action and civil or criminal penalties.
           </DialogDescription>
         </DialogHeader>
