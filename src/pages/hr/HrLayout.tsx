@@ -12,6 +12,7 @@ import {
   FileText,
   Bell,
   BarChart3,
+  Star,
 } from "lucide-react";
 import AppLayout from "@/components/AppLayout";
 import { cn } from "@/lib/utils";
@@ -36,6 +37,7 @@ const TABS: Tab[] = [
   { to: "/hr/grievances", label: "Grievances", icon: AlertTriangle },
   { to: "/hr/documents", label: "Documents", icon: FileText },
   { to: "/hr/notifications", label: "Notifications", icon: Bell },
+  { to: "/hr/performance", label: "Performance", icon: Star },
   { to: "/hr/reports", label: "Reports", icon: BarChart3 },
 ];
 
