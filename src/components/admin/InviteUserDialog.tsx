@@ -92,19 +92,8 @@ export default function InviteUserDialog({ onInvited }: Props) {
           </DialogDescription>
         </DialogHeader>
 
-        {inviteUrl ? (
-          <div className="space-y-4">
-            <p className="text-sm text-foreground">Invitation link:</p>
-            <div className="flex gap-2">
-              <Input value={inviteUrl} readOnly className="font-mono text-xs" />
-              <Button type="button" onClick={copy}><Copy className="size-3.5" /></Button>
-            </div>
-            <DialogFooter>
-              <Button variant="outline" onClick={() => { reset(); }}>Invite another</Button>
-              <Button onClick={() => setOpen(false)}>Done</Button>
-            </DialogFooter>
-          </div>
-        ) : (
+        {(
+
           <form onSubmit={handleSubmit} className="space-y-4">
             <div className="grid grid-cols-2 gap-3">
               <div className="space-y-1.5">
