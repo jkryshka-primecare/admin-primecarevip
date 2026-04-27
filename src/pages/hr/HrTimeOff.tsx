@@ -240,6 +240,8 @@ export default function HrTimeOff() {
         </Dialog>
       </div>
 
+      {isAdmin && <CalendarSyncSettings />}
+
       <Card>
         <div className="overflow-x-auto">
           <table className="w-full">
