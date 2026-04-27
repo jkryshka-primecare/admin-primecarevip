@@ -47,6 +47,26 @@ export default function Auth() {
     if (!loading && user) navigate("/", { replace: true });
   }, [user, loading, navigate]);
 
+  // Surface auth callback errors that arrive in the URL hash, e.g. expired
+  // magic links from Supabase's built-in invite emails.
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const hash = window.location.hash;
+    if (!hash || !hash.includes("error")) return;
+    const params = new URLSearchParams(hash.startsWith("#") ? hash.slice(1) : hash);
+    const code = params.get("error_code");
+    const desc = params.get("error_description")?.replace(/\+/g, " ");
+    if (code === "otp_expired") {
+      toast.error("That invitation link has expired", {
+        description: "Ask your administrator to resend the invite, then use the new link.",
+      });
+    } else if (desc) {
+      toast.error(decodeURIComponent(desc));
+    }
+    // Clean the hash so the toast doesn't re-fire on re-renders/navigation.
+    window.history.replaceState(null, "", window.location.pathname + window.location.search);
+  }, []);
+
   async function handleEmailAuth(e: React.FormEvent) {
     e.preventDefault();
     const ev = emailSchema.safeParse(email);
