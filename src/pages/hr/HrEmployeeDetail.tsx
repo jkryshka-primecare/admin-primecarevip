@@ -3,7 +3,7 @@ import { useNavigate, useParams } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/hooks/useAuth";
-import { ArrowLeft, Camera, Save } from "lucide-react";
+import { ArrowLeft, Camera, Save, UserPlus, CheckCircle2 } from "lucide-react";
 import { toast } from "sonner";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
@@ -18,6 +18,8 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import EmployeeCertifications from "@/components/hr/EmployeeCertifications";
+import InviteToPortalDialog from "@/components/hr/InviteToPortalDialog";
+import { Badge } from "@/components/ui/badge";
 
 const empty = {
   first_name: "",
@@ -45,6 +47,7 @@ export default function HrEmployeeDetail() {
   const isAdmin = hasAnyRole(["super_admin", "admin", "hr"]);
   const fileInput = useRef<HTMLInputElement>(null);
   const [uploading, setUploading] = useState(false);
+  const [inviteOpen, setInviteOpen] = useState(false);
   const [form, setForm] = useState(empty);
 
   const { data: employee, isLoading } = useQuery({
@@ -222,17 +225,44 @@ export default function HrEmployeeDetail() {
             </p>
           </div>
         </div>
-        {isAdmin && (
-          <Button
-            className="ml-auto gap-2"
-            onClick={() => update.mutate()}
-            disabled={update.isPending}
-          >
-            <Save className="h-4 w-4" />
-            Save Changes
-          </Button>
-        )}
+        <div className="ml-auto flex items-center gap-2">
+          {employee.user_id ? (
+            <Badge variant="secondary" className="gap-1 bg-success/10 text-success">
+              <CheckCircle2 className="h-3 w-3" /> Portal linked
+            </Badge>
+          ) : (
+            isAdmin && (
+              <Button variant="outline" className="gap-2" onClick={() => setInviteOpen(true)}>
+                <UserPlus className="h-4 w-4" /> Invite to Portal
+              </Button>
+            )
+          )}
+          {isAdmin && (
+            <Button
+              className="gap-2"
+              onClick={() => update.mutate()}
+              disabled={update.isPending}
+            >
+              <Save className="h-4 w-4" />
+              Save Changes
+            </Button>
+          )}
+        </div>
       </div>
+
+      {isAdmin && employee && (
+        <InviteToPortalDialog
+          open={inviteOpen}
+          onOpenChange={setInviteOpen}
+          employee={{
+            id: employee.id,
+            first_name: employee.first_name,
+            last_name: employee.last_name,
+            email: employee.email,
+            user_id: employee.user_id,
+          }}
+        />
+      )}
 
       <form
         onSubmit={(e) => {
