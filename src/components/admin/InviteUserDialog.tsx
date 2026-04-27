@@ -64,9 +64,15 @@ export default function InviteUserDialog({ onInvited }: Props) {
     }
 
     const url = (data as { invite_url?: string } | null)?.invite_url ?? null;
-    setInviteUrl(url);
-    toast.success(`Invitation created for ${email}`);
+    if (url) {
+      try { await navigator.clipboard.writeText(url); } catch { /* ignore */ }
+    }
+    toast.success(`Invitation sent to ${email}`, {
+      description: url ? "Invite link copied to clipboard." : undefined,
+    });
     onInvited();
+    reset();
+    setOpen(false);
   }
 
   function copy() {
