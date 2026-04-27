@@ -1,0 +1,59 @@
+// Verifies hardened access on the public `email-assets` bucket:
+//  1. Anonymous clients CANNOT list files (RLS blocks SELECT on storage.objects).
+//  2. Service-role clients CAN list files.
+//  3. Direct public URLs still serve the file bytes (CDN public-flag path).
+//
+// Run with:
+//   supabase functions test --filter "email-assets storage hardening"
+import { createClient } from "https://esm.sh/@supabase/supabase-js@2.49.1";
+import {
+  assert,
+  assertEquals,
+} from "https://deno.land/std@0.224.0/assert/mod.ts";
+
+const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
+const ANON_KEY = Deno.env.get("SUPABASE_ANON_KEY")!;
+const SERVICE_ROLE = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
+const BUCKET = "email-assets";
+const KNOWN_FILE = "primecare-logo.jpg"; // seeded asset
+
+Deno.test("email-assets storage hardening", async (t) => {
+  const anon = createClient(SUPABASE_URL, ANON_KEY);
+  const admin = createClient(SUPABASE_URL, SERVICE_ROLE);
+
+  await t.step("anonymous client cannot list files", async () => {
+    const { data, error } = await anon.storage.from(BUCKET).list();
+    // Either the API returns an explicit error or an empty list (RLS filters all rows).
+    if (error) {
+      assert(error.message.length > 0, "expected error message");
+    } else {
+      assertEquals(
+        data?.length ?? 0,
+        0,
+        `anon listing should be empty, got ${data?.length} items`,
+      );
+    }
+  });
+
+  await t.step("service role can list files", async () => {
+    const { data, error } = await admin.storage.from(BUCKET).list();
+    assertEquals(error, null, `service role list error: ${error?.message}`);
+    assert(
+      (data?.length ?? 0) > 0,
+      "service role should see at least one file",
+    );
+  });
+
+  await t.step("direct public URL still serves the file", async () => {
+    const { data } = anon.storage.from(BUCKET).getPublicUrl(KNOWN_FILE);
+    const res = await fetch(data.publicUrl);
+    assertEquals(
+      res.status,
+      200,
+      `expected 200 from ${data.publicUrl}, got ${res.status}`,
+    );
+    const buf = await res.arrayBuffer();
+    await res.body?.cancel?.();
+    assert(buf.byteLength > 0, "expected non-empty file body");
+  });
+});
