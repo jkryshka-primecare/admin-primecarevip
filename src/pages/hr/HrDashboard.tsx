@@ -1,12 +1,15 @@
+import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { differenceInDays, format, parseISO } from "date-fns";
 import { useNavigate } from "react-router-dom";
-import { Users, Clock, AlertTriangle, UserPlus, Calendar, ShieldAlert } from "lucide-react";
+import { Users, Clock, AlertTriangle, UserPlus, Calendar, ShieldAlert, Plus } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/hooks/useAuth";
 import HrStatCard from "@/components/hr/HrStatCard";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import AddEmployeeDialog from "@/components/hr/AddEmployeeDialog";
 
 const STAGE_PROGRESS: Record<string, number> = {
   pre_hire: 15,
@@ -20,6 +23,7 @@ export default function HrDashboard() {
   const { hasAnyRole } = useAuth();
   const navigate = useNavigate();
   const isAdmin = hasAnyRole(["super_admin", "admin", "hr"]);
+  const [addOpen, setAddOpen] = useState(false);
 
   const { data: employeeCount = 0 } = useQuery({
     queryKey: ["hr", "employee-count"],
@@ -90,13 +94,25 @@ export default function HrDashboard() {
 
   return (
     <div className="space-y-8">
-      <div>
-        <h2 className="font-serif text-2xl text-foreground">HR Dashboard</h2>
-        <p className="text-sm text-muted-foreground">
-          {isAdmin
-            ? "Live snapshot of headcount, requests, and compliance."
-            : "Welcome to your employee portal."}
-        </p>
+      <div className="flex items-start justify-between gap-4">
+        <div>
+          <h2 className="font-serif text-2xl text-foreground">HR Dashboard</h2>
+          <p className="text-sm text-muted-foreground">
+            {isAdmin
+              ? "Live snapshot of headcount, requests, and compliance."
+              : "Welcome to your employee portal."}
+          </p>
+        </div>
+        {isAdmin && (
+          <div className="flex gap-2">
+            <Button variant="outline" onClick={() => navigate("/hr/employees")}>
+              View Employees
+            </Button>
+            <Button onClick={() => setAddOpen(true)} className="gap-2">
+              <Plus className="h-4 w-4" /> Add Employee
+            </Button>
+          </div>
+        )}
       </div>
 
       {isAdmin && (
@@ -231,6 +247,8 @@ export default function HrDashboard() {
           </Card>
         )}
       </div>
+
+      {isAdmin && <AddEmployeeDialog open={addOpen} onOpenChange={setAddOpen} />}
     </div>
   );
 }
