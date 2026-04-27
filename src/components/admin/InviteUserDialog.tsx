@@ -12,7 +12,7 @@ import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from "@/components/ui/select";
 import { toast } from "sonner";
-import { Loader2, UserPlus, Copy } from "lucide-react";
+import { Loader2, UserPlus } from "lucide-react";
 
 type Props = { onInvited: () => void };
 
@@ -32,10 +32,9 @@ export default function InviteUserDialog({ onInvited }: Props) {
   const [lastName, setLastName] = useState("");
   const [role, setRole] = useState<AppRole>("staff");
   const [submitting, setSubmitting] = useState(false);
-  const [inviteUrl, setInviteUrl] = useState<string | null>(null);
 
   function reset() {
-    setEmail(""); setFirstName(""); setLastName(""); setRole("staff"); setInviteUrl(null);
+    setEmail(""); setFirstName(""); setLastName(""); setRole("staff");
   }
 
   async function handleSubmit(e: React.FormEvent) {
@@ -64,16 +63,19 @@ export default function InviteUserDialog({ onInvited }: Props) {
     }
 
     const url = (data as { invite_url?: string } | null)?.invite_url ?? null;
-    setInviteUrl(url);
-    toast.success(`Invitation created for ${email}`);
+    if (url) {
+      try { await navigator.clipboard.writeText(url); } catch { /* ignore */ }
+    }
+    toast.success(`Invitation sent to ${email}`, {
+      description: url ? "Invite link copied to clipboard." : undefined,
+    });
     onInvited();
+    reset();
+    setOpen(false);
   }
 
-  function copy() {
-    if (!inviteUrl) return;
-    navigator.clipboard.writeText(inviteUrl);
-    toast.success("Invite link copied");
-  }
+
+
 
   return (
     <Dialog open={open} onOpenChange={(o) => { setOpen(o); if (!o) reset(); }}>
@@ -90,19 +92,8 @@ export default function InviteUserDialog({ onInvited }: Props) {
           </DialogDescription>
         </DialogHeader>
 
-        {inviteUrl ? (
-          <div className="space-y-4">
-            <p className="text-sm text-foreground">Invitation link:</p>
-            <div className="flex gap-2">
-              <Input value={inviteUrl} readOnly className="font-mono text-xs" />
-              <Button type="button" onClick={copy}><Copy className="size-3.5" /></Button>
-            </div>
-            <DialogFooter>
-              <Button variant="outline" onClick={() => { reset(); }}>Invite another</Button>
-              <Button onClick={() => setOpen(false)}>Done</Button>
-            </DialogFooter>
-          </div>
-        ) : (
+        {(
+
           <form onSubmit={handleSubmit} className="space-y-4">
             <div className="grid grid-cols-2 gap-3">
               <div className="space-y-1.5">
