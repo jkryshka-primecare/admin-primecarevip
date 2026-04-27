@@ -24,6 +24,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { CalendarSyncSettings } from "@/components/hr/CalendarSyncSettings";
 
 const STATUS_ICON: Record<string, typeof CheckCircle2> = {
   pending: Clock,
