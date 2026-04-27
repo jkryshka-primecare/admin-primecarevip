@@ -908,11 +908,25 @@ function ReviewDetailDialog({
 
   const save = useMutation({
     mutationFn: async () => {
+      const previousStatus = review?.status as ReviewStatus | undefined;
       const { error } = await supabase
         .from("hr_performance_reviews")
         .update(form)
         .eq("id", reviewId);
       if (error) throw error;
+
+      // Fire-and-forget notification when status transitions to a notify stage.
+      const newStatus = form.status as ReviewStatus;
+      const NOTIFY: ReviewStatus[] = ["in_progress", "employee_review", "completed"];
+      if (newStatus !== previousStatus && NOTIFY.includes(newStatus)) {
+        supabase.functions
+          .invoke("notify-review-status", {
+            body: { reviewId, previousStatus, newStatus },
+          })
+          .catch(() => {
+            /* non-blocking */
+          });
+      }
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["hr", "performance-reviews"] });
