@@ -22,7 +22,12 @@ const SERVICE_ROLE = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? "";
 const BUCKET = "email-assets";
 const KNOWN_FILE = "primecare-logo.jpg"; // seeded asset
 
-Deno.test("email-assets storage hardening", async (t) => {
+Deno.test({
+  name: "email-assets storage hardening",
+  // Supabase client keeps realtime heartbeat intervals open; not relevant here.
+  sanitizeOps: false,
+  sanitizeResources: false,
+  fn: async (t) => {
   const anon = createClient(SUPABASE_URL, ANON_KEY);
   const admin = SERVICE_ROLE
     ? createClient(SUPABASE_URL, SERVICE_ROLE)
