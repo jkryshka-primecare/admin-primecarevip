@@ -595,6 +595,27 @@ export type Database = {
           },
         ]
       }
+      hr_settings: {
+        Row: {
+          google_calendar_id: string | null
+          id: boolean
+          updated_at: string
+          updated_by: string | null
+        }
+        Insert: {
+          google_calendar_id?: string | null
+          id?: boolean
+          updated_at?: string
+          updated_by?: string | null
+        }
+        Update: {
+          google_calendar_id?: string | null
+          id?: boolean
+          updated_at?: string
+          updated_by?: string | null
+        }
+        Relationships: []
+      }
       hr_time_off_requests: {
         Row: {
           calendar_event_id: string | null
