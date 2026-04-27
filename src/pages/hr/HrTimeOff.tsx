@@ -127,6 +127,15 @@ export default function HrTimeOff() {
         .update({ status, reviewed_by: user!.id, reviewed_at: new Date().toISOString() })
         .eq("id", id);
       if (error) throw error;
+
+      // Sync to Google Calendar (best-effort): create on approve, delete on deny.
+      try {
+        await supabase.functions.invoke("sync-timeoff-calendar", {
+          body: { request_id: id, action: status === "approved" ? "upsert" : "delete" },
+        });
+      } catch (e) {
+        console.warn("Calendar sync failed (non-blocking):", e);
+      }
     },
     onSuccess: (_d, vars) => {
       queryClient.invalidateQueries({ queryKey: ["hr", "time-off-requests"] });
