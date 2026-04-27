@@ -64,7 +64,6 @@ Deno.test("email-assets storage hardening", async (t) => {
       `expected 200 from ${data.publicUrl}, got ${res.status}`,
     );
     const buf = await res.arrayBuffer();
-    await res.body?.cancel?.();
     assert(buf.byteLength > 0, "expected non-empty file body");
   });
 });
