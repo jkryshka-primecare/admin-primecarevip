@@ -1,20 +1,24 @@
-// Admin-only edge function to invite a new user by email.
-// - Verifies the caller's JWT and confirms they hold the 'admin' role.
-// - Verifies the email's domain is in allowed_signup_domains.
-// - Sends a Supabase invite (magic link) via the service role.
-// - Assigns the requested role (pending/staff/clinician/admin) on success
-//   so the user lands with the right access immediately.
+// Admin-only edge function to invite a new user.
+// - Verifies the caller is an HR admin (admin or super_admin).
+// - Creates a row in public.invitations with a long-lived token.
+// - Returns an invite_url pointing to /auth?invite=<token> that the admin
+//   can share. The link does not expire (until used or revoked), avoiding
+//   the OTP-expired errors that come from Supabase's built-in inviteUserByEmail.
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.74.0";
 import { corsHeaders, deny } from "../_shared/auth.ts";
 
 type InviteBody = {
   email: string;
-  role: "pending" | "staff" | "clinician" | "admin";
+  role: string;
+  first_name?: string;
+  last_name?: string;
   display_name?: string;
 };
 
-const ROLES = new Set(["pending", "staff", "clinician", "admin"]);
+const ROLES = new Set([
+  "pending", "staff", "hr", "billing", "pharmacy", "clinical", "admin", "super_admin",
+]);
 
 function json(body: unknown, status = 200) {
   return new Response(JSON.stringify(body), {
@@ -68,60 +72,52 @@ Deno.serve(async (req) => {
 
   const email = (body.email ?? "").trim().toLowerCase();
   const role = body.role;
-  const displayName = body.display_name?.trim() || null;
+  const firstName = (body.first_name ?? "").trim();
+  const lastName = (body.last_name ?? "").trim();
 
   const emailRe = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
   if (!emailRe.test(email)) return deny(400, "Please enter a valid email address.");
   if (!ROLES.has(role)) return deny(400, "Invalid role.");
+  if (!firstName || !lastName) return deny(400, "First and last name are required.");
 
-  // 3. Domain allow-list check (skipped — no allowed_signup_domains table configured).
+  // 3. Revoke any prior pending invitations for this email so only the
+  //    newest link is valid.
+  await admin.from("invitations")
+    .update({ status: "revoked" })
+    .eq("email", email)
+    .eq("status", "pending");
 
+  // 4. Create the invitation row. The token defaults to gen_random_uuid().
+  const { data: inv, error: invErr } = await admin
+    .from("invitations")
+    .insert({
+      email,
+      first_name: firstName,
+      last_name: lastName,
+      role,
+      created_by: callerId,
+      status: "pending",
+    })
+    .select("token")
+    .single();
 
-  // 4. Send the invite. If the user already exists, surface a friendly message.
-  const redirectTo = req.headers.get("origin")
-    ? `${req.headers.get("origin")}/auth`
-    : undefined;
-
-  const { data: invited, error: inviteErr } = await admin.auth.admin.inviteUserByEmail(
-    email,
-    {
-      data: displayName ? { full_name: displayName } : undefined,
-      redirectTo,
-    },
-  );
-
-  if (inviteErr) {
-    const msg = inviteErr.message ?? "Could not send invite.";
-    const status = /already|exist/i.test(msg) ? 409 : 500;
-    return json({ error: msg }, status);
+  if (invErr || !inv?.token) {
+    return json({ error: invErr?.message ?? "Could not create invitation." }, 500);
   }
 
-  const newUserId = invited?.user?.id;
-  if (!newUserId) return deny(500, "Invite sent but no user id was returned.");
-
-  // 5. Replace any default role with the requested one.
-  await admin.from("user_roles").delete().eq("user_id", newUserId);
-  const { error: insErr } = await admin.from("user_roles").insert({
-    user_id: newUserId,
-    role,
-    granted_by: callerId,
-  });
-  if (insErr) {
-    return json(
-      {
-        error: `Invite sent, but role assignment failed: ${insErr.message}. You can fix the role manually on the Users page.`,
-      },
-      500,
-    );
-  }
+  // 5. Build the share link. Prefer the request origin; fall back to env.
+  const origin = req.headers.get("origin")
+    ?? Deno.env.get("PUBLIC_APP_URL")
+    ?? "https://admin.primecarevip.com";
+  const inviteUrl = `${origin.replace(/\/+$/, "")}/auth?invite=${inv.token}`;
 
   // 6. Audit
   await admin.from("phi_access_log").insert({
     user_id: callerId,
     user_email: callerEmail,
     source: "admin-invite-user",
-    resource: "auth.users",
-    resource_id: newUserId,
+    resource: "public.invitations",
+    resource_id: inv.token,
     scope: `invite:${role}`,
     http_status: 200,
     row_count: 1,
@@ -129,5 +125,5 @@ Deno.serve(async (req) => {
     user_agent: req.headers.get("user-agent") ?? null,
   });
 
-  return json({ ok: true, user_id: newUserId, email, role });
+  return json({ ok: true, email, role, invite_url: inviteUrl });
 });
