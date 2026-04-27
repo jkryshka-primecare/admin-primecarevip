@@ -74,11 +74,8 @@ export default function InviteUserDialog({ onInvited }: Props) {
     setOpen(false);
   }
 
-  function copy() {
-    if (!inviteUrl) return;
-    navigator.clipboard.writeText(inviteUrl);
-    toast.success("Invite link copied");
-  }
+
+
 
   return (
     <Dialog open={open} onOpenChange={(o) => { setOpen(o); if (!o) reset(); }}>
