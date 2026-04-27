@@ -52,9 +52,8 @@ Deno.serve(async (req) => {
     Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!,
   );
 
-  const { data: isAdmin, error: roleErr } = await admin.rpc("has_role", {
+  const { data: isAdmin, error: roleErr } = await admin.rpc("is_hr_admin", {
     _user_id: callerId,
-    _role: "admin",
   });
   if (roleErr) return deny(500, `Role check failed: ${roleErr.message}`);
   if (!isAdmin) return deny(403, "Only admins can invite users.");
