@@ -545,6 +545,60 @@ export type Database = {
           },
         ]
       }
+      hr_one_on_ones: {
+        Row: {
+          action_items: string | null
+          created_at: string
+          created_by: string | null
+          employee_id: string
+          id: string
+          is_private: boolean
+          manager_id: string
+          meeting_date: string
+          summary: string | null
+          updated_at: string
+        }
+        Insert: {
+          action_items?: string | null
+          created_at?: string
+          created_by?: string | null
+          employee_id: string
+          id?: string
+          is_private?: boolean
+          manager_id: string
+          meeting_date: string
+          summary?: string | null
+          updated_at?: string
+        }
+        Update: {
+          action_items?: string | null
+          created_at?: string
+          created_by?: string | null
+          employee_id?: string
+          id?: string
+          is_private?: boolean
+          manager_id?: string
+          meeting_date?: string
+          summary?: string | null
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "hr_one_on_ones_employee_id_fkey"
+            columns: ["employee_id"]
+            isOneToOne: false
+            referencedRelation: "hr_employees"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "hr_one_on_ones_manager_id_fkey"
+            columns: ["manager_id"]
+            isOneToOne: false
+            referencedRelation: "hr_employees"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       hr_payroll_records: {
         Row: {
           created_at: string
@@ -589,6 +643,82 @@ export type Database = {
           {
             foreignKeyName: "hr_payroll_records_employee_id_fkey"
             columns: ["employee_id"]
+            isOneToOne: false
+            referencedRelation: "hr_employees"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      hr_performance_reviews: {
+        Row: {
+          acknowledged_at: string | null
+          areas_to_improve: string | null
+          completed_at: string | null
+          created_at: string
+          cycle_id: string
+          employee_comments: string | null
+          employee_id: string
+          id: string
+          manager_comments: string | null
+          overall_rating: number | null
+          reviewer_id: string | null
+          status: Database["public"]["Enums"]["hr_review_status"]
+          strengths: string | null
+          submitted_at: string | null
+          updated_at: string
+        }
+        Insert: {
+          acknowledged_at?: string | null
+          areas_to_improve?: string | null
+          completed_at?: string | null
+          created_at?: string
+          cycle_id: string
+          employee_comments?: string | null
+          employee_id: string
+          id?: string
+          manager_comments?: string | null
+          overall_rating?: number | null
+          reviewer_id?: string | null
+          status?: Database["public"]["Enums"]["hr_review_status"]
+          strengths?: string | null
+          submitted_at?: string | null
+          updated_at?: string
+        }
+        Update: {
+          acknowledged_at?: string | null
+          areas_to_improve?: string | null
+          completed_at?: string | null
+          created_at?: string
+          cycle_id?: string
+          employee_comments?: string | null
+          employee_id?: string
+          id?: string
+          manager_comments?: string | null
+          overall_rating?: number | null
+          reviewer_id?: string | null
+          status?: Database["public"]["Enums"]["hr_review_status"]
+          strengths?: string | null
+          submitted_at?: string | null
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "hr_performance_reviews_cycle_id_fkey"
+            columns: ["cycle_id"]
+            isOneToOne: false
+            referencedRelation: "hr_review_cycles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "hr_performance_reviews_employee_id_fkey"
+            columns: ["employee_id"]
+            isOneToOne: false
+            referencedRelation: "hr_employees"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "hr_performance_reviews_reviewer_id_fkey"
+            columns: ["reviewer_id"]
             isOneToOne: false
             referencedRelation: "hr_employees"
             referencedColumns: ["id"]
@@ -641,6 +771,92 @@ export type Database = {
             columns: ["employee_id"]
             isOneToOne: false
             referencedRelation: "hr_employees"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      hr_review_cycles: {
+        Row: {
+          created_at: string
+          created_by: string | null
+          description: string | null
+          due_date: string | null
+          id: string
+          name: string
+          period_end: string
+          period_start: string
+          status: Database["public"]["Enums"]["hr_review_cycle_status"]
+          updated_at: string
+        }
+        Insert: {
+          created_at?: string
+          created_by?: string | null
+          description?: string | null
+          due_date?: string | null
+          id?: string
+          name: string
+          period_end: string
+          period_start: string
+          status?: Database["public"]["Enums"]["hr_review_cycle_status"]
+          updated_at?: string
+        }
+        Update: {
+          created_at?: string
+          created_by?: string | null
+          description?: string | null
+          due_date?: string | null
+          id?: string
+          name?: string
+          period_end?: string
+          period_start?: string
+          status?: Database["public"]["Enums"]["hr_review_cycle_status"]
+          updated_at?: string
+        }
+        Relationships: []
+      }
+      hr_review_goals: {
+        Row: {
+          created_at: string
+          description: string | null
+          id: string
+          progress_pct: number
+          review_id: string
+          sort_order: number
+          status: Database["public"]["Enums"]["hr_goal_status"]
+          target_date: string | null
+          title: string
+          updated_at: string
+        }
+        Insert: {
+          created_at?: string
+          description?: string | null
+          id?: string
+          progress_pct?: number
+          review_id: string
+          sort_order?: number
+          status?: Database["public"]["Enums"]["hr_goal_status"]
+          target_date?: string | null
+          title: string
+          updated_at?: string
+        }
+        Update: {
+          created_at?: string
+          description?: string | null
+          id?: string
+          progress_pct?: number
+          review_id?: string
+          sort_order?: number
+          status?: Database["public"]["Enums"]["hr_goal_status"]
+          target_date?: string | null
+          title?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "hr_review_goals_review_id_fkey"
+            columns: ["review_id"]
+            isOneToOne: false
+            referencedRelation: "hr_performance_reviews"
             referencedColumns: ["id"]
           },
         ]
@@ -1245,6 +1461,7 @@ export type Database = {
         | "holiday"
         | "sick"
       hr_employment_status: "active" | "on_leave" | "terminated" | "suspended"
+      hr_goal_status: "not_started" | "in_progress" | "completed" | "cancelled"
       hr_grievance_priority: "low" | "medium" | "high" | "urgent"
       hr_grievance_status:
         | "new"
@@ -1260,6 +1477,12 @@ export type Database = {
         | "complete"
       hr_payroll_status: "pending" | "processed" | "paid" | "cancelled"
       hr_request_status: "pending" | "approved" | "denied" | "cancelled"
+      hr_review_cycle_status: "draft" | "active" | "closed"
+      hr_review_status:
+        | "draft"
+        | "in_progress"
+        | "employee_review"
+        | "completed"
       hr_time_off_type:
         | "vacation"
         | "sick"
@@ -1414,6 +1637,7 @@ export const Constants = {
         "sick",
       ],
       hr_employment_status: ["active", "on_leave", "terminated", "suspended"],
+      hr_goal_status: ["not_started", "in_progress", "completed", "cancelled"],
       hr_grievance_priority: ["low", "medium", "high", "urgent"],
       hr_grievance_status: [
         "new",
@@ -1431,6 +1655,13 @@ export const Constants = {
       ],
       hr_payroll_status: ["pending", "processed", "paid", "cancelled"],
       hr_request_status: ["pending", "approved", "denied", "cancelled"],
+      hr_review_cycle_status: ["draft", "active", "closed"],
+      hr_review_status: [
+        "draft",
+        "in_progress",
+        "employee_review",
+        "completed",
+      ],
       hr_time_off_type: [
         "vacation",
         "sick",
