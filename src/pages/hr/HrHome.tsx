@@ -7,6 +7,7 @@ import HrOrgChart from "./HrOrgChart";
 import HrOnboarding from "./HrOnboarding";
 import HrPayroll from "./HrPayroll";
 import HrTimeOff from "./HrTimeOff";
+import HrAttendance from "./HrAttendance";
 import HrGrievances from "./HrGrievances";
 import HrDocuments from "./HrDocuments";
 import HrNotifications from "./HrNotifications";
@@ -22,6 +23,7 @@ export default function HrHome() {
         <Route path="onboarding" element={<HrOnboarding />} />
         <Route path="payroll" element={<HrPayroll />} />
         <Route path="time-off" element={<HrTimeOff />} />
+        <Route path="attendance" element={<HrAttendance />} />
         <Route path="grievances" element={<HrGrievances />} />
         <Route path="documents" element={<HrDocuments />} />
         <Route path="notifications" element={<HrNotifications />} />
