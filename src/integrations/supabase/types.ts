@@ -128,6 +128,529 @@ export type Database = {
         }
         Relationships: []
       }
+      hr_attendance_records: {
+        Row: {
+          clock_in: string | null
+          clock_out: string | null
+          created_at: string
+          date: string
+          employee_id: string
+          hours_worked: number | null
+          id: string
+          notes: string | null
+          status: Database["public"]["Enums"]["hr_attendance_status"]
+        }
+        Insert: {
+          clock_in?: string | null
+          clock_out?: string | null
+          created_at?: string
+          date: string
+          employee_id: string
+          hours_worked?: number | null
+          id?: string
+          notes?: string | null
+          status?: Database["public"]["Enums"]["hr_attendance_status"]
+        }
+        Update: {
+          clock_in?: string | null
+          clock_out?: string | null
+          created_at?: string
+          date?: string
+          employee_id?: string
+          hours_worked?: number | null
+          id?: string
+          notes?: string | null
+          status?: Database["public"]["Enums"]["hr_attendance_status"]
+        }
+        Relationships: [
+          {
+            foreignKeyName: "hr_attendance_records_employee_id_fkey"
+            columns: ["employee_id"]
+            isOneToOne: false
+            referencedRelation: "hr_employees"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      hr_certifications: {
+        Row: {
+          created_at: string
+          document_name: string | null
+          document_url: string | null
+          employee_id: string
+          expiration_date: string | null
+          id: string
+          issue_date: string | null
+          issuing_authority: string | null
+          last_notified_date: string | null
+          license_number: string | null
+          name: string
+          notes: string | null
+          updated_at: string
+        }
+        Insert: {
+          created_at?: string
+          document_name?: string | null
+          document_url?: string | null
+          employee_id: string
+          expiration_date?: string | null
+          id?: string
+          issue_date?: string | null
+          issuing_authority?: string | null
+          last_notified_date?: string | null
+          license_number?: string | null
+          name: string
+          notes?: string | null
+          updated_at?: string
+        }
+        Update: {
+          created_at?: string
+          document_name?: string | null
+          document_url?: string | null
+          employee_id?: string
+          expiration_date?: string | null
+          id?: string
+          issue_date?: string | null
+          issuing_authority?: string | null
+          last_notified_date?: string | null
+          license_number?: string | null
+          name?: string
+          notes?: string | null
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "hr_certifications_employee_id_fkey"
+            columns: ["employee_id"]
+            isOneToOne: false
+            referencedRelation: "hr_employees"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      hr_departments: {
+        Row: {
+          created_at: string
+          description: string | null
+          head_employee_id: string | null
+          id: string
+          name: string
+          updated_at: string
+        }
+        Insert: {
+          created_at?: string
+          description?: string | null
+          head_employee_id?: string | null
+          id?: string
+          name: string
+          updated_at?: string
+        }
+        Update: {
+          created_at?: string
+          description?: string | null
+          head_employee_id?: string | null
+          id?: string
+          name?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "hr_departments_head_fk"
+            columns: ["head_employee_id"]
+            isOneToOne: false
+            referencedRelation: "hr_employees"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      hr_documents: {
+        Row: {
+          created_at: string
+          description: string | null
+          employee_id: string
+          file_size: number | null
+          file_type: string | null
+          file_url: string
+          id: string
+          name: string
+          uploaded_by: string | null
+        }
+        Insert: {
+          created_at?: string
+          description?: string | null
+          employee_id: string
+          file_size?: number | null
+          file_type?: string | null
+          file_url: string
+          id?: string
+          name: string
+          uploaded_by?: string | null
+        }
+        Update: {
+          created_at?: string
+          description?: string | null
+          employee_id?: string
+          file_size?: number | null
+          file_type?: string | null
+          file_url?: string
+          id?: string
+          name?: string
+          uploaded_by?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "hr_documents_employee_id_fkey"
+            columns: ["employee_id"]
+            isOneToOne: false
+            referencedRelation: "hr_employees"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      hr_employees: {
+        Row: {
+          address: string | null
+          avatar_url: string | null
+          created_at: string
+          date_of_birth: string | null
+          department_id: string | null
+          email: string
+          emergency_contact_name: string | null
+          emergency_contact_phone: string | null
+          employment_status: Database["public"]["Enums"]["hr_employment_status"]
+          first_name: string
+          hire_date: string | null
+          id: string
+          job_title: string | null
+          last_name: string
+          manager_id: string | null
+          notes: string | null
+          phone: string | null
+          salary: number | null
+          ssn: string | null
+          termination_date: string | null
+          updated_at: string
+          user_id: string | null
+        }
+        Insert: {
+          address?: string | null
+          avatar_url?: string | null
+          created_at?: string
+          date_of_birth?: string | null
+          department_id?: string | null
+          email: string
+          emergency_contact_name?: string | null
+          emergency_contact_phone?: string | null
+          employment_status?: Database["public"]["Enums"]["hr_employment_status"]
+          first_name: string
+          hire_date?: string | null
+          id?: string
+          job_title?: string | null
+          last_name: string
+          manager_id?: string | null
+          notes?: string | null
+          phone?: string | null
+          salary?: number | null
+          ssn?: string | null
+          termination_date?: string | null
+          updated_at?: string
+          user_id?: string | null
+        }
+        Update: {
+          address?: string | null
+          avatar_url?: string | null
+          created_at?: string
+          date_of_birth?: string | null
+          department_id?: string | null
+          email?: string
+          emergency_contact_name?: string | null
+          emergency_contact_phone?: string | null
+          employment_status?: Database["public"]["Enums"]["hr_employment_status"]
+          first_name?: string
+          hire_date?: string | null
+          id?: string
+          job_title?: string | null
+          last_name?: string
+          manager_id?: string | null
+          notes?: string | null
+          phone?: string | null
+          salary?: number | null
+          ssn?: string | null
+          termination_date?: string | null
+          updated_at?: string
+          user_id?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "hr_employees_department_id_fkey"
+            columns: ["department_id"]
+            isOneToOne: false
+            referencedRelation: "hr_departments"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "hr_employees_manager_id_fkey"
+            columns: ["manager_id"]
+            isOneToOne: false
+            referencedRelation: "hr_employees"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      hr_grievances: {
+        Row: {
+          assigned_to: string | null
+          category: string
+          created_at: string
+          description: string | null
+          id: string
+          is_anonymous: boolean
+          priority: Database["public"]["Enums"]["hr_grievance_priority"]
+          resolution_notes: string | null
+          status: Database["public"]["Enums"]["hr_grievance_status"]
+          submitted_by: string | null
+          summary: string
+          updated_at: string
+        }
+        Insert: {
+          assigned_to?: string | null
+          category: string
+          created_at?: string
+          description?: string | null
+          id?: string
+          is_anonymous?: boolean
+          priority?: Database["public"]["Enums"]["hr_grievance_priority"]
+          resolution_notes?: string | null
+          status?: Database["public"]["Enums"]["hr_grievance_status"]
+          submitted_by?: string | null
+          summary: string
+          updated_at?: string
+        }
+        Update: {
+          assigned_to?: string | null
+          category?: string
+          created_at?: string
+          description?: string | null
+          id?: string
+          is_anonymous?: boolean
+          priority?: Database["public"]["Enums"]["hr_grievance_priority"]
+          resolution_notes?: string | null
+          status?: Database["public"]["Enums"]["hr_grievance_status"]
+          submitted_by?: string | null
+          summary?: string
+          updated_at?: string
+        }
+        Relationships: []
+      }
+      hr_notifications: {
+        Row: {
+          created_at: string
+          id: string
+          link: string | null
+          message: string
+          read: boolean
+          title: string
+          user_id: string
+        }
+        Insert: {
+          created_at?: string
+          id?: string
+          link?: string | null
+          message: string
+          read?: boolean
+          title: string
+          user_id: string
+        }
+        Update: {
+          created_at?: string
+          id?: string
+          link?: string | null
+          message?: string
+          read?: boolean
+          title?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
+      hr_onboarding_checklists: {
+        Row: {
+          created_at: string
+          employee_id: string
+          id: string
+          stage: Database["public"]["Enums"]["hr_onboarding_stage"]
+          start_date: string
+          updated_at: string
+        }
+        Insert: {
+          created_at?: string
+          employee_id: string
+          id?: string
+          stage?: Database["public"]["Enums"]["hr_onboarding_stage"]
+          start_date: string
+          updated_at?: string
+        }
+        Update: {
+          created_at?: string
+          employee_id?: string
+          id?: string
+          stage?: Database["public"]["Enums"]["hr_onboarding_stage"]
+          start_date?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "hr_onboarding_checklists_employee_id_fkey"
+            columns: ["employee_id"]
+            isOneToOne: false
+            referencedRelation: "hr_employees"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      hr_onboarding_tasks: {
+        Row: {
+          checklist_id: string
+          completed_at: string | null
+          created_at: string
+          id: string
+          is_completed: boolean
+          name: string
+          sort_order: number
+        }
+        Insert: {
+          checklist_id: string
+          completed_at?: string | null
+          created_at?: string
+          id?: string
+          is_completed?: boolean
+          name: string
+          sort_order?: number
+        }
+        Update: {
+          checklist_id?: string
+          completed_at?: string | null
+          created_at?: string
+          id?: string
+          is_completed?: boolean
+          name?: string
+          sort_order?: number
+        }
+        Relationships: [
+          {
+            foreignKeyName: "hr_onboarding_tasks_checklist_id_fkey"
+            columns: ["checklist_id"]
+            isOneToOne: false
+            referencedRelation: "hr_onboarding_checklists"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      hr_payroll_records: {
+        Row: {
+          created_at: string
+          deductions: number
+          employee_id: string
+          gross_pay: number
+          id: string
+          net_pay: number
+          notes: string | null
+          period_end: string
+          period_start: string
+          status: Database["public"]["Enums"]["hr_payroll_status"]
+          taxes: number
+        }
+        Insert: {
+          created_at?: string
+          deductions?: number
+          employee_id: string
+          gross_pay: number
+          id?: string
+          net_pay: number
+          notes?: string | null
+          period_end: string
+          period_start: string
+          status?: Database["public"]["Enums"]["hr_payroll_status"]
+          taxes?: number
+        }
+        Update: {
+          created_at?: string
+          deductions?: number
+          employee_id?: string
+          gross_pay?: number
+          id?: string
+          net_pay?: number
+          notes?: string | null
+          period_end?: string
+          period_start?: string
+          status?: Database["public"]["Enums"]["hr_payroll_status"]
+          taxes?: number
+        }
+        Relationships: [
+          {
+            foreignKeyName: "hr_payroll_records_employee_id_fkey"
+            columns: ["employee_id"]
+            isOneToOne: false
+            referencedRelation: "hr_employees"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      hr_time_off_requests: {
+        Row: {
+          calendar_event_id: string | null
+          created_at: string
+          days: number
+          employee_id: string
+          end_date: string
+          id: string
+          reason: string | null
+          reviewed_at: string | null
+          reviewed_by: string | null
+          start_date: string
+          status: Database["public"]["Enums"]["hr_request_status"]
+          type: Database["public"]["Enums"]["hr_time_off_type"]
+          updated_at: string
+        }
+        Insert: {
+          calendar_event_id?: string | null
+          created_at?: string
+          days: number
+          employee_id: string
+          end_date: string
+          id?: string
+          reason?: string | null
+          reviewed_at?: string | null
+          reviewed_by?: string | null
+          start_date: string
+          status?: Database["public"]["Enums"]["hr_request_status"]
+          type: Database["public"]["Enums"]["hr_time_off_type"]
+          updated_at?: string
+        }
+        Update: {
+          calendar_event_id?: string | null
+          created_at?: string
+          days?: number
+          employee_id?: string
+          end_date?: string
+          id?: string
+          reason?: string | null
+          reviewed_at?: string | null
+          reviewed_by?: string | null
+          start_date?: string
+          status?: Database["public"]["Enums"]["hr_request_status"]
+          type?: Database["public"]["Enums"]["hr_time_off_type"]
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "hr_time_off_requests_employee_id_fkey"
+            columns: ["employee_id"]
+            isOneToOne: false
+            referencedRelation: "hr_employees"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       icd10_codes: {
         Row: {
           code: string
@@ -592,6 +1115,7 @@ export type Database = {
       [_ in never]: never
     }
     Functions: {
+      current_employee_id: { Args: never; Returns: string }
       delete_email: {
         Args: { message_id: number; queue_name: string }
         Returns: boolean
@@ -607,6 +1131,12 @@ export type Database = {
         }
         Returns: boolean
       }
+      is_employee_manager_of: {
+        Args: { _employee_id: string; _viewer_user_id: string }
+        Returns: boolean
+      }
+      is_hr_admin: { Args: { _user_id: string }; Returns: boolean }
+      is_hr_manager: { Args: { _user_id: string }; Returns: boolean }
       is_staff: { Args: { _user_id: string }; Returns: boolean }
       move_to_dlq: {
         Args: {
@@ -636,6 +1166,37 @@ export type Database = {
         | "billing"
         | "staff"
         | "pending"
+      hr_attendance_status:
+        | "present"
+        | "absent"
+        | "late"
+        | "remote"
+        | "holiday"
+        | "sick"
+      hr_employment_status: "active" | "on_leave" | "terminated" | "suspended"
+      hr_grievance_priority: "low" | "medium" | "high" | "urgent"
+      hr_grievance_status:
+        | "new"
+        | "under_review"
+        | "in_progress"
+        | "resolved"
+        | "closed"
+      hr_onboarding_stage:
+        | "pre_hire"
+        | "first_day"
+        | "first_week"
+        | "first_month"
+        | "complete"
+      hr_payroll_status: "pending" | "processed" | "paid" | "cancelled"
+      hr_request_status: "pending" | "approved" | "denied" | "cancelled"
+      hr_time_off_type:
+        | "vacation"
+        | "sick"
+        | "personal"
+        | "bereavement"
+        | "jury_duty"
+        | "unpaid"
+        | "other"
     }
     CompositeTypes: {
       [_ in never]: never
@@ -772,6 +1333,41 @@ export const Constants = {
         "billing",
         "staff",
         "pending",
+      ],
+      hr_attendance_status: [
+        "present",
+        "absent",
+        "late",
+        "remote",
+        "holiday",
+        "sick",
+      ],
+      hr_employment_status: ["active", "on_leave", "terminated", "suspended"],
+      hr_grievance_priority: ["low", "medium", "high", "urgent"],
+      hr_grievance_status: [
+        "new",
+        "under_review",
+        "in_progress",
+        "resolved",
+        "closed",
+      ],
+      hr_onboarding_stage: [
+        "pre_hire",
+        "first_day",
+        "first_week",
+        "first_month",
+        "complete",
+      ],
+      hr_payroll_status: ["pending", "processed", "paid", "cancelled"],
+      hr_request_status: ["pending", "approved", "denied", "cancelled"],
+      hr_time_off_type: [
+        "vacation",
+        "sick",
+        "personal",
+        "bereavement",
+        "jury_duty",
+        "unpaid",
+        "other",
       ],
     },
   },
