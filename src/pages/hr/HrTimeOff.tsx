@@ -25,6 +25,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { CalendarSyncSettings } from "@/components/hr/CalendarSyncSettings";
+import { PtoBalanceSummary } from "@/components/hr/PtoBalanceSummary";
 
 const STATUS_ICON: Record<string, typeof CheckCircle2> = {
   pending: Clock,
@@ -240,6 +241,8 @@ export default function HrTimeOff() {
           </DialogContent>
         </Dialog>
       </div>
+
+      <PtoBalanceSummary />
 
       {isAdmin && <CalendarSyncSettings />}
 
