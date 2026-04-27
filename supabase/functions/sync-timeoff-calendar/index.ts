@@ -105,7 +105,8 @@ Deno.serve(async (req) => {
     }
 
     // UPSERT
-    const emp = request.hr_employees as
+    const empRaw = request.hr_employees as unknown;
+    const emp = (Array.isArray(empRaw) ? empRaw[0] : empRaw) as
       | { first_name: string; last_name: string; email: string }
       | null;
     const empName = emp ? `${emp.first_name} ${emp.last_name}` : "Employee";
