@@ -12,7 +12,7 @@ import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from "@/components/ui/select";
 import { toast } from "sonner";
-import { Loader2, UserPlus, Copy } from "lucide-react";
+import { Loader2, UserPlus } from "lucide-react";
 
 type Props = { onInvited: () => void };
 
