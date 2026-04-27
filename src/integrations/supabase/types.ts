@@ -595,6 +595,56 @@ export type Database = {
           },
         ]
       }
+      hr_pto_balances: {
+        Row: {
+          accrual_rate_per_year: number
+          accrued_days: number
+          carryover_days: number
+          created_at: string
+          employee_id: string
+          id: string
+          notes: string | null
+          type: Database["public"]["Enums"]["hr_time_off_type"]
+          updated_at: string
+          used_days: number
+          year: number
+        }
+        Insert: {
+          accrual_rate_per_year?: number
+          accrued_days?: number
+          carryover_days?: number
+          created_at?: string
+          employee_id: string
+          id?: string
+          notes?: string | null
+          type: Database["public"]["Enums"]["hr_time_off_type"]
+          updated_at?: string
+          used_days?: number
+          year?: number
+        }
+        Update: {
+          accrual_rate_per_year?: number
+          accrued_days?: number
+          carryover_days?: number
+          created_at?: string
+          employee_id?: string
+          id?: string
+          notes?: string | null
+          type?: Database["public"]["Enums"]["hr_time_off_type"]
+          updated_at?: string
+          used_days?: number
+          year?: number
+        }
+        Relationships: [
+          {
+            foreignKeyName: "hr_pto_balances_employee_id_fkey"
+            columns: ["employee_id"]
+            isOneToOne: false
+            referencedRelation: "hr_employees"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       hr_settings: {
         Row: {
           google_calendar_id: string | null
