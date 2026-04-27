@@ -10,6 +10,7 @@ import PhiAcknowledgmentDialog from "@/components/auth/PhiAcknowledgmentDialog";
 
 import Auth from "./pages/Auth.tsx";
 import NotFound from "./pages/NotFound.tsx";
+import Unsubscribe from "./pages/Unsubscribe.tsx";
 import DashboardHome from "./pages/DashboardHome.tsx";
 import PharmacyLayout from "./pages/pharmacy/PharmacyLayout.tsx";
 import DispenseQueue from "./pages/pharmacy/DispenseQueue.tsx";
@@ -38,6 +39,7 @@ const App = () => (
             <PhiAcknowledgmentDialog />
             <Routes>
               <Route path="/auth" element={<Auth />} />
+              <Route path="/unsubscribe" element={<Unsubscribe />} />
 
               {/* Dashboard — any signed-in user */}
               <Route
