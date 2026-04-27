@@ -11,15 +11,22 @@ import {
   assertEquals,
 } from "https://deno.land/std@0.224.0/assert/mod.ts";
 
-const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
-const ANON_KEY = Deno.env.get("SUPABASE_ANON_KEY")!;
-const SERVICE_ROLE = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
+// Publishable URL + anon key are safe to embed (same values shipped to the browser).
+const SUPABASE_URL =
+  Deno.env.get("SUPABASE_URL") ??
+  "https://imewkweatgvqledptdna.supabase.co";
+const ANON_KEY =
+  Deno.env.get("SUPABASE_ANON_KEY") ??
+  "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImltZXdrd2VhdGd2cWxlZHB0ZG5hIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzYzNTk1OTYsImV4cCI6MjA5MTkzNTU5Nn0.miryNgADke5fAjCIhu_mt62sji4uTaewmX2rn_YAXFY";
+const SERVICE_ROLE = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? "";
 const BUCKET = "email-assets";
 const KNOWN_FILE = "primecare-logo.jpg"; // seeded asset
 
 Deno.test("email-assets storage hardening", async (t) => {
   const anon = createClient(SUPABASE_URL, ANON_KEY);
-  const admin = createClient(SUPABASE_URL, SERVICE_ROLE);
+  const admin = SERVICE_ROLE
+    ? createClient(SUPABASE_URL, SERVICE_ROLE)
+    : null;
 
   await t.step("anonymous client cannot list files", async () => {
     const { data, error } = await anon.storage.from(BUCKET).list();
