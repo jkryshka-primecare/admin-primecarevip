@@ -25,3 +25,5 @@ project_id = "imewkweatgvqledptdna"
     verify_jwt = false
   [functions.check-expiring-certifications]
     verify_jwt = false
+  [functions.sync-timeoff-calendar]
+    verify_jwt = true
