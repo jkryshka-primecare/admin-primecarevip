@@ -32,10 +32,9 @@ export default function InviteUserDialog({ onInvited }: Props) {
   const [lastName, setLastName] = useState("");
   const [role, setRole] = useState<AppRole>("staff");
   const [submitting, setSubmitting] = useState(false);
-  const [inviteUrl, setInviteUrl] = useState<string | null>(null);
 
   function reset() {
-    setEmail(""); setFirstName(""); setLastName(""); setRole("staff"); setInviteUrl(null);
+    setEmail(""); setFirstName(""); setLastName(""); setRole("staff");
   }
 
   async function handleSubmit(e: React.FormEvent) {
