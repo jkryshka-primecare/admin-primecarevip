@@ -71,4 +71,5 @@ Deno.test({
     const buf = await res.arrayBuffer();
     assert(buf.byteLength > 0, "expected non-empty file body");
   });
+  },
 });
