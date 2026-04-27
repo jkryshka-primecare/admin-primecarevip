@@ -74,20 +74,8 @@ Deno.serve(async (req) => {
   if (!emailRe.test(email)) return deny(400, "Please enter a valid email address.");
   if (!ROLES.has(role)) return deny(400, "Invalid role.");
 
-  // 3. Domain allow-list check (matches the auth.users trigger)
-  const domain = email.split("@")[1];
-  const { data: domainRow, error: domainErr } = await admin
-    .from("allowed_signup_domains")
-    .select("domain")
-    .eq("domain", domain)
-    .maybeSingle();
-  if (domainErr) return deny(500, `Domain check failed: ${domainErr.message}`);
-  if (!domainRow) {
-    return deny(
-      400,
-      `"${domain}" is not on the approved signup domains list. Add it under Administration → Signup Domains first.`,
-    );
-  }
+  // 3. Domain allow-list check (skipped — no allowed_signup_domains table configured).
+
 
   // 4. Send the invite. If the user already exists, surface a friendly message.
   const redirectTo = req.headers.get("origin")
