@@ -43,6 +43,10 @@ Deno.test("email-assets storage hardening", async (t) => {
   });
 
   await t.step("service role can list files", async () => {
+    if (!admin) {
+      console.warn("SUPABASE_SERVICE_ROLE_KEY not set — skipping");
+      return;
+    }
     const { data, error } = await admin.storage.from(BUCKET).list();
     assertEquals(error, null, `service role list error: ${error?.message}`);
     assert(
