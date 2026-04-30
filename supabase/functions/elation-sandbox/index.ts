@@ -161,15 +161,34 @@ Deno.serve(async (req) => {
       Deno.env.get("ELATION_SANDBOX_TOKEN_URL") ??
       Deno.env.get("ELATION_TOKEN_URL") ??
       DEFAULT_TOKEN_URL;
+    // Sanitize base URLs: secrets pasted from dashboards sometimes include
+    // surrounding whitespace/tabs or omit the scheme.
+    const sanitizeBase = (raw: string, fallback: string): string => {
+      const trimmed = raw.replace(/\s+/g, "").replace(/\/+$/, "");
+      if (!trimmed) return fallback;
+      const withScheme = /^https?:\/\//i.test(trimmed)
+        ? trimmed
+        : `https://${trimmed}`;
+      try {
+        new URL(withScheme);
+        return withScheme;
+      } catch {
+        return fallback;
+      }
+    };
     // ELATION_BASE_URL is the global REST base (e.g. https://sandbox.elationemr.com/api/2.0)
-    const restBase =
+    const restBase = sanitizeBase(
       Deno.env.get("ELATION_SANDBOX_REST_BASE") ??
-      Deno.env.get("ELATION_BASE_URL") ??
-      DEFAULT_REST_BASE;
-    const fhirBase =
+        Deno.env.get("ELATION_BASE_URL") ??
+        DEFAULT_REST_BASE,
+      DEFAULT_REST_BASE,
+    );
+    const fhirBase = sanitizeBase(
       Deno.env.get("ELATION_SANDBOX_FHIR_BASE") ??
-      Deno.env.get("ELATION_FHIR_BASE") ??
-      DEFAULT_FHIR_BASE;
+        Deno.env.get("ELATION_FHIR_BASE") ??
+        DEFAULT_FHIR_BASE,
+      DEFAULT_FHIR_BASE,
+    );
 
     if (!clientId || !clientSecret) {
       // Return 200 with `configured: false` so the client can render an
