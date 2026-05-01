@@ -176,17 +176,16 @@ Deno.serve(async (req) => {
         return fallback;
       }
     };
-    // ELATION_BASE_URL is the global REST base (e.g. https://sandbox.elationemr.com/api/2.0)
+    // NOTE: Do NOT fall back to the global ELATION_BASE_URL / ELATION_FHIR_BASE
+    // here — those point at the production host (api.elationemr.com), which is
+    // not reachable from this sandbox function and causes DNS errors. Only use
+    // sandbox-specific overrides, otherwise default to the Elation sandbox.
     const restBase = sanitizeBase(
-      Deno.env.get("ELATION_SANDBOX_REST_BASE") ??
-        Deno.env.get("ELATION_BASE_URL") ??
-        DEFAULT_REST_BASE,
+      Deno.env.get("ELATION_SANDBOX_REST_BASE") ?? DEFAULT_REST_BASE,
       DEFAULT_REST_BASE,
     );
     const fhirBase = sanitizeBase(
-      Deno.env.get("ELATION_SANDBOX_FHIR_BASE") ??
-        Deno.env.get("ELATION_FHIR_BASE") ??
-        DEFAULT_FHIR_BASE,
+      Deno.env.get("ELATION_SANDBOX_FHIR_BASE") ?? DEFAULT_FHIR_BASE,
       DEFAULT_FHIR_BASE,
     );
 
