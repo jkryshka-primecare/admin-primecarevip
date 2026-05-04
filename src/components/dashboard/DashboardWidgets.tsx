@@ -1,5 +1,6 @@
 import { Link } from "react-router-dom";
 import { cn } from "@/lib/utils";
+import { useHintDashboard, fmtUsd } from "@/hooks/useHintDashboard";
 
 /* ---------- Shared primitives ---------- */
 
