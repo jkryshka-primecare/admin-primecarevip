@@ -5,7 +5,7 @@ const corsHeaders = {
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
 };
 
-const ALLOWED_ROLES = ["admin", "pharmacist", "pharmacy_tech"] as const;
+const ALLOWED_ROLES = ["admin", "super_admin", "pharmacy"] as const;
 const DEFAULT_HINT_API_URL = "https://api.hint.com/api";
 
 type HintPatient = Record<string, unknown>;

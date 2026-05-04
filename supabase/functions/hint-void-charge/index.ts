@@ -5,7 +5,7 @@ const corsHeaders = {
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
 };
 
-const ALLOWED_ROLES = ["admin", "pharmacist"] as const;
+const ALLOWED_ROLES = ["admin", "super_admin", "pharmacy"] as const;
 
 function jsonResponse(body: unknown, status: number) {
   return new Response(JSON.stringify(body), {
