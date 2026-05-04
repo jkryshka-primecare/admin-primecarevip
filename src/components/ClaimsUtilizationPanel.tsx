@@ -170,7 +170,7 @@ const ClaimsUtilizationPanel = () => {
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 max-w-2xl">
           <StatCard
             title="High Cost Claims #"
-            tooltip="Count of claims considered high cost during the selected period."
+            tooltip="Number of claims categorized as high-cost, helping identify cost outliers."
             selected={highCostView === "claims"}
             onClick={() => setHighCostView("claims")}
           />
