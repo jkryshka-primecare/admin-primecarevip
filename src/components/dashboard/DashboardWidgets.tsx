@@ -1,6 +1,6 @@
 import { Link } from "react-router-dom";
 import { cn } from "@/lib/utils";
-import { useHintDashboard, fmtUsd } from "@/hooks/useHintDashboard";
+import { useHintDashboard, fmtUsd, type HintDashboardData } from "@/hooks/useHintDashboard";
 
 /* ---------- Shared primitives ---------- */
 
@@ -81,8 +81,8 @@ const Sparkline = ({ data, colorVar }: { data: number[]; colorVar: string }) => 
 
 /* ---------- Row 1: Patient Activity ---------- */
 
-const PatientActivityRow = () => {
-  const { patients, memberships, loading, error } = useHintDashboard();
+const PatientActivityRow = ({ hint }: { hint: HintDashboardData }) => {
+  const { patients, memberships, loading, error } = hint;
   const fmt = (n: number | null) => (loading ? "…" : n ?? "—");
   return (
     <section>
@@ -141,8 +141,8 @@ const RevenueBar = ({ label, pct, colorVar }: { label: string; pct: number; colo
   </div>
 );
 
-const InvoicesRow = () => {
-  const { invoices, loading } = useHintDashboard();
+const InvoicesRow = ({ hint }: { hint: HintDashboardData }) => {
+  const { invoices, loading } = hint;
   const fmt = (cents: number) => (loading ? "…" : fmtUsd(cents));
   const dueSoon = Math.max(0, invoices.outstandingCents - invoices.overdueCents);
   return (
@@ -292,10 +292,12 @@ const RxRow = () => (
 /* ---------- Export ---------- */
 
 export default function DashboardWidgets() {
+  const hint = useHintDashboard();
+
   return (
     <div className="space-y-8">
-      <PatientActivityRow />
-      <InvoicesRow />
+      <PatientActivityRow hint={hint} />
+      <InvoicesRow hint={hint} />
       <CareConnectRow />
       <RxRow />
     </div>
