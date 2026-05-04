@@ -124,18 +124,21 @@ Deno.serve(async (req) => {
   try {
     const clientId = Deno.env.get("ELATION_CLIENT_ID");
     const clientSecret = Deno.env.get("ELATION_CLIENT_SECRET");
-    let restBase = sanitizeBase(Deno.env.get("ELATION_BASE_URL"), DEFAULT_REST_BASE);
-    // Guard against the common misconfig where ELATION_BASE_URL was saved as
-    // api.elationemr.com (which doesn't resolve). Force the correct host.
-    if (/\/\/api\.elationemr\.com/i.test(restBase)) {
-      restBase = DEFAULT_REST_BASE;
-    }
-    const fhirBase = sanitizeBase(Deno.env.get("ELATION_FHIR_BASE"), DEFAULT_FHIR_BASE);
-    let tokenUrl =
-      Deno.env.get("ELATION_TOKEN_URL") ?? `${restBase}/oauth2/token/`;
-    if (/\/\/api\.elationemr\.com/i.test(tokenUrl)) {
-      tokenUrl = `${restBase}/oauth2/token/`;
-    }
+    // Hard-pin to the correct production hosts. The previously-saved
+    // ELATION_BASE_URL / ELATION_TOKEN_URL secrets pointed at
+    // `api.elationemr.com` which does not resolve. Ignore env host overrides
+    // unless explicitly opted in via ELATION_ALLOW_ENV_HOST=true.
+    const allowEnvHost = Deno.env.get("ELATION_ALLOW_ENV_HOST") === "true";
+    const restBase = allowEnvHost
+      ? sanitizeBase(Deno.env.get("ELATION_BASE_URL"), DEFAULT_REST_BASE)
+      : DEFAULT_REST_BASE;
+    const fhirBase = allowEnvHost
+      ? sanitizeBase(Deno.env.get("ELATION_FHIR_BASE"), DEFAULT_FHIR_BASE)
+      : DEFAULT_FHIR_BASE;
+    const tokenUrl = allowEnvHost
+      ? (Deno.env.get("ELATION_TOKEN_URL") ?? `${restBase}/oauth2/token/`)
+      : `${restBase}/oauth2/token/`;
+    console.log("[elation-live] tokenUrl=", tokenUrl, "restBase=", restBase);
 
     if (!clientId || !clientSecret) {
       return json(
