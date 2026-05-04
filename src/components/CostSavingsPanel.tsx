@@ -42,7 +42,11 @@ const DateChip = ({ label, value, onChange }: { label: string; value: string; on
       type="date"
       value={value}
       onChange={(e) => onChange(e.target.value)}
-      className="h-7 bg-transparent text-xs font-mono outline-none"
+      onClick={(e) => {
+        const el = e.currentTarget as HTMLInputElement & { showPicker?: () => void };
+        el.showPicker?.();
+      }}
+      className="h-7 w-[120px] bg-transparent text-xs font-mono outline-none cursor-pointer"
     />
   </div>
 );
