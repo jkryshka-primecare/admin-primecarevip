@@ -63,7 +63,7 @@ export default function InsightsHome() {
         )}
 
         {tab === "engagement" && <EngagementPanel />}
-        {tab === "risk" && <RiskTable />}
+        {tab === "risk" && <UtilizationGapsPanel />}
         {tab === "savings" && <CostSavingsPanel />}
         {tab === "claims" && <ClaimsPipeline />}
         {tab === "messaging" && <MessagingAnalytics />}
