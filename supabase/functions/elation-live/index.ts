@@ -131,8 +131,11 @@ Deno.serve(async (req) => {
       restBase = DEFAULT_REST_BASE;
     }
     const fhirBase = sanitizeBase(Deno.env.get("ELATION_FHIR_BASE"), DEFAULT_FHIR_BASE);
-    const tokenUrl =
+    let tokenUrl =
       Deno.env.get("ELATION_TOKEN_URL") ?? `${restBase}/oauth2/token/`;
+    if (/\/\/api\.elationemr\.com/i.test(tokenUrl)) {
+      tokenUrl = `${restBase}/oauth2/token/`;
+    }
 
     if (!clientId || !clientSecret) {
       return json(
