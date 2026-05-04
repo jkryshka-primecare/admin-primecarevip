@@ -129,7 +129,18 @@ const CostSavingsPanel = () => {
       <div className="space-y-3 max-w-2xl">
         <p className="text-sm text-foreground flex items-center gap-2">
           Select % of after hours encounters potentially avoidable as Emergency room (ER) and Urgent Care (UC) visits.
-          <Info className="size-3.5 text-muted-foreground" />
+          <TooltipProvider delayDuration={150}>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <button type="button" className="inline-flex" aria-label="More info">
+                  <Info className="size-3.5 text-muted-foreground" />
+                </button>
+              </TooltipTrigger>
+              <TooltipContent side="top" className="max-w-xs text-xs leading-relaxed">
+                Total Savings is the difference of Total Value and Employer Investment.
+              </TooltipContent>
+            </Tooltip>
+          </TooltipProvider>
         </p>
         <SliderRow label="ER avoided" value={erPct} onChange={setErPct} />
         <SliderRow label="UC avoided" value={ucPct} onChange={setUcPct} />
