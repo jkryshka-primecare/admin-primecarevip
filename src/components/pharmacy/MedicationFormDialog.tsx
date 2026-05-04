@@ -16,7 +16,7 @@ import {
   Medication,
   UnitType,
 } from "@/lib/medications";
-import { lookupNDC, NDCLookupResult } from "@/lib/ndc-lookup";
+import { lookupNDC, NDCLookupResult } from "@/lib/pharmacy/ndc-lookup";
 
 const STRENGTH_UNIT_REGEX = /(mg\/ml|mg|ml|mcg|g|gram|each|units|%|iu|meq)$/i;
 

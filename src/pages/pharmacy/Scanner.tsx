@@ -7,9 +7,9 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
 import { fetchMedications, MEDICATIONS_QUERY_KEY, Medication } from "@/lib/medications";
-import { createExternalScannerListener } from "@/lib/scanner";
-import { parseGS1, isGS1Barcode, type GS1ParsedData } from "@/lib/gs1-parser";
-import { MedicationCodes } from "@/components/MedicationCodes";
+import { createExternalScannerListener } from "@/lib/pharmacy/scanner";
+import { parseGS1, isGS1Barcode, type GS1ParsedData } from "@/lib/pharmacy/gs1-parser";
+import { MedicationCodes } from "@/components/pharmacy/MedicationCodes";
 
 export default function Scanner() {
   const [result, setResult] = useState<Medication | null>(null);

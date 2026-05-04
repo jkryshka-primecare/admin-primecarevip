@@ -20,12 +20,12 @@ import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/comp
 
 import { incrementStock, MEDICATIONS_QUERY_KEY } from "@/lib/medications";
 import { useQueryClient } from "@tanstack/react-query";
-import { MedicationLabel, type LabelData } from "@/components/MedicationLabel";
+import { MedicationLabel, type LabelData } from "@/components/pharmacy/MedicationLabel";
 import { supabase } from "@/integrations/supabase/client";
 import type { Json } from "@/integrations/supabase/types";
 import { toast } from "sonner";
-import { useAuth } from "@/contexts/AuthContext";
-import { formatPrice } from "@/lib/format";
+import { useAuth } from "@/hooks/useAuth";
+import { formatPrice } from "@/lib/pharmacy/format";
 
 interface DbDispenseRecord {
   id: string;

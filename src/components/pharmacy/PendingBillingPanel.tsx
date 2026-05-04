@@ -28,7 +28,7 @@ import {
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { MEDICATIONS_QUERY_KEY } from "@/lib/medications";
-import HintPatientMatchDialog from "@/components/HintPatientMatchDialog";
+import HintPatientMatchDialog from "@/components/pharmacy/HintPatientMatchDialog";
 
 interface DispenseBillingRow {
   id: string;

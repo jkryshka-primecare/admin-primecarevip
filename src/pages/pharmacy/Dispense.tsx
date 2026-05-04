@@ -1,7 +1,7 @@
 import { useState, useCallback } from "react";
 import { ArrowRightLeft, ShieldCheck, Bell } from "lucide-react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
-import { MedicationLabel, type LabelData } from "@/components/MedicationLabel";
+import { MedicationLabel, type LabelData } from "@/components/pharmacy/MedicationLabel";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
@@ -25,9 +25,9 @@ import {
 } from "@/lib/medications";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
-import PrescriptionQueue, { type QueuedPrescription } from "@/components/PrescriptionQueue";
+import PrescriptionQueue, { type QueuedPrescription } from "@/components/pharmacy/PrescriptionQueue";
 import { supabase } from "@/integrations/supabase/client";
-import { formatPrice } from "@/lib/format";
+import { formatPrice } from "@/lib/pharmacy/format";
 
 export default function Dispense() {
   const [selectedMedId, setSelectedMedId] = useState("");

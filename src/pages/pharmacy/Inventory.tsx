@@ -1,13 +1,13 @@
 import { useState, useEffect, useCallback, useRef, useMemo } from "react";
 import { useSearchParams, useNavigate } from "react-router-dom";
 import { Search, Plus, Pencil, Trash2, QrCode, ArrowUpDown, ArrowRightLeft, ScanLine, Merge, Scissors, Usb, Bug, ChevronDown } from "lucide-react";
-import { SplitInventoryDialog } from "@/components/SplitInventoryDialog";
-import { MedicationCodes } from "@/components/MedicationCodes";
+import { SplitInventoryDialog } from "@/components/pharmacy/SplitInventoryDialog";
+import { MedicationCodes } from "@/components/pharmacy/MedicationCodes";
 import {
   MedicationFormDialog,
   buildInitialFormValues,
   MedicationFormValues,
-} from "@/components/MedicationFormDialog";
+} from "@/components/pharmacy/MedicationFormDialog";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -36,10 +36,10 @@ import { Label } from "@/components/ui/label";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { fetchMedications, addMedication, updateMedication, deleteMedication, selectMergeable, mergeMedications, MEDICATIONS_QUERY_KEY, CATEGORIES, Medication, UnitType } from "@/lib/medications";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { createExternalScannerListener } from "@/lib/scanner";
-import { parseGS1, isGS1Barcode, GS1ParsedData } from "@/lib/gs1-parser";
-import { formatPrice } from "@/lib/format";
-import { lookupNDC, NDCLookupResult } from "@/lib/ndc-lookup";
+import { createExternalScannerListener } from "@/lib/pharmacy/scanner";
+import { parseGS1, isGS1Barcode, GS1ParsedData } from "@/lib/pharmacy/gs1-parser";
+import { formatPrice } from "@/lib/pharmacy/format";
+import { lookupNDC, NDCLookupResult } from "@/lib/pharmacy/ndc-lookup";
 import { toast } from "sonner";
 
 // Real NDCs verified to return data from openFDA — handy for one-click testing the lookup pipeline.

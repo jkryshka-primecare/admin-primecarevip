@@ -1,7 +1,7 @@
 import { Package, AlertTriangle, ArrowRightLeft, DollarSign, TrendingUp, Receipt } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
-import { StatCard } from "@/components/StatCard";
+import { StatCard } from "@/components/pharmacy/StatCard";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import {
@@ -11,8 +11,8 @@ import {
   MEDICATIONS_QUERY_KEY,
 } from "@/lib/medications";
 import { supabase } from "@/integrations/supabase/client";
-import PrescriptionQueue from "@/components/PrescriptionQueue";
-import PendingBillingPanel from "@/components/PendingBillingPanel";
+import PrescriptionQueue from "@/components/pharmacy/PrescriptionQueue";
+import PendingBillingPanel from "@/components/pharmacy/PendingBillingPanel";
 
 export default function Dashboard() {
   const navigate = useNavigate();
