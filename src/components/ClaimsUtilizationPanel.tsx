@@ -114,7 +114,7 @@ const ClaimsUtilizationPanel = () => {
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-5">
         <StatCard title="Total Active Patients" tooltip="Total patients covered under DPC or Non-DPC for the selected timeframe." />
         <StatCard title="DPC Patients" tooltip="Patients enrolled in DPC during the selected timeframe." />
-        <StatCard title="Non DPC Patients" tooltip="Number of patients not enrolled with a Direct Primary Care provider." />
+        <StatCard title="Non DPC Patients" tooltip="Patients covered under Non-DPC for the selected timeframe." />
       </div>
 
       {/* Member months row */}
