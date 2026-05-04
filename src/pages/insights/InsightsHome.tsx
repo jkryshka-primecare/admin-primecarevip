@@ -2,6 +2,7 @@ import { useState } from "react";
 import AppLayout from "@/components/AppLayout";
 import KPICard from "@/components/KPICard";
 import RiskTable from "@/components/RiskTable";
+import UtilizationGapsPanel from "@/components/UtilizationGapsPanel";
 import EngagementPanel from "@/components/EngagementPanel";
 import CostSavingsPanel from "@/components/CostSavingsPanel";
 import ClaimsPipeline from "@/components/ClaimsPipeline";
