@@ -103,13 +103,23 @@ const ChronicRiskPanel = () => {
           </div>
         </div>
         <div className="flex items-center gap-2">
-          <Button variant="outline" size="sm" className="gap-2 text-xs">
-            <Filter className="size-3.5" /> Filters
-          </Button>
-          <Button variant="outline" size="sm" className="px-2">
+          <FiltersSheet
+            employer={employer} setEmployer={setEmployer}
+            dpc={dpc} setDpc={setDpc}
+            physician={physician} setPhysician={setPhysician}
+          />
+          <Button
+            variant="outline" size="sm" className="px-2"
+            onClick={() => handleDownload(sub)}
+            title="Download CSV"
+          >
             <Download className="size-3.5" />
           </Button>
-          <Button variant="outline" size="sm" className="px-2">
+          <Button
+            variant="outline" size="sm" className="px-2"
+            onClick={() => handleShare(sub)}
+            title="Share link"
+          >
             <Share2 className="size-3.5" />
           </Button>
         </div>
