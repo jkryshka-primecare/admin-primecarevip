@@ -2,20 +2,28 @@ import { cn } from "@/lib/utils";
 
 interface PatientRisk {
   id: string;
+  name: string;
+  age: number;
+  phone: string;
   condition: string;
+  spruceApp: boolean;
+  lastEncounter: string;
+  lastMessage: string;
+  employer: string;
+  dpc: string;
+  physician: string;
   hccScore: number;
-  costVariance: string;
   severity: "critical" | "moderate" | "low";
-  entity: string;
 }
 
 const mockPatients: PatientRisk[] = [
-  { id: "VIP-9942-A", condition: "Acute Coronary Syndrome", hccScore: 4.44, costVariance: "+$12,402", severity: "critical", entity: "PrimeCare VIP" },
-  { id: "VIP-8210-C", condition: "Type 2 Diabetes Mellitus", hccScore: 2.81, costVariance: "-$2,140", severity: "moderate", entity: "PrimeCare VIP" },
-  { id: "VIP-1104-E", condition: "Chronic Kidney Disease (Stage 4)", hccScore: 3.15, costVariance: "+$8,550", severity: "critical", entity: "PrimeCare VIP" },
-  { id: "HH-3382-B", condition: "Managed Hypertension", hccScore: 1.10, costVariance: "-$412", severity: "low", entity: "Hero Healthcare" },
-  { id: "HH-4501-D", condition: "Major Depressive Disorder", hccScore: 1.84, costVariance: "+$1,204", severity: "moderate", entity: "Hero Healthcare" },
-  { id: "VIP-6620-F", condition: "CHF with Reduced Ejection Fraction", hccScore: 4.92, costVariance: "+$22,180", severity: "critical", entity: "PrimeCare VIP" },
+  { id: "VIP-9942-A", name: "Marcus Bellamy", age: 64, phone: "(305) 555-0142", condition: "Acute Coronary Syndrome", spruceApp: true, lastEncounter: "2026-04-28 09:14", lastMessage: "2026-05-02 16:42", employer: "Aligned Marketplace", dpc: "PrimeCare VIP", physician: "Michael Kieffer", hccScore: 4.44, severity: "critical" },
+  { id: "VIP-8210-C", name: "Priya Anand", age: 52, phone: "(786) 555-0188", condition: "Type 2 Diabetes Mellitus", spruceApp: true, lastEncounter: "2026-04-22 11:02", lastMessage: "2026-05-03 08:15", employer: "Ernst & Young", dpc: "PrimeCare VIP", physician: "Lainey Kieffer", hccScore: 2.81, severity: "moderate" },
+  { id: "VIP-1104-E", name: "Theodore Hahn", age: 71, phone: "(305) 555-0210", condition: "Chronic Kidney Disease (Stage 4)", spruceApp: false, lastEncounter: "2026-04-30 14:48", lastMessage: "2026-04-29 10:05", employer: "KD Nutra", dpc: "PrimeCare VIP", physician: "Raphael Lopez", hccScore: 3.15, severity: "critical" },
+  { id: "HH-3382-B", name: "Jasmine Okafor", age: 39, phone: "(954) 555-0117", condition: "Managed Hypertension", spruceApp: true, lastEncounter: "2026-04-15 08:30", lastMessage: "2026-05-01 19:22", employer: "Mind And Mobility", dpc: "PrimeCare VIP Health - Retail", physician: "Nicole Aguila", hccScore: 1.10, severity: "low" },
+  { id: "HH-4501-D", name: "Owen Caldwell", age: 47, phone: "(561) 555-0166", condition: "Major Depressive Disorder", spruceApp: true, lastEncounter: "2026-04-25 13:11", lastMessage: "2026-05-04 07:38", employer: "Persona Healthcare Direct", dpc: "PrimeCare VIP", physician: "Shannon Nelson", hccScore: 1.84, severity: "moderate" },
+  { id: "VIP-6620-F", name: "Geneva Whitlock", age: 68, phone: "(305) 555-0193", condition: "CHF with Reduced Ejection Fraction", spruceApp: false, lastEncounter: "2026-05-01 10:20", lastMessage: "2026-05-03 21:09", employer: "Prime Care VIP Health - Retail", dpc: "PrimeCare VIP", physician: "Jarrod Frydman", hccScore: 4.92, severity: "critical" },
+  { id: "VIP-7733-G", name: "Daniel Reyes", age: 58, phone: "(786) 555-0149", condition: "COPD with Exacerbation", spruceApp: true, lastEncounter: "2026-04-19 15:55", lastMessage: "2026-04-30 12:01", employer: "Aligned Marketplace", dpc: "PrimeCare VIP", physician: "Melissa Buchanan", hccScore: 3.62, severity: "critical" },
 ];
 
 const severityColor = {
@@ -43,26 +51,51 @@ const RiskTable = () => {
         <table className="w-full text-left">
           <thead>
             <tr className="text-[10px] uppercase tracking-widest text-muted-foreground border-b border-border bg-secondary/30">
-              <th className="px-6 py-4 font-semibold">Patient ID</th>
-              <th className="px-6 py-4 font-semibold">Entity</th>
-              <th className="px-6 py-4 font-semibold">Clinical Status</th>
-              <th className="px-6 py-4 font-semibold text-right">HCC Score</th>
-              <th className="px-6 py-4 font-semibold text-right">Cost Variance</th>
+              <th className="px-4 py-4 font-semibold">Patient ID</th>
+              <th className="px-4 py-4 font-semibold">Patient Name</th>
+              <th className="px-4 py-4 font-semibold text-right">Age</th>
+              <th className="px-4 py-4 font-semibold">Phone Number</th>
+              <th className="px-4 py-4 font-semibold">Medical Condition</th>
+              <th className="px-4 py-4 font-semibold text-center">Spruce App</th>
+              <th className="px-4 py-4 font-semibold">Last Encounter</th>
+              <th className="px-4 py-4 font-semibold">Last Message</th>
+              <th className="px-4 py-4 font-semibold">Employer</th>
+              <th className="px-4 py-4 font-semibold">DPC</th>
+              <th className="px-4 py-4 font-semibold">Physician</th>
+              <th className="px-4 py-4 font-semibold text-right">HCC</th>
             </tr>
           </thead>
           <tbody className="divide-y divide-border font-mono text-xs">
-            {mockPatients.map((patient) => (
-              <tr key={patient.id} className="hover:bg-accent/5 transition-colors cursor-pointer">
-                <td className="px-6 py-4 font-medium text-foreground">{patient.id}</td>
-                <td className="px-6 py-4 text-muted-foreground font-sans text-[11px]">{patient.entity}</td>
-                <td className="px-6 py-4">
+            {mockPatients.map((p) => (
+              <tr key={p.id} className="hover:bg-accent/5 transition-colors cursor-pointer">
+                <td className="px-4 py-4 font-medium text-foreground whitespace-nowrap">{p.id}</td>
+                <td className="px-4 py-4 font-sans text-foreground whitespace-nowrap">{p.name}</td>
+                <td className="px-4 py-4 text-right text-muted-foreground">{p.age}</td>
+                <td className="px-4 py-4 text-muted-foreground whitespace-nowrap">{p.phone}</td>
+                <td className="px-4 py-4">
                   <div className="flex items-center gap-2">
-                    <div className={cn("size-2 rounded-full", severityColor[patient.severity])} />
-                    <span className="text-foreground/80 font-sans">{patient.condition}</span>
+                    <div className={cn("size-2 rounded-full shrink-0", severityColor[p.severity])} />
+                    <span className="text-foreground/80 font-sans whitespace-nowrap">{p.condition}</span>
                   </div>
                 </td>
-                <td className={cn("px-6 py-4 text-right", scoreColor[patient.severity])}>{patient.hccScore.toFixed(2)}</td>
-                <td className="px-6 py-4 text-right text-muted-foreground">{patient.costVariance}</td>
+                <td className="px-4 py-4 text-center">
+                  <span
+                    className={cn(
+                      "inline-block px-2 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider border",
+                      p.spruceApp
+                        ? "bg-success/10 text-success border-success/30"
+                        : "bg-muted text-muted-foreground border-border",
+                    )}
+                  >
+                    {p.spruceApp ? "Yes" : "No"}
+                  </span>
+                </td>
+                <td className="px-4 py-4 text-muted-foreground whitespace-nowrap">{p.lastEncounter}</td>
+                <td className="px-4 py-4 text-muted-foreground whitespace-nowrap">{p.lastMessage}</td>
+                <td className="px-4 py-4 font-sans text-foreground/80 whitespace-nowrap">{p.employer}</td>
+                <td className="px-4 py-4 font-sans text-foreground/80 whitespace-nowrap">{p.dpc}</td>
+                <td className="px-4 py-4 font-sans text-foreground/80 whitespace-nowrap">{p.physician}</td>
+                <td className={cn("px-4 py-4 text-right", scoreColor[p.severity])}>{p.hccScore.toFixed(2)}</td>
               </tr>
             ))}
           </tbody>
