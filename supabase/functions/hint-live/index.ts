@@ -35,6 +35,11 @@ const ALLOWED_RESOURCES = new Set([
   "memberships_revenue",
 ]);
 
+const HINT_STATUS_MESSAGES: Record<number, string> = {
+  401: "Hint rejected the saved API key. Confirm the live Hint API key is active and pasted into HINT_PRACTICE_API_KEY.",
+  428: "Hint authenticated the key, but it is not attached to a live practice. Use a live Practice API key from the practice's Settings > API page, or complete practice activation in Hint.",
+};
+
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: corsHeaders });
 
@@ -101,16 +106,20 @@ Deno.serve(async (req) => {
       row_count: Number.isFinite(total) ? Number(total) : (Array.isArray(parsed) ? parsed.length : null),
     });
 
+    const hintMessage = HINT_STATUS_MESSAGES[upstream.status];
+
     return json({
       source: "live.hint",
       upstream: url.toString(),
       scope,
       status: upstream.status,
+      ok: upstream.ok,
+      error: hintMessage,
       elapsedMs,
       generated: new Date().toISOString(),
       pagination: { total: Number.isFinite(total) ? total : null, headers: paginationHeaders },
       data: parsed,
-    }, upstream.ok ? 200 : upstream.status);
+    });
   } catch (error) {
     const message = error instanceof Error ? error.message : "Unknown error";
     return json({ error: message }, 500);
