@@ -119,7 +119,7 @@ const ClaimsUtilizationPanel = () => {
 
       {/* Member months row */}
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-5">
-        <StatCard title="DPC Member Months" tooltip="Total member-months of coverage for DPC patients during the selected period." />
+        <StatCard title="DPC Member Months" tooltip="Patients covered under Non-DPC for the selected timeframe." />
         <StatCard title="Non DPC Member Months" tooltip="Total member-months of coverage for Non-DPC patients during the selected period." />
         <div />
       </div>
