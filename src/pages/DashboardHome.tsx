@@ -37,10 +37,18 @@ export default function DashboardHome() {
         </section>
 
         <section className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-5">
-          <KPICard label="Modules Online" value="1 / 7" subtitle="Phase 1 · shell only" />
-          <KPICard label="Pending Invites" value="—" subtitle="Manage in Admin" />
-          <KPICard label="Audit Events (24h)" value="—" subtitle="Coming with module rollout" />
-          <KPICard label="Backend" value="Healthy" subtitle="Lovable Cloud" />
+          <Link to="/admin" className="block rounded-2xl focus:outline-none focus:ring-2 focus:ring-accent/40">
+            <KPICard label="Modules Online" value="1 / 7" subtitle="Phase 1 · shell only" />
+          </Link>
+          <Link to="/admin" className="block rounded-2xl focus:outline-none focus:ring-2 focus:ring-accent/40">
+            <KPICard label="Pending Invites" value="—" subtitle="Manage in Admin" />
+          </Link>
+          <Link to="/admin" className="block rounded-2xl focus:outline-none focus:ring-2 focus:ring-accent/40">
+            <KPICard label="Audit Events (24h)" value="—" subtitle="Coming with module rollout" />
+          </Link>
+          <Link to="/admin" className="block rounded-2xl focus:outline-none focus:ring-2 focus:ring-accent/40">
+            <KPICard label="Backend" value="Healthy" subtitle="Lovable Cloud" />
+          </Link>
         </section>
 
         <DashboardWidgets />
