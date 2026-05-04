@@ -2,6 +2,7 @@ import { useState } from "react";
 import AppLayout from "@/components/AppLayout";
 import KPICard from "@/components/KPICard";
 import RiskTable from "@/components/RiskTable";
+import UtilizationGapsPanel from "@/components/UtilizationGapsPanel";
 import EngagementPanel from "@/components/EngagementPanel";
 import CostSavingsPanel from "@/components/CostSavingsPanel";
 import ClaimsPipeline from "@/components/ClaimsPipeline";
@@ -15,7 +16,7 @@ import { cn } from "@/lib/utils";
 const tabs = [
   { id: "overview", label: "Executive Registry" },
   { id: "engagement", label: "Engagement & Utilization" },
-  { id: "risk", label: "Risk Stratification" },
+  { id: "risk", label: "Utilization Gaps" },
   { id: "savings", label: "Cost Savings" },
   { id: "claims", label: "Claims Pipeline" },
   { id: "messaging", label: "Messaging" },
@@ -62,7 +63,7 @@ export default function InsightsHome() {
         )}
 
         {tab === "engagement" && <EngagementPanel />}
-        {tab === "risk" && <RiskTable />}
+        {tab === "risk" && <UtilizationGapsPanel />}
         {tab === "savings" && <CostSavingsPanel />}
         {tab === "claims" && <ClaimsPipeline />}
         {tab === "messaging" && <MessagingAnalytics />}
