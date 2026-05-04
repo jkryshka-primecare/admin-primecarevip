@@ -1,5 +1,6 @@
 import AppLayout from "@/components/AppLayout";
 import KPICard from "@/components/KPICard";
+import DashboardWidgets from "@/components/dashboard/DashboardWidgets";
 import { useAuth } from "@/hooks/useAuth";
 
 export default function DashboardHome() {
@@ -41,6 +42,8 @@ export default function DashboardHome() {
           <KPICard label="Audit Events (24h)" value="—" subtitle="Coming with module rollout" />
           <KPICard label="Backend" value="Healthy" subtitle="Lovable Cloud" />
         </section>
+
+        <DashboardWidgets />
       </div>
     </AppLayout>
   );
