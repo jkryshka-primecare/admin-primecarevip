@@ -124,7 +124,12 @@ Deno.serve(async (req) => {
   try {
     const clientId = Deno.env.get("ELATION_CLIENT_ID");
     const clientSecret = Deno.env.get("ELATION_CLIENT_SECRET");
-    const restBase = sanitizeBase(Deno.env.get("ELATION_BASE_URL"), DEFAULT_REST_BASE);
+    let restBase = sanitizeBase(Deno.env.get("ELATION_BASE_URL"), DEFAULT_REST_BASE);
+    // Guard against the common misconfig where ELATION_BASE_URL was saved as
+    // api.elationemr.com (which doesn't resolve). Force the correct host.
+    if (/\/\/api\.elationemr\.com/i.test(restBase)) {
+      restBase = DEFAULT_REST_BASE;
+    }
     const fhirBase = sanitizeBase(Deno.env.get("ELATION_FHIR_BASE"), DEFAULT_FHIR_BASE);
     const tokenUrl =
       Deno.env.get("ELATION_TOKEN_URL") ?? `${restBase}/oauth2/token/`;
