@@ -371,6 +371,7 @@ const DetailTable = ({ selection, onClear }: { selection: Selection; onClear: ()
   );
 };
 
+const ChartCard = ({
   title, yLabel, xLabel, children,
 }: { title: string; yLabel: string; xLabel: string; children: React.ReactNode }) => (
   <div className="bg-card border border-border rounded-lg shadow-card p-5">
