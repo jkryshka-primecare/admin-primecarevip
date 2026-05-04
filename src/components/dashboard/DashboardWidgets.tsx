@@ -1,5 +1,6 @@
 import { Link } from "react-router-dom";
 import { cn } from "@/lib/utils";
+import { useHintDashboard, fmtUsd } from "@/hooks/useHintDashboard";
 
 /* ---------- Shared primitives ---------- */
 
@@ -80,37 +81,42 @@ const Sparkline = ({ data, colorVar }: { data: number[]; colorVar: string }) => 
 
 /* ---------- Row 1: Patient Activity ---------- */
 
-const PatientActivityRow = () => (
-  <section>
-    <SectionLabel>Patient Activity</SectionLabel>
-    <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-      <Card to="/patients">
-        <StatLabel>New Patients (30d)</StatLabel>
-        <div className="flex items-baseline justify-between mt-1.5">
-          <StatValue>128</StatValue>
-          <Pill tone="success">+12.4%</Pill>
-        </div>
-        <Sparkline data={[4, 7, 5, 9, 6, 11, 14]} colorVar="--accent" />
-      </Card>
-      <Card to="/care">
-        <StatLabel>Appointments This Week</StatLabel>
-        <div className="flex items-baseline justify-between mt-1.5">
-          <StatValue>87</StatValue>
-          <span className="text-[11px] text-muted-foreground">9 upcoming today</span>
-        </div>
-        <Sparkline data={[10, 12, 9, 14, 11, 15, 16]} colorVar="--success" />
-      </Card>
-      <Card to="/care">
-        <StatLabel>Avg Response Time</StatLabel>
-        <div className="flex items-baseline justify-between mt-1.5">
-          <StatValue>2.4h</StatValue>
-          <Pill tone="success">On target</Pill>
-        </div>
-        <Sparkline data={[3, 2.5, 3.1, 2.2, 2.8, 2.4, 2.1]} colorVar="--destructive" />
-      </Card>
-    </div>
-  </section>
-);
+const PatientActivityRow = () => {
+  const { patients, memberships, loading, error } = useHintDashboard();
+  const fmt = (n: number | null) => (loading ? "…" : n ?? "—");
+  return (
+    <section>
+      <SectionLabel>Patient Activity {error && <span className="text-destructive normal-case tracking-normal ml-2">· {error}</span>}</SectionLabel>
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+        <Card to="/patients">
+          <StatLabel>Total Patients (Hint)</StatLabel>
+          <div className="flex items-baseline justify-between mt-1.5">
+            <StatValue>{fmt(patients.total)}</StatValue>
+            <Pill tone="accent">Live</Pill>
+          </div>
+          <Sparkline data={[4, 7, 5, 9, 6, 11, 14]} colorVar="--accent" />
+        </Card>
+        <Card to="/patients">
+          <StatLabel>Active Memberships</StatLabel>
+          <div className="flex items-baseline justify-between mt-1.5">
+            <StatValue>{fmt(memberships.active)}</StatValue>
+            <Pill tone="success">Hint</Pill>
+          </div>
+          <Sparkline data={[10, 12, 9, 14, 11, 15, 16]} colorVar="--success" />
+        </Card>
+        <Card to="/care">
+          <StatLabel>Avg Response Time</StatLabel>
+          <div className="flex items-baseline justify-between mt-1.5">
+            <StatValue>2.4h</StatValue>
+            <Pill tone="success">On target</Pill>
+          </div>
+          <Sparkline data={[3, 2.5, 3.1, 2.2, 2.8, 2.4, 2.1]} colorVar="--destructive" />
+        </Card>
+      </div>
+    </section>
+  );
+};
+
 
 /* ---------- Row 2: Invoices & Billing ---------- */
 
@@ -135,41 +141,47 @@ const RevenueBar = ({ label, pct, colorVar }: { label: string; pct: number; colo
   </div>
 );
 
-const InvoicesRow = () => (
-  <section>
-    <SectionLabel>Invoices &amp; Billing</SectionLabel>
-    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-      <Card to="/estimator">
-        <div className="flex items-start justify-between">
-          <div>
-            <StatLabel>Outstanding Invoices</StatLabel>
-            <StatValue>$48,620</StatValue>
+const InvoicesRow = () => {
+  const { invoices, loading } = useHintDashboard();
+  const fmt = (cents: number) => (loading ? "…" : fmtUsd(cents));
+  const dueSoon = Math.max(0, invoices.outstandingCents - invoices.overdueCents);
+  return (
+    <section>
+      <SectionLabel>Invoices &amp; Billing</SectionLabel>
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+        <Card to="/estimator">
+          <div className="flex items-start justify-between">
+            <div>
+              <StatLabel>Outstanding Invoices</StatLabel>
+              <StatValue>{fmt(invoices.outstandingCents)}</StatValue>
+            </div>
+            <Pill tone="warning">{loading ? "…" : `${invoices.openCount} open`}</Pill>
           </div>
-          <Pill tone="warning">23 open</Pill>
-        </div>
-        <div className="mt-4">
-          <InvoiceRow label="Overdue" value="$12,400" tone="destructive" />
-          <InvoiceRow label="Due This Week" value="$18,900" />
-          <InvoiceRow label="Pending" value="$17,320" />
-        </div>
-      </Card>
-      <Card to="/insights">
-        <div className="flex items-start justify-between">
-          <div>
-            <StatLabel>Revenue (MTD)</StatLabel>
-            <StatValue>$214,580</StatValue>
+          <div className="mt-4">
+            <InvoiceRow label="Overdue" value={fmt(invoices.overdueCents)} tone="destructive" />
+            <InvoiceRow label="Due / Pending" value={fmt(dueSoon)} />
+            <InvoiceRow label="Paid (MTD)" value={fmt(invoices.paidMtdCents)} />
           </div>
-          <Pill tone="success">+8.2%</Pill>
-        </div>
-        <div className="mt-4 space-y-2.5">
-          <RevenueBar label="Membership Fees" pct={62} colorVar="--accent" />
-          <RevenueBar label="Rx / Services" pct={28} colorVar="--success" />
-          <RevenueBar label="Other" pct={10} colorVar="--warning" />
-        </div>
-      </Card>
-    </div>
-  </section>
-);
+        </Card>
+        <Card to="/insights">
+          <div className="flex items-start justify-between">
+            <div>
+              <StatLabel>Revenue (MTD)</StatLabel>
+              <StatValue>{fmt(invoices.paidMtdCents)}</StatValue>
+            </div>
+            <Pill tone="success">Hint</Pill>
+          </div>
+          <div className="mt-4 space-y-2.5">
+            <RevenueBar label="Membership Fees" pct={62} colorVar="--accent" />
+            <RevenueBar label="Rx / Services" pct={28} colorVar="--success" />
+            <RevenueBar label="Other" pct={10} colorVar="--warning" />
+          </div>
+        </Card>
+      </div>
+    </section>
+  );
+};
+
 
 /* ---------- Row 3: Care Connect ---------- */
 
