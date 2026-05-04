@@ -3,6 +3,7 @@ import AppLayout from "@/components/AppLayout";
 import KPICard from "@/components/KPICard";
 import RiskTable from "@/components/RiskTable";
 import UtilizationGapsPanel from "@/components/UtilizationGapsPanel";
+import ClaimsUtilizationPanel from "@/components/ClaimsUtilizationPanel";
 import ChronicRiskPanel from "@/components/ChronicRiskPanel";
 import EngagementPanel from "@/components/EngagementPanel";
 import CostSavingsPanel from "@/components/CostSavingsPanel";
