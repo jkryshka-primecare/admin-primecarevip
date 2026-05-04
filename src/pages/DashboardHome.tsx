@@ -42,6 +42,8 @@ export default function DashboardHome() {
           <KPICard label="Audit Events (24h)" value="—" subtitle="Coming with module rollout" />
           <KPICard label="Backend" value="Healthy" subtitle="Lovable Cloud" />
         </section>
+
+        <DashboardWidgets />
       </div>
     </AppLayout>
   );
