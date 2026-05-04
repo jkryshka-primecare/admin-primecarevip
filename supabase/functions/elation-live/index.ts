@@ -130,12 +130,23 @@ Deno.serve(async (req) => {
   if (auth instanceof Response) return auth;
 
   try {
-    const clientId = Deno.env.get("ELATION_CLIENT_ID");
-    const clientSecret = Deno.env.get("ELATION_CLIENT_SECRET");
-    const restBase = Deno.env.get("ELATION_BASE_URL") ?? DEFAULT_BASE;
+    const clean = (v: string | undefined) => v?.replace(/\s+/g, "").trim() || undefined;
+    const isValidHttpUrl = (v: string) => {
+      try { const u = new URL(v); return u.protocol === "https:" || u.protocol === "http:"; }
+      catch { return false; }
+    };
+
+    const clientId = clean(Deno.env.get("ELATION_CLIENT_ID"));
+    const clientSecret = clean(Deno.env.get("ELATION_CLIENT_SECRET"));
+    const envBase = clean(Deno.env.get("ELATION_BASE_URL"));
+    const restBase = envBase && isValidHttpUrl(envBase) ? envBase.replace(/\/+$/, "") : DEFAULT_BASE;
+    const envTokenUrl = clean(Deno.env.get("ELATION_TOKEN_URL"));
     const tokenUrl =
-      Deno.env.get("ELATION_TOKEN_URL") ?? `${restBase}/oauth2/token/`;
-    const fhirBase = Deno.env.get("ELATION_FHIR_BASE") ?? DEFAULT_FHIR_BASE;
+      envTokenUrl && isValidHttpUrl(envTokenUrl)
+        ? envTokenUrl
+        : `${restBase}/oauth2/token/`;
+    const envFhir = clean(Deno.env.get("ELATION_FHIR_BASE"));
+    const fhirBase = envFhir && isValidHttpUrl(envFhir) ? envFhir.replace(/\/+$/, "") : DEFAULT_FHIR_BASE;
 
     if (!clientId || !clientSecret) {
       return json(
