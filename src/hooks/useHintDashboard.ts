@@ -6,6 +6,7 @@ type HintResponse = {
   data: any;
   pagination?: { total: number | null };
   error?: string;
+  ok?: boolean;
 };
 
 type HintResult = HintResponse | { status: 0; data: null; pagination: { total: null }; error: string };
@@ -20,7 +21,12 @@ async function callHint(resource: string, query: Record<string, any> = {}, scope
 
 async function safeCallHint(resource: string, query: Record<string, any> = {}, scope: "practice" | "partner" = "practice"): Promise<HintResult> {
   try {
-    return await callHint(resource, query, scope);
+    const response = await callHint(resource, query, scope);
+    if (response.ok === false || response.status >= 400) {
+      const hintMessage = response.data?.message ?? response.error ?? `Hint returned ${response.status}`;
+      return { ...response, error: hintMessage };
+    }
+    return response;
   } catch (error) {
     const message = error instanceof Error ? error.message : `Failed to load ${resource}`;
     return { status: 0, data: null, pagination: { total: null }, error: message };
