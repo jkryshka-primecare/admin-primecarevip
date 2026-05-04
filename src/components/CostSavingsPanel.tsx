@@ -191,7 +191,12 @@ const CostSavingsPanel = () => {
           sub="Total encounters during selected timeframe."
           tooltip="This is the total number of encounters that have occurred during the selected period for all employees on the plan, as of the latest date and time the dashboard was updated. This includes office visits, chat (conversations via the Spruce messaging application), and telehealth encounters."
         />
-        <StatCard title="Encounter Types - Breakdown" value="1215" sub="In-Person" />
+        <StatCard
+          title="Encounter Types - Breakdown"
+          value="1215"
+          sub="In-Person"
+          tooltip="This is the breakdown of encounters by type, including in-person, telehealth, and chat (conversations through the Spruce messaging application), for the selected period."
+        />
         <StatCard title="Total # After Hours Encounters" value="371" sub="Total encounters after hours and weekends." />
       </div>
     </section>
