@@ -70,6 +70,7 @@ export default function InsightsHome() {
         {tab === "risk" && <UtilizationGapsPanel />}
         {tab === "chronic" && <ChronicRiskPanel />}
         {tab === "savings" && <CostSavingsPanel />}
+        {tab === "claims-util" && <ClaimsUtilizationPanel />}
         {tab === "claims" && <ClaimsPipeline />}
         {tab === "messaging" && <MessagingAnalytics />}
         {tab === "medications" && <MedicationStats />}
