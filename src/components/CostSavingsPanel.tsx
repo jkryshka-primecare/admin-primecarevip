@@ -47,11 +47,26 @@ const DateChip = ({ label, value, onChange }: { label: string; value: string; on
   </div>
 );
 
-const StatCard = ({ title, value, sub }: { title: string; value: string; sub: string }) => (
+const StatCard = ({ title, value, sub, tooltip }: { title: string; value: string; sub: string; tooltip?: string }) => (
   <div className="bg-card border border-border rounded-lg shadow-card p-5">
     <div className="flex items-center gap-2 text-sm text-foreground">
       <span>{title}</span>
-      <Info className="size-3.5 text-muted-foreground" />
+      {tooltip ? (
+        <TooltipProvider delayDuration={150}>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <button type="button" className="inline-flex" aria-label="More info">
+                <Info className="size-3.5 text-muted-foreground" />
+              </button>
+            </TooltipTrigger>
+            <TooltipContent side="top" className="max-w-xs text-xs leading-relaxed">
+              {tooltip}
+            </TooltipContent>
+          </Tooltip>
+        </TooltipProvider>
+      ) : (
+        <Info className="size-3.5 text-muted-foreground" />
+      )}
     </div>
     <p className="font-serif text-3xl text-foreground mt-4">{value}</p>
     <p className="text-xs text-muted-foreground mt-1">{sub}</p>
