@@ -74,9 +74,9 @@ function DetailRow({ label, value }: { label: string; value: string }) {
 }
 
 export default function History() {
-  const { user, profile, hasRole } = useAuth();
+  const { user, hasAnyRole } = useAuth();
   const queryClient = useQueryClient();
-  const canReverse = hasRole("admin") || hasRole("pharmacist");
+  const canReverse = hasAnyRole(["admin", "super_admin", "pharmacy"]);
 
   const [records, setRecords] = useState<DbDispenseRecord[]>([]);
   const [costMap, setCostMap] = useState<Record<string, number>>({});
@@ -349,7 +349,7 @@ export default function History() {
     }
     setReversing(true);
     try {
-      const reversedBy = profile?.display_name || user.email || user.id;
+      const reversedBy = user.email || user.id;
       const reversedAt = new Date().toISOString();
 
       // 1. Mark record reversed (preserve the original record for the audit trail)
