@@ -1,130 +1,193 @@
-const savingsData = {
-  erAvoidance: { saved: 842000, avoided: 124, avgCostPer: 6790 },
-  hospitalizationAvoidance: { saved: 1240000, avoided: 42, avgCostPer: 29524 },
-  internalFeatures: [
-    { feature: "Telehealth Platform", savings: 320000, category: "Internal" },
-    { feature: "Care Navigation", savings: 180000, category: "Internal" },
-    { feature: "Chronic Care Management", savings: 440000, category: "Internal" },
-    { feature: "Patient Messaging App", savings: 95000, category: "Internal" },
-  ],
-  externalFeatures: [
-    { feature: "Preferred Lab Network", savings: 210000, category: "External" },
-    { feature: "Imaging Center Partnerships", savings: 165000, category: "External" },
-    { feature: "Pharmacy Benefit Optimization", savings: 280000, category: "External" },
-  ],
-  claimsComparison: {
-    primeCareVIP: { actual: 1422, benchmark: 1680, pmpm: true },
-    heroHealthcare: { actual: 1105, benchmark: 1340, pmpm: true },
-  },
-};
+import { useState, useMemo } from "react";
+import { Info } from "lucide-react";
+import {
+  Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
+} from "@/components/ui/select";
+import { Slider } from "@/components/ui/slider";
+import {
+  BarChart, Bar, XAxis, YAxis, CartesianGrid, ResponsiveContainer, LabelList, Cell,
+} from "recharts";
+import { employerOptions, physicianOptions, dpcOptions } from "@/components/engagement/mockData";
 
-const formatCurrency = (n: number) => `$${(n / 1000).toFixed(0)}K`;
+const labelClass = "text-[10px] font-bold uppercase tracking-widest text-muted-foreground";
+
+const ChipField = ({
+  label, value, onChange, options, allLabel,
+}: {
+  label: string; value: string; onChange: (v: string) => void; options: string[]; allLabel: string;
+}) => (
+  <div className="flex items-center gap-2 bg-card border border-border rounded-md px-3 py-1.5">
+    <span className={labelClass}>{label}:</span>
+    <Select value={value} onValueChange={onChange}>
+      <SelectTrigger className="h-7 border-0 bg-transparent text-xs font-mono px-1 gap-1 focus:ring-0 shadow-none">
+        <SelectValue />
+      </SelectTrigger>
+      <SelectContent className="bg-popover">
+        <SelectItem value="all">{allLabel}</SelectItem>
+        {options.map((opt) => (
+          <SelectItem key={opt} value={opt}>{opt}</SelectItem>
+        ))}
+      </SelectContent>
+    </Select>
+  </div>
+);
+
+const DateChip = ({ label, value, onChange }: { label: string; value: string; onChange: (v: string) => void }) => (
+  <div className="flex items-center gap-2 bg-card border border-border rounded-md px-3 py-1.5">
+    <span className={labelClass}>{label}:</span>
+    <input
+      type="date"
+      value={value}
+      onChange={(e) => onChange(e.target.value)}
+      className="h-7 bg-transparent text-xs font-mono outline-none"
+    />
+  </div>
+);
+
+const StatCard = ({ title, value, sub }: { title: string; value: string; sub: string }) => (
+  <div className="bg-card border border-border rounded-lg shadow-card p-5">
+    <div className="flex items-center gap-2 text-sm text-foreground">
+      <span>{title}</span>
+      <Info className="size-3.5 text-muted-foreground" />
+    </div>
+    <p className="font-serif text-3xl text-foreground mt-4">{value}</p>
+    <p className="text-xs text-muted-foreground mt-1">{sub}</p>
+  </div>
+);
 
 const CostSavingsPanel = () => {
-  const totalInternal = savingsData.internalFeatures.reduce((s, f) => s + f.savings, 0);
-  const totalExternal = savingsData.externalFeatures.reduce((s, f) => s + f.savings, 0);
-  const grandTotal = savingsData.erAvoidance.saved + savingsData.hospitalizationAvoidance.saved + totalInternal + totalExternal;
+  const [start, setStart] = useState("2025-11-01");
+  const [end, setEnd] = useState("2026-05-04");
+  const [employer, setEmployer] = useState("all");
+  const [dpc, setDpc] = useState("all");
+  const [physician, setPhysician] = useState("all");
+  const [erPct, setErPct] = useState(24);
+  const [ucPct, setUcPct] = useState(30);
+
+  const erFullValue = 240000;
+  const ucFullValue = 130000;
+  const lowCostLabs = 111895;
+  const employerInvestment = 30669;
+
+  const data = useMemo(() => {
+    const erUcAvoided = Math.round(erFullValue * (erPct / 100) + ucFullValue * (ucPct / 100));
+    const totalValue = erUcAvoided + lowCostLabs;
+    const totalSavings = totalValue - employerInvestment;
+    return {
+      erUcAvoided,
+      lowCostLabs,
+      totalValue,
+      employerInvestment,
+      totalSavings,
+      chart: [
+        { name: "ER & UC avoided", value: erUcAvoided, color: "hsl(var(--accent))" },
+        { name: "Low Cost Labs",   value: lowCostLabs, color: "hsl(var(--accent))" },
+        { name: "Total Value",     value: totalValue, color: "hsl(var(--accent))" },
+        { name: "Employer Inv.",   value: employerInvestment, color: "hsl(320 70% 55%)" },
+        { name: "Total Savings",   value: totalSavings, color: "hsl(var(--success))" },
+      ],
+    };
+  }, [erPct, ucPct]);
+
+  const fmt = (n: number) => `$${n.toLocaleString()}`;
 
   return (
-    <div className="space-y-8">
-      {/* Grand Total */}
-      <div className="glass-panel rounded-lg p-6 border-l-4 border-l-success">
-        <p className="text-[10px] font-bold text-muted-foreground uppercase tracking-widest mb-2">Total Annualized Savings</p>
-        <p className="text-4xl font-mono tracking-tighter text-success">${(grandTotal / 1000000).toFixed(2)}M</p>
-        <p className="text-xs text-muted-foreground mt-2">Combined PrimeCare VIP & Hero Healthcare</p>
+    <section className="space-y-5">
+      <div>
+        <h2 className="font-serif text-2xl text-accent tracking-tight">Cost Savings</h2>
+        <div className="mt-3 h-px bg-border" />
       </div>
 
-      <div className="grid grid-cols-2 gap-6">
-        {/* ER Avoidance */}
-        <div className="glass-panel rounded-lg p-6">
-          <h3 className="text-xs font-bold uppercase tracking-widest text-muted-foreground mb-4">ER Avoidance</h3>
-          <p className="text-2xl font-mono text-foreground">{formatCurrency(savingsData.erAvoidance.saved)}</p>
-          <div className="mt-4 space-y-2 text-xs text-muted-foreground">
-            <div className="flex justify-between"><span>Visits Avoided</span><span className="font-mono text-foreground">{savingsData.erAvoidance.avoided}</span></div>
-            <div className="flex justify-between"><span>Avg Cost/Visit</span><span className="font-mono text-foreground">${savingsData.erAvoidance.avgCostPer.toLocaleString()}</span></div>
-          </div>
-        </div>
-
-        {/* Hospitalization */}
-        <div className="glass-panel rounded-lg p-6">
-          <h3 className="text-xs font-bold uppercase tracking-widest text-muted-foreground mb-4">Hospital Avoidance</h3>
-          <p className="text-2xl font-mono text-foreground">${(savingsData.hospitalizationAvoidance.saved / 1000000).toFixed(2)}M</p>
-          <div className="mt-4 space-y-2 text-xs text-muted-foreground">
-            <div className="flex justify-between"><span>Admissions Avoided</span><span className="font-mono text-foreground">{savingsData.hospitalizationAvoidance.avoided}</span></div>
-            <div className="flex justify-between"><span>Avg Cost/Admission</span><span className="font-mono text-foreground">${savingsData.hospitalizationAvoidance.avgCostPer.toLocaleString()}</span></div>
-          </div>
-        </div>
+      {/* Filter chips */}
+      <div className="flex flex-wrap items-center gap-2">
+        <DateChip label="Start Date" value={start} onChange={setStart} />
+        <DateChip label="End Date" value={end} onChange={setEnd} />
+        <ChipField label="Employer" value={employer} onChange={setEmployer} options={employerOptions} allLabel="All Sponsored Patients" />
+        <ChipField label="DPC" value={dpc} onChange={setDpc} options={dpcOptions} allLabel="All DPCs" />
+        <ChipField label="Physician" value={physician} onChange={setPhysician} options={physicianOptions} allLabel="All Physicians" />
       </div>
 
-      {/* Internal vs External Features */}
-      <div className="grid grid-cols-2 gap-6">
-        <div className="glass-panel rounded-lg p-6">
-          <h3 className="text-xs font-bold uppercase tracking-widest text-muted-foreground mb-4">Internal Feature Savings</h3>
-          <div className="space-y-3">
-            {savingsData.internalFeatures.map((f) => (
-              <div key={f.feature} className="flex justify-between items-center">
-                <span className="text-xs text-foreground/80">{f.feature}</span>
-                <span className="text-xs font-mono text-success">{formatCurrency(f.savings)}</span>
-              </div>
-            ))}
-            <div className="border-t border-border pt-3 flex justify-between">
-              <span className="text-xs font-bold text-foreground">Total Internal</span>
-              <span className="text-sm font-mono font-bold text-success">{formatCurrency(totalInternal)}</span>
-            </div>
+      {/* Sliders */}
+      <div className="space-y-3 max-w-2xl">
+        <p className="text-sm text-foreground flex items-center gap-2">
+          Select % of after hours encounters potentially avoidable as Emergency room (ER) and Urgent Care (UC) visits.
+          <Info className="size-3.5 text-muted-foreground" />
+        </p>
+        <SliderRow label="ER avoided" value={erPct} onChange={setErPct} />
+        <SliderRow label="UC avoided" value={ucPct} onChange={setUcPct} />
+      </div>
+
+      {/* Total Savings + Chart */}
+      <div className="grid grid-cols-1 lg:grid-cols-[280px_1fr] gap-5">
+        <div className="bg-card border border-border rounded-lg shadow-card p-5">
+          <div className="flex items-center gap-2 text-sm text-foreground">
+            <span>Total Savings</span>
+            <Info className="size-3.5 text-muted-foreground ml-auto" />
           </div>
+          <p className="font-serif text-3xl text-success mt-6">$ {data.totalSavings.toLocaleString()}</p>
+          <p className="text-xs text-muted-foreground mt-2">Difference between value and investment.</p>
         </div>
 
-        <div className="glass-panel rounded-lg p-6">
-          <h3 className="text-xs font-bold uppercase tracking-widest text-muted-foreground mb-4">External Feature Savings</h3>
-          <div className="space-y-3">
-            {savingsData.externalFeatures.map((f) => (
-              <div key={f.feature} className="flex justify-between items-center">
-                <span className="text-xs text-foreground/80">{f.feature}</span>
-                <span className="text-xs font-mono text-accent">{formatCurrency(f.savings)}</span>
-              </div>
-            ))}
-            <div className="border-t border-border pt-3 flex justify-between">
-              <span className="text-xs font-bold text-foreground">Total External</span>
-              <span className="text-sm font-mono font-bold text-accent">{formatCurrency(totalExternal)}</span>
-            </div>
+        <div className="bg-card border border-border rounded-lg shadow-card p-5">
+          <h3 className="text-sm font-semibold text-foreground mb-4">Overview</h3>
+          <div className="relative">
+            <span className="absolute -left-1 top-1/2 -translate-y-1/2 -rotate-90 text-[10px] uppercase tracking-wider text-muted-foreground origin-center whitespace-nowrap">
+              Cost Savings
+            </span>
+            <ResponsiveContainer width="100%" height={360}>
+              <BarChart data={data.chart} margin={{ top: 20, right: 30, left: 20, bottom: 10 }}>
+                <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" vertical={false} />
+                <XAxis dataKey="name" stroke="hsl(var(--muted-foreground))" fontSize={11} />
+                <YAxis tickFormatter={(v) => `$${(v / 1000).toFixed(0)}K`} stroke="hsl(var(--muted-foreground))" fontSize={11} />
+                <Bar dataKey="value" radius={[4, 4, 0, 0]}>
+                  {data.chart.map((d) => (
+                    <Cell key={d.name} fill={d.color} />
+                  ))}
+                  <LabelList dataKey="value" position="top" formatter={(v: number) => fmt(v)} fill="hsl(var(--accent))" fontSize={11} fontWeight={600} />
+                </Bar>
+              </BarChart>
+            </ResponsiveContainer>
+            <p className="text-center text-xs text-muted-foreground mt-1">Service Type</p>
           </div>
         </div>
       </div>
 
-      {/* Claims PMPM Comparison */}
-      <div className="glass-panel rounded-lg p-6">
-        <h3 className="text-xs font-bold uppercase tracking-widest text-muted-foreground mb-6">Claims PMPM vs Benchmark</h3>
-        <div className="grid grid-cols-2 gap-8">
-          <div>
-            <p className="text-xs text-muted-foreground mb-2">PrimeCare VIP</p>
-            <div className="flex items-baseline gap-3">
-              <span className="text-2xl font-mono text-foreground">${savingsData.claimsComparison.primeCareVIP.actual}</span>
-              <span className="text-xs text-muted-foreground">vs ${savingsData.claimsComparison.primeCareVIP.benchmark} benchmark</span>
-            </div>
-            <div className="mt-3 h-2 bg-muted rounded-full overflow-hidden">
-              <div className="h-full bg-success rounded-full" style={{ width: `${(savingsData.claimsComparison.primeCareVIP.actual / savingsData.claimsComparison.primeCareVIP.benchmark) * 100}%` }} />
-            </div>
-            <p className="text-[10px] text-success mt-1.5">
-              {((1 - savingsData.claimsComparison.primeCareVIP.actual / savingsData.claimsComparison.primeCareVIP.benchmark) * 100).toFixed(1)}% below benchmark
-            </p>
-          </div>
-          <div>
-            <p className="text-xs text-muted-foreground mb-2">Hero Healthcare</p>
-            <div className="flex items-baseline gap-3">
-              <span className="text-2xl font-mono text-foreground">${savingsData.claimsComparison.heroHealthcare.actual}</span>
-              <span className="text-xs text-muted-foreground">vs ${savingsData.claimsComparison.heroHealthcare.benchmark} benchmark</span>
-            </div>
-            <div className="mt-3 h-2 bg-muted rounded-full overflow-hidden">
-              <div className="h-full bg-accent rounded-full" style={{ width: `${(savingsData.claimsComparison.heroHealthcare.actual / savingsData.claimsComparison.heroHealthcare.benchmark) * 100}%` }} />
-            </div>
-            <p className="text-[10px] text-accent mt-1.5">
-              {((1 - savingsData.claimsComparison.heroHealthcare.actual / savingsData.claimsComparison.heroHealthcare.benchmark) * 100).toFixed(1)}% below benchmark
-            </p>
-          </div>
-        </div>
+      {/* Methodology */}
+      <div className="bg-card border border-border rounded-lg shadow-card p-5">
+        <ul className="text-sm text-foreground space-y-2 list-disc pl-5">
+          <li><strong>Savings</strong> are based on encounter counts, CPT codes, and fee-for-service rates from DPC locations.</li>
+          <li><strong>Procedure pricing</strong> uses Healthcare Bluebook or CMS fee schedules.</li>
+          <li><strong>Fallback CPT:</strong> Defaults to 99215 (in-person) or 99443 (telemed/chat) if code is unavailable.</li>
+          <li><strong>Assumes 20% ER and 30% UC</strong> visit avoidance (adjustable via sliders).</li>
+          <li><strong>ER/pricing data</strong> from Healthcare Bluebook.</li>
+          <li><strong>Employer Investment</strong> = Monthly rate x active adult/dependent members at month-end.</li>
+          <li><strong>Total Savings</strong> = Total Value - Employer Investment.</li>
+        </ul>
       </div>
-    </div>
+
+      {/* Encounter stat cards */}
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-5">
+        <StatCard title="Total # Encounters" value="1215" sub="Total encounters during selected timeframe." />
+        <StatCard title="Encounter Types - Breakdown" value="1215" sub="In-Person" />
+        <StatCard title="Total # After Hours Encounters" value="371" sub="Total encounters after hours and weekends." />
+      </div>
+    </section>
   );
 };
+
+const SliderRow = ({ label, value, onChange }: { label: string; value: number; onChange: (v: number) => void }) => (
+  <div className="flex items-center gap-4">
+    <span className="text-sm text-foreground w-24 shrink-0">{label}</span>
+    <span className="text-sm font-mono text-accent w-12 shrink-0">{value}%</span>
+    <Slider
+      value={[value]}
+      min={0}
+      max={100}
+      step={1}
+      onValueChange={([v]) => onChange(v)}
+      className="flex-1 max-w-md"
+    />
+  </div>
+);
 
 export default CostSavingsPanel;
