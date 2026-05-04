@@ -140,7 +140,18 @@ const CostSavingsPanel = () => {
         <div className="bg-card border border-border rounded-lg shadow-card p-5">
           <div className="flex items-center gap-2 text-sm text-foreground">
             <span>Total Savings</span>
-            <Info className="size-3.5 text-muted-foreground ml-auto" />
+            <TooltipProvider delayDuration={150}>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <button type="button" className="inline-flex ml-auto" aria-label="More info">
+                    <Info className="size-3.5 text-muted-foreground" />
+                  </button>
+                </TooltipTrigger>
+                <TooltipContent side="top" className="max-w-xs text-xs leading-relaxed">
+                  Total Savings is the difference of Total Value and Employer Investment.
+                </TooltipContent>
+              </Tooltip>
+            </TooltipProvider>
           </div>
           <p className="font-serif text-3xl text-success mt-6">$ {data.totalSavings.toLocaleString()}</p>
           <p className="text-xs text-muted-foreground mt-2">Difference between value and investment.</p>
