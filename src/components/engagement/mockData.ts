@@ -9,14 +9,25 @@ export const reportDefaults = {
 };
 
 export const employerOptions = [
-  "Acme Holdings",
-  "Bridgewater Group",
-  "Hero Logistics",
+  "Aligned Marketplace",
+  "Ernst & Young",
+  "KD Nutra",
+  "Mind And Mobility",
+  "Persona Healthcare Direct",
+  "Prime Care VIP Health - Retail",
 ];
 
 export const dpcOptions = ["PrimeCare VIP", "Hero Healthcare"];
 
-export const physicianOptions = ["Dr. Patel", "Dr. Cho", "Dr. Singh"];
+export const physicianOptions = [
+  "Jarrod Frydman",
+  "Lainey Kieffer",
+  "Melissa Buchanan",
+  "Michael Kieffer",
+  "Nicole Aguila",
+  "Raphael Lopez",
+  "Shannon Nelson",
+];
 
 // Sample patient population used to power every drill-down view.
 // In production this would come from Hint + Elation joined queries.
