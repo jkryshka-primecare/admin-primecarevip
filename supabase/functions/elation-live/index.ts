@@ -10,7 +10,11 @@
 
 import { corsHeaders, requireStaff, logPhiAccess } from "../_shared/auth.ts";
 
-const DEFAULT_REST_BASE = "https://api.elationemr.com/api/2.0";
+// NOTE: Elation's production REST host is `app.elationemr.com` — not
+// `api.elationemr.com` (that hostname does not resolve). FHIR lives on
+// `fhir.elationemr.com`. We override any saved ELATION_BASE_URL that points
+// at the non-existent api.* host to keep the integration working.
+const DEFAULT_REST_BASE = "https://app.elationemr.com/api/2.0";
 const DEFAULT_FHIR_BASE = "https://fhir.elationemr.com";
 
 type Scope = "rest" | "fhir";
