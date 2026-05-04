@@ -197,7 +197,12 @@ const CostSavingsPanel = () => {
           sub="In-Person"
           tooltip="This is the breakdown of encounters by type, including in-person, telehealth, and chat (conversations through the Spruce messaging application), for the selected period."
         />
-        <StatCard title="Total # After Hours Encounters" value="371" sub="Total encounters after hours and weekends." />
+        <StatCard
+          title="Total # After Hours Encounters"
+          value="371"
+          sub="Total encounters after hours and weekends."
+          tooltip="This represents the total count of encounters that occurred after 5 PM and before 8 AM (Local Practice Timezone) on weekdays, as well as any time during weekends."
+        />
       </div>
     </section>
   );
