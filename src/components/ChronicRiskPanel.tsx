@@ -43,6 +43,26 @@ const SelectField = ({
 
 type SubTab = "active" | "encounters";
 
+const conditionNames: Record<string, string> = {
+  "E78.5": "Hyperlipidemia, unspecified",
+  "I10": "Essential (primary) hypertension",
+  "E55.9": "Vitamin D deficiency, unspecified",
+  "F41.1": "Generalized anxiety disorder",
+  "I25.10": "Atherosclerotic heart disease",
+  "K21.9": "Gastro-esophageal reflux disease",
+  "F90.9": "Attention-deficit hyperactivity disorder",
+};
+
+const samplePatients = [
+  { id: "1003914548084737", name: "Eric Gutmann",     employer: "Prime Care VIP Health - Retail", dpc: "Mind And Mobility",          physician: "Michael Kieffer" },
+  { id: "1005972506542081", name: "Danielle Fingal",  employer: "Prime Care VIP Health - Retail", dpc: "Persona Healthcare Direct",  physician: "Jarrod Frydman" },
+  { id: "1015095268802561", name: "Kenneth Dixon",    employer: "Aligned Marketplace",            dpc: "KD Nutra",                    physician: "Raphael Lopez" },
+  { id: "1015147021729793", name: "Susan Rutstein",   employer: "Ernst & Young",                  dpc: "Mind And Mobility",          physician: "Lainey Kieffer" },
+  { id: "1018442751180802", name: "Marcus Holloway",  employer: "Prime Care VIP Health - Retail", dpc: "Persona Healthcare Direct",  physician: "Nicole Aguila" },
+  { id: "1021884532910012", name: "Priya Natarajan",  employer: "KD Nutra",                       dpc: "KD Nutra",                    physician: "Shannon Nelson" },
+  { id: "1024451209876553", name: "Robert Chen",      employer: "Aligned Marketplace",            dpc: "Mind And Mobility",          physician: "Melissa Buchanan" },
+];
+
 const topConditions = [
   { code: "E78.5", pct: 18.9 },
   { code: "I10",   pct: 7.8 },
