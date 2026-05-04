@@ -195,10 +195,90 @@ const ActiveView = () => (
   </>
 );
 
+const encountersTopConditions = [
+  { code: "E78.5", pct: 21.4 },
+  { code: "I10", pct: 9.2 },
+  { code: "E55.9", pct: 8.1 },
+  { code: "F41.1", pct: 7.0 },
+  { code: "I25.10", pct: 5.3 },
+];
+
+const encountersDistribution = [
+  { type: "No Comorbidity", pct: 5.6, color: "hsl(38 92% 55%)" },
+  { type: "Comorbidity", pct: 11.8, color: "hsl(28 85% 50%)" },
+  { type: "Low Multimorbidity", pct: 7.2, color: "hsl(20 70% 42%)" },
+  { type: "High Multimorbidity", pct: 18.4, color: "hsl(18 55% 30%)" },
+];
+
 const EncountersView = () => (
-  <div className="bg-card border border-border rounded-lg shadow-card p-8 text-center text-sm text-muted-foreground">
-    Patients with Encounter(s) view coming soon.
-  </div>
+  <>
+    <div className="bg-card border border-border rounded-lg shadow-card p-5 max-w-xs">
+      <div className="flex items-center gap-2 text-sm text-foreground">
+        <span>Chronic Condition Patients</span>
+        <Info className="size-3.5 text-muted-foreground" />
+      </div>
+      <p className="mt-3">
+        <span className="font-serif text-3xl text-foreground">98</span>
+        <span className="ml-2 text-sm text-muted-foreground">(42.1%)</span>
+      </p>
+      <p className="text-xs text-muted-foreground mt-1">
+        Patients with Encounter(s): <span className="text-foreground font-medium">233</span>
+      </p>
+    </div>
+
+    <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
+      <ChartCard title="Top Chronic Conditions" yLabel="Chronic Condition" xLabel="Percentage of Patients with Encounters">
+        <ResponsiveContainer width="100%" height={320}>
+          <BarChart layout="vertical" data={encountersTopConditions} margin={{ top: 10, right: 50, left: 20, bottom: 10 }}>
+            <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" horizontal={false} />
+            <XAxis type="number" tickFormatter={(v) => `${v}%`} stroke="hsl(var(--muted-foreground))" fontSize={11} />
+            <YAxis type="category" dataKey="code" stroke="hsl(var(--muted-foreground))" fontSize={11} width={60} />
+            <Bar dataKey="pct" fill="hsl(var(--accent))" radius={[0, 4, 4, 0]}>
+              <LabelList dataKey="pct" position="right" formatter={(v: number) => `${v}%`} fill="hsl(var(--accent))" fontSize={11} fontWeight={600} />
+            </Bar>
+          </BarChart>
+        </ResponsiveContainer>
+      </ChartCard>
+
+      <ChartCard title="Chronic Condition Distribution" yLabel="Condition Type" xLabel="Percentage of Patients with Encounters">
+        <ResponsiveContainer width="100%" height={320}>
+          <BarChart layout="vertical" data={encountersDistribution} margin={{ top: 10, right: 50, left: 20, bottom: 10 }}>
+            <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" horizontal={false} />
+            <XAxis type="number" tickFormatter={(v) => `${v}%`} stroke="hsl(var(--muted-foreground))" fontSize={11} />
+            <YAxis type="category" dataKey="type" stroke="hsl(var(--muted-foreground))" fontSize={11} width={140} />
+            <Bar dataKey="pct" radius={[0, 4, 4, 0]}>
+              {encountersDistribution.map((d) => (
+                <Cell key={d.type} fill={d.color} />
+              ))}
+              <LabelList dataKey="pct" position="right" formatter={(v: number) => `${v}%`} fill="hsl(var(--accent))" fontSize={11} fontWeight={600} />
+            </Bar>
+          </BarChart>
+        </ResponsiveContainer>
+      </ChartCard>
+    </div>
+
+    <div className="bg-card border border-border rounded-lg shadow-card overflow-hidden">
+      <table className="w-full text-sm">
+        <thead className="bg-secondary text-xs uppercase tracking-wider text-muted-foreground">
+          <tr>
+            <th className="text-left px-4 py-3 font-semibold">Patient ID</th>
+            <th className="text-left px-4 py-3 font-semibold">Patient Name</th>
+            <th className="text-left px-4 py-3 font-semibold">Medical Condition</th>
+            <th className="text-left px-4 py-3 font-semibold">Employer</th>
+            <th className="text-left px-4 py-3 font-semibold">DPC</th>
+            <th className="text-left px-4 py-3 font-semibold">Physician</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td colSpan={6} className="text-center text-sm text-muted-foreground py-6 italic">
+              Click a bar or label to show or hide patient details.
+            </td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+  </>
 );
 
 const ChartCard = ({
