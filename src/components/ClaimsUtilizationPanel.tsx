@@ -176,7 +176,7 @@ const ClaimsUtilizationPanel = () => {
           />
           <StatCard
             title="# of Members with high cost claims"
-            tooltip="Count of unique members with at least one high cost claim."
+            tooltip="Unique patients with high-cost claims, indicating distribution and concentration of high-cost care."
             selected={highCostView === "members"}
             onClick={() => setHighCostView("members")}
           />
