@@ -158,75 +158,27 @@ const ChronicRiskPanel = () => {
 };
 
 const ActiveView = () => (
-  <>
-    <div className="bg-card border border-border rounded-lg shadow-card p-5 max-w-xs">
-      <div className="flex items-center gap-2 text-sm text-foreground">
-        <span>Chronic Condition Patients</span>
-        <Info className="size-3.5 text-muted-foreground" />
-      </div>
-      <p className="mt-3">
-        <span className="font-serif text-3xl text-foreground">129</span>
-        <span className="ml-2 text-sm text-muted-foreground">(37.5%)</span>
-      </p>
-      <p className="text-xs text-muted-foreground mt-1">
-        Total Active Patients: <span className="text-foreground font-medium">344</span>
-      </p>
-    </div>
+  <ChronicView
+    metricLabel="Total Active Patients"
+    metricValue={344}
+    chronicCount={129}
+    chronicPct={37.5}
+    topData={topConditions}
+    distData={distribution}
+    xLabel="Percentage of Active Patients"
+  />
+);
 
-    <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
-      <ChartCard title="Top Chronic Conditions" yLabel="Chronic Condition" xLabel="Percentage of Active Patients">
-        <ResponsiveContainer width="100%" height={320}>
-          <BarChart layout="vertical" data={topConditions} margin={{ top: 10, right: 50, left: 20, bottom: 10 }}>
-            <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" horizontal={false} />
-            <XAxis type="number" tickFormatter={(v) => `${v}%`} stroke="hsl(var(--muted-foreground))" fontSize={11} />
-            <YAxis type="category" dataKey="code" stroke="hsl(var(--muted-foreground))" fontSize={11} width={60} />
-            <Bar dataKey="pct" fill="hsl(var(--accent))" radius={[0, 4, 4, 0]}>
-              <LabelList dataKey="pct" position="right" formatter={(v: number) => `${v}%`} fill="hsl(var(--accent))" fontSize={11} fontWeight={600} />
-            </Bar>
-          </BarChart>
-        </ResponsiveContainer>
-      </ChartCard>
-
-      <ChartCard title="Chronic Condition Distribution" yLabel="Condition Type" xLabel="Percentage of Active Patients">
-        <ResponsiveContainer width="100%" height={320}>
-          <BarChart layout="vertical" data={distribution} margin={{ top: 10, right: 50, left: 20, bottom: 10 }}>
-            <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" horizontal={false} />
-            <XAxis type="number" tickFormatter={(v) => `${v}%`} stroke="hsl(var(--muted-foreground))" fontSize={11} />
-            <YAxis type="category" dataKey="type" stroke="hsl(var(--muted-foreground))" fontSize={11} width={140} />
-            <Bar dataKey="pct" radius={[0, 4, 4, 0]}>
-              {distribution.map((d) => (
-                <Cell key={d.type} fill={d.color} />
-              ))}
-              <LabelList dataKey="pct" position="right" formatter={(v: number) => `${v}%`} fill="hsl(var(--accent))" fontSize={11} fontWeight={600} />
-            </Bar>
-          </BarChart>
-        </ResponsiveContainer>
-      </ChartCard>
-    </div>
-
-    {/* Patient detail table */}
-    <div className="bg-card border border-border rounded-lg shadow-card overflow-hidden">
-      <table className="w-full text-sm">
-        <thead className="bg-secondary text-xs uppercase tracking-wider text-muted-foreground">
-          <tr>
-            <th className="text-left px-4 py-3 font-semibold">Patient ID</th>
-            <th className="text-left px-4 py-3 font-semibold">Patient Name</th>
-            <th className="text-left px-4 py-3 font-semibold">Medical Condition</th>
-            <th className="text-left px-4 py-3 font-semibold">Employer</th>
-            <th className="text-left px-4 py-3 font-semibold">DPC</th>
-            <th className="text-left px-4 py-3 font-semibold">Physician</th>
-          </tr>
-        </thead>
-        <tbody>
-          <tr>
-            <td colSpan={6} className="text-center text-sm text-muted-foreground py-6 italic">
-              Click a bar or label to show or hide patient details.
-            </td>
-          </tr>
-        </tbody>
-      </table>
-    </div>
-  </>
+const EncountersView = () => (
+  <ChronicView
+    metricLabel="Patients with Encounter(s)"
+    metricValue={233}
+    chronicCount={98}
+    chronicPct={42.1}
+    topData={encountersTopConditions}
+    distData={encountersDistribution}
+    xLabel="Percentage of Patients with Encounters"
+  />
 );
 
 const encountersTopConditions = [
@@ -244,78 +196,181 @@ const encountersDistribution = [
   { type: "High Multimorbidity", pct: 18.4, color: "hsl(18 55% 30%)" },
 ];
 
-const EncountersView = () => (
-  <>
-    <div className="bg-card border border-border rounded-lg shadow-card p-5 max-w-xs">
-      <div className="flex items-center gap-2 text-sm text-foreground">
-        <span>Chronic Condition Patients</span>
-        <Info className="size-3.5 text-muted-foreground" />
+type Selection =
+  | { kind: "condition"; code: string }
+  | { kind: "distribution"; type: string }
+  | null;
+
+const ChronicView = ({
+  metricLabel, metricValue, chronicCount, chronicPct, topData, distData, xLabel,
+}: {
+  metricLabel: string;
+  metricValue: number;
+  chronicCount: number;
+  chronicPct: number;
+  topData: { code: string; pct: number }[];
+  distData: { type: string; pct: number; color: string }[];
+  xLabel: string;
+}) => {
+  const [selection, setSelection] = useState<Selection>(null);
+
+  const toggleCondition = (code: string) =>
+    setSelection((s) => (s?.kind === "condition" && s.code === code ? null : { kind: "condition", code }));
+  const toggleDist = (type: string) =>
+    setSelection((s) => (s?.kind === "distribution" && s.type === type ? null : { kind: "distribution", type }));
+
+  return (
+    <>
+      <div className="bg-card border border-border rounded-lg shadow-card p-5 max-w-xs">
+        <div className="flex items-center gap-2 text-sm text-foreground">
+          <span>Chronic Condition Patients</span>
+          <Info className="size-3.5 text-muted-foreground" />
+        </div>
+        <p className="mt-3">
+          <span className="font-serif text-3xl text-foreground">{chronicCount}</span>
+          <span className="ml-2 text-sm text-muted-foreground">({chronicPct}%)</span>
+        </p>
+        <p className="text-xs text-muted-foreground mt-1">
+          {metricLabel}: <span className="text-foreground font-medium">{metricValue}</span>
+        </p>
       </div>
-      <p className="mt-3">
-        <span className="font-serif text-3xl text-foreground">98</span>
-        <span className="ml-2 text-sm text-muted-foreground">(42.1%)</span>
-      </p>
-      <p className="text-xs text-muted-foreground mt-1">
-        Patients with Encounter(s): <span className="text-foreground font-medium">233</span>
-      </p>
+
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
+        <ChartCard title="Top Chronic Conditions" yLabel="Chronic Condition" xLabel={xLabel}>
+          <ResponsiveContainer width="100%" height={320}>
+            <BarChart layout="vertical" data={topData} margin={{ top: 10, right: 50, left: 20, bottom: 10 }}>
+              <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" horizontal={false} />
+              <XAxis type="number" tickFormatter={(v) => `${v}%`} stroke="hsl(var(--muted-foreground))" fontSize={11} />
+              <YAxis type="category" dataKey="code" stroke="hsl(var(--muted-foreground))" fontSize={11} width={60} />
+              <Bar
+                dataKey="pct" radius={[0, 4, 4, 0]} cursor="pointer"
+                onClick={(d: { code: string }) => toggleCondition(d.code)}
+              >
+                {topData.map((d) => (
+                  <Cell
+                    key={d.code}
+                    fill={
+                      selection?.kind === "condition" && selection.code !== d.code
+                        ? "hsl(var(--accent) / 0.35)"
+                        : "hsl(var(--accent))"
+                    }
+                  />
+                ))}
+                <LabelList dataKey="pct" position="right" formatter={(v: number) => `${v}%`} fill="hsl(var(--accent))" fontSize={11} fontWeight={600} />
+              </Bar>
+            </BarChart>
+          </ResponsiveContainer>
+        </ChartCard>
+
+        <ChartCard title="Chronic Condition Distribution" yLabel="Condition Type" xLabel={xLabel}>
+          <ResponsiveContainer width="100%" height={320}>
+            <BarChart layout="vertical" data={distData} margin={{ top: 10, right: 50, left: 20, bottom: 10 }}>
+              <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" horizontal={false} />
+              <XAxis type="number" tickFormatter={(v) => `${v}%`} stroke="hsl(var(--muted-foreground))" fontSize={11} />
+              <YAxis type="category" dataKey="type" stroke="hsl(var(--muted-foreground))" fontSize={11} width={140} />
+              <Bar
+                dataKey="pct" radius={[0, 4, 4, 0]} cursor="pointer"
+                onClick={(d: { type: string }) => toggleDist(d.type)}
+              >
+                {distData.map((d) => (
+                  <Cell
+                    key={d.type}
+                    fill={
+                      selection?.kind === "distribution" && selection.type !== d.type
+                        ? `${d.color.replace(")", " / 0.35)")}`
+                        : d.color
+                    }
+                  />
+                ))}
+                <LabelList dataKey="pct" position="right" formatter={(v: number) => `${v}%`} fill="hsl(var(--accent))" fontSize={11} fontWeight={600} />
+              </Bar>
+            </BarChart>
+          </ResponsiveContainer>
+        </ChartCard>
+      </div>
+
+      <DetailTable selection={selection} onClear={() => setSelection(null)} />
+    </>
+  );
+};
+
+const DetailTable = ({ selection, onClear }: { selection: Selection; onClear: () => void }) => {
+  let title = "";
+  let rows = samplePatients;
+  let conditionCode = "";
+
+  if (!selection) {
+    return (
+      <div className="bg-card border border-border rounded-lg shadow-card overflow-hidden">
+        <table className="w-full text-sm">
+          <thead className="bg-secondary text-xs uppercase tracking-wider text-muted-foreground">
+            <tr>
+              <th className="text-left px-4 py-3 font-semibold">Patient ID</th>
+              <th className="text-left px-4 py-3 font-semibold">Patient Name</th>
+              <th className="text-left px-4 py-3 font-semibold">Medical Condition</th>
+              <th className="text-left px-4 py-3 font-semibold">Employer</th>
+              <th className="text-left px-4 py-3 font-semibold">DPC</th>
+              <th className="text-left px-4 py-3 font-semibold">Physician</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td colSpan={6} className="text-center text-sm text-muted-foreground py-6 italic">
+                Click a bar or label on either chart to show patient details.
+              </td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    );
+  }
+
+  if (selection.kind === "condition") {
+    conditionCode = selection.code;
+    title = `Top Chronic Conditions - ${conditionNames[selection.code] ?? "Condition"} ( ${selection.code} )`;
+    rows = samplePatients.slice(0, 4);
+  } else {
+    title = `Chronic Condition Distribution - ${selection.type}`;
+    conditionCode = "—";
+    rows = samplePatients.slice(2, 7);
+  }
+
+  return (
+    <div className="space-y-2">
+      <div className="flex items-center justify-between">
+        <h3 className="text-sm text-foreground">{title}</h3>
+        <button onClick={onClear} className="text-xs text-accent hover:underline">Clear selection</button>
+      </div>
+      <div className="bg-card border border-border rounded-lg shadow-card overflow-hidden">
+        <table className="w-full text-sm">
+          <thead className="bg-secondary text-xs uppercase tracking-wider text-muted-foreground">
+            <tr>
+              <th className="text-left px-4 py-3 font-semibold">Patient ID</th>
+              <th className="text-left px-4 py-3 font-semibold">Patient Name</th>
+              <th className="text-left px-4 py-3 font-semibold">Medical Condition</th>
+              <th className="text-left px-4 py-3 font-semibold">Employer</th>
+              <th className="text-left px-4 py-3 font-semibold">DPC</th>
+              <th className="text-left px-4 py-3 font-semibold">Physician</th>
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-border">
+            {rows.map((p) => (
+              <tr key={p.id} className="hover:bg-muted/40">
+                <td className="px-4 py-3 font-mono text-accent">{p.id}</td>
+                <td className="px-4 py-3 text-foreground">{p.name}</td>
+                <td className="px-4 py-3 text-foreground">{conditionCode}</td>
+                <td className="px-4 py-3 text-foreground">{p.employer}</td>
+                <td className="px-4 py-3 text-foreground">{p.dpc}</td>
+                <td className="px-4 py-3 text-foreground">{p.physician}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
     </div>
+  );
+};
 
-    <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
-      <ChartCard title="Top Chronic Conditions" yLabel="Chronic Condition" xLabel="Percentage of Patients with Encounters">
-        <ResponsiveContainer width="100%" height={320}>
-          <BarChart layout="vertical" data={encountersTopConditions} margin={{ top: 10, right: 50, left: 20, bottom: 10 }}>
-            <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" horizontal={false} />
-            <XAxis type="number" tickFormatter={(v) => `${v}%`} stroke="hsl(var(--muted-foreground))" fontSize={11} />
-            <YAxis type="category" dataKey="code" stroke="hsl(var(--muted-foreground))" fontSize={11} width={60} />
-            <Bar dataKey="pct" fill="hsl(var(--accent))" radius={[0, 4, 4, 0]}>
-              <LabelList dataKey="pct" position="right" formatter={(v: number) => `${v}%`} fill="hsl(var(--accent))" fontSize={11} fontWeight={600} />
-            </Bar>
-          </BarChart>
-        </ResponsiveContainer>
-      </ChartCard>
-
-      <ChartCard title="Chronic Condition Distribution" yLabel="Condition Type" xLabel="Percentage of Patients with Encounters">
-        <ResponsiveContainer width="100%" height={320}>
-          <BarChart layout="vertical" data={encountersDistribution} margin={{ top: 10, right: 50, left: 20, bottom: 10 }}>
-            <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" horizontal={false} />
-            <XAxis type="number" tickFormatter={(v) => `${v}%`} stroke="hsl(var(--muted-foreground))" fontSize={11} />
-            <YAxis type="category" dataKey="type" stroke="hsl(var(--muted-foreground))" fontSize={11} width={140} />
-            <Bar dataKey="pct" radius={[0, 4, 4, 0]}>
-              {encountersDistribution.map((d) => (
-                <Cell key={d.type} fill={d.color} />
-              ))}
-              <LabelList dataKey="pct" position="right" formatter={(v: number) => `${v}%`} fill="hsl(var(--accent))" fontSize={11} fontWeight={600} />
-            </Bar>
-          </BarChart>
-        </ResponsiveContainer>
-      </ChartCard>
-    </div>
-
-    <div className="bg-card border border-border rounded-lg shadow-card overflow-hidden">
-      <table className="w-full text-sm">
-        <thead className="bg-secondary text-xs uppercase tracking-wider text-muted-foreground">
-          <tr>
-            <th className="text-left px-4 py-3 font-semibold">Patient ID</th>
-            <th className="text-left px-4 py-3 font-semibold">Patient Name</th>
-            <th className="text-left px-4 py-3 font-semibold">Medical Condition</th>
-            <th className="text-left px-4 py-3 font-semibold">Employer</th>
-            <th className="text-left px-4 py-3 font-semibold">DPC</th>
-            <th className="text-left px-4 py-3 font-semibold">Physician</th>
-          </tr>
-        </thead>
-        <tbody>
-          <tr>
-            <td colSpan={6} className="text-center text-sm text-muted-foreground py-6 italic">
-              Click a bar or label to show or hide patient details.
-            </td>
-          </tr>
-        </tbody>
-      </table>
-    </div>
-  </>
-);
-
-const ChartCard = ({
   title, yLabel, xLabel, children,
 }: { title: string; yLabel: string; xLabel: string; children: React.ReactNode }) => (
   <div className="bg-card border border-border rounded-lg shadow-card p-5">
