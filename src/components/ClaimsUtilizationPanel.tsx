@@ -141,7 +141,7 @@ const ClaimsUtilizationPanel = () => {
         </div>
 
         <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-          <StatCard title="Total Claims Costs" tooltip="Sum of DPC and Non-DPC claims costs for the selected view." />
+          <StatCard title="Total Claims Costs" tooltip="Cumulative months patients were covered under Non-DPC for cost and usage analysis." />
           <StatCard title="DPC Claims Costs" tooltip="Claims costs attributed to DPC-enrolled patients." />
           <StatCard title="Non DPC Claims Costs" tooltip="Claims costs attributed to Non-DPC patients." />
         </div>
