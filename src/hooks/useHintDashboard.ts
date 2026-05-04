@@ -8,12 +8,23 @@ type HintResponse = {
   error?: string;
 };
 
+type HintResult = HintResponse | { status: 0; data: null; pagination: { total: null }; error: string };
+
 async function callHint(resource: string, query: Record<string, any> = {}, scope: "practice" | "partner" = "practice") {
   const { data, error } = await supabase.functions.invoke("hint-live", {
     body: { resource, scope, query },
   });
   if (error) throw new Error(error.message);
   return data as HintResponse;
+}
+
+async function safeCallHint(resource: string, query: Record<string, any> = {}, scope: "practice" | "partner" = "practice"): Promise<HintResult> {
+  try {
+    return await callHint(resource, query, scope);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : `Failed to load ${resource}`;
+    return { status: 0, data: null, pagination: { total: null }, error: message };
+  }
 }
 
 export type HintDashboardData = {
@@ -46,9 +57,9 @@ export function useHintDashboard() {
     (async () => {
       try {
         const [patientsRes, invoicesRes, membershipsRes] = await Promise.all([
-          callHint("patients", { per_page: 1 }),
-          callHint("invoices", { per_page: 100 }),
-          callHint("memberships", { per_page: 1 }),
+          safeCallHint("patients", { limit: 1 }),
+          safeCallHint("invoices", { limit: 100 }),
+          safeCallHint("memberships", { limit: 1 }),
         ]);
 
         const invoiceList: any[] = Array.isArray(invoicesRes.data?.data)
@@ -80,6 +91,9 @@ export function useHintDashboard() {
         }
 
         if (cancelled) return;
+        const errors = [patientsRes, invoicesRes, membershipsRes]
+          .map((result) => result.error)
+          .filter(Boolean);
         setState({
           patients: {
             total: patientsRes.pagination?.total ?? null,
@@ -97,7 +111,7 @@ export function useHintDashboard() {
             active: membershipsRes.pagination?.total ?? null,
           },
           loading: false,
-          error: null,
+          error: errors[0] ?? null,
         });
       } catch (e: any) {
         if (cancelled) return;

@@ -57,7 +57,7 @@ Deno.serve(async (req) => {
       return json({ error: `Unsupported resource "${resource}".` }, 400);
     }
 
-    const apiKey = scope === "partner" ? partnerKey : practiceKey;
+    const apiKey = (scope === "partner" ? partnerKey : practiceKey)?.trim();
     if (!apiKey) return json({ error: `Hint ${scope} API key missing.` }, 500);
 
     const base = scope === "partner" ? HINT_PARTNER_BASE : HINT_PRACTICE_BASE;
@@ -73,7 +73,7 @@ Deno.serve(async (req) => {
       headers: {
         Accept: "application/json",
         "Content-Type": "application/json",
-        Authorization: `Basic ${btoa(`${apiKey}:`)}`,
+        Authorization: `Bearer ${apiKey}`,
       },
       body: method === "GET" || method === "DELETE" ? undefined : JSON.stringify(body.payload ?? {}),
     });
