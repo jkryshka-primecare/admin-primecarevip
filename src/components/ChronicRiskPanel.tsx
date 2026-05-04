@@ -4,6 +4,10 @@ import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from "@/components/ui/select";
 import { Button } from "@/components/ui/button";
+import {
+  Sheet, SheetContent, SheetHeader, SheetTitle, SheetFooter,
+} from "@/components/ui/sheet";
+import { toast } from "@/hooks/use-toast";
 import { employerOptions, physicianOptions, dpcOptions } from "@/components/engagement/mockData";
 import { cn } from "@/lib/utils";
 import {
