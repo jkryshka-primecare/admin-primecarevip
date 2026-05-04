@@ -3,6 +3,7 @@ import AppLayout from "@/components/AppLayout";
 import KPICard from "@/components/KPICard";
 import RiskTable from "@/components/RiskTable";
 import UtilizationGapsPanel from "@/components/UtilizationGapsPanel";
+import ClaimsUtilizationPanel from "@/components/ClaimsUtilizationPanel";
 import ChronicRiskPanel from "@/components/ChronicRiskPanel";
 import EngagementPanel from "@/components/EngagementPanel";
 import CostSavingsPanel from "@/components/CostSavingsPanel";
@@ -20,6 +21,7 @@ const tabs = [
   { id: "risk", label: "Utilization Gaps" },
   { id: "chronic", label: "Chronic Risk" },
   { id: "savings", label: "Cost Savings" },
+  { id: "claims-util", label: "Claims Utilization" },
   { id: "claims", label: "Claims Pipeline" },
   { id: "messaging", label: "Messaging" },
   { id: "medications", label: "Medications" },
@@ -68,6 +70,7 @@ export default function InsightsHome() {
         {tab === "risk" && <UtilizationGapsPanel />}
         {tab === "chronic" && <ChronicRiskPanel />}
         {tab === "savings" && <CostSavingsPanel />}
+        {tab === "claims-util" && <ClaimsUtilizationPanel />}
         {tab === "claims" && <ClaimsPipeline />}
         {tab === "messaging" && <MessagingAnalytics />}
         {tab === "medications" && <MedicationStats />}
