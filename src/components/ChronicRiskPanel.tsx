@@ -310,4 +310,111 @@ const ChartCard = ({
   </div>
 );
 
+const handleDownload = (sub: SubTab) => {
+  const rows = [
+    ["Patient ID", "Patient Name", "Medical Condition", "Employer", "DPC", "Physician"],
+  ];
+  const csv = rows.map((r) => r.join(",")).join("\n");
+  const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = `chronic-risk-${sub}-${new Date().toISOString().slice(0, 10)}.csv`;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+  toast({ title: "Download started", description: `Chronic Risk (${sub === "active" ? "Active" : "Encounters"}) export.` });
+};
+
+const handleShare = async (sub: SubTab) => {
+  const url = `${window.location.origin}${window.location.pathname}?tab=chronic&view=${sub}`;
+  try {
+    if (navigator.share) {
+      await navigator.share({ title: "Chronic Risk", url });
+      return;
+    }
+    await navigator.clipboard.writeText(url);
+    toast({ title: "Link copied", description: "Shareable URL copied to clipboard." });
+  } catch {
+    toast({ title: "Unable to share", description: url });
+  }
+};
+
+const FiltersSheet = ({
+  employer, setEmployer, dpc, setDpc, physician, setPhysician,
+}: {
+  employer: string; setEmployer: (v: string) => void;
+  dpc: string; setDpc: (v: string) => void;
+  physician: string; setPhysician: (v: string) => void;
+}) => {
+  const [open, setOpen] = useState(false);
+  const [draftEmp, setDraftEmp] = useState(employer);
+  const [draftDpc, setDraftDpc] = useState(dpc);
+  const [draftPhy, setDraftPhy] = useState(physician);
+
+  const onOpenChange = (o: boolean) => {
+    if (o) {
+      setDraftEmp(employer); setDraftDpc(dpc); setDraftPhy(physician);
+    }
+    setOpen(o);
+  };
+
+  const apply = () => {
+    setEmployer(draftEmp); setDpc(draftDpc); setPhysician(draftPhy);
+    setOpen(false);
+    toast({ title: "Filters applied" });
+  };
+
+  const reset = () => {
+    setDraftEmp("all"); setDraftDpc("all"); setDraftPhy("all");
+  };
+
+  return (
+    <Sheet open={open} onOpenChange={onOpenChange}>
+      <Button variant="outline" size="sm" className="gap-2 text-xs" onClick={() => setOpen(true)}>
+        <Filter className="size-3.5" /> Filters
+      </Button>
+      <SheetContent side="right" className="w-[320px] flex flex-col">
+        <SheetHeader>
+          <SheetTitle>Manage Filters</SheetTitle>
+        </SheetHeader>
+        <div className="space-y-5 mt-6 flex-1">
+          <FilterField label="Select Employer" value={draftEmp} onChange={setDraftEmp} options={employerOptions} allLabel="All Sponsored Patients" />
+          <FilterField label="Select DPC" value={draftDpc} onChange={setDraftDpc} options={dpcOptions} allLabel="All DPCs" />
+          <FilterField label="Select Physician" value={draftPhy} onChange={setDraftPhy} options={physicianOptions} allLabel="All Physicians" />
+        </div>
+        <p className="text-xs text-muted-foreground">
+          Note: After changing any filters, click Apply to update the results.
+        </p>
+        <SheetFooter className="flex-row gap-2 sm:justify-start">
+          <Button onClick={apply} className="flex-1">Apply</Button>
+          <Button variant="outline" onClick={reset} className="flex-1">Reset</Button>
+        </SheetFooter>
+      </SheetContent>
+    </Sheet>
+  );
+};
+
+const FilterField = ({
+  label, value, onChange, options, allLabel,
+}: {
+  label: string; value: string; onChange: (v: string) => void; options: string[]; allLabel: string;
+}) => (
+  <div className="space-y-1.5">
+    <label className="text-sm text-muted-foreground">{label}</label>
+    <Select value={value} onValueChange={onChange}>
+      <SelectTrigger className="w-full">
+        <SelectValue />
+      </SelectTrigger>
+      <SelectContent className="bg-popover">
+        <SelectItem value="all">{allLabel}</SelectItem>
+        {options.map((opt) => (
+          <SelectItem key={opt} value={opt}>{opt}</SelectItem>
+        ))}
+      </SelectContent>
+    </Select>
+  </div>
+);
+
 export default ChronicRiskPanel;
