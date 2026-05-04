@@ -14,6 +14,42 @@ export type Database = {
   }
   public: {
     Tables: {
+      audit_log: {
+        Row: {
+          action: string
+          created_at: string
+          id: string
+          ip_address: string | null
+          new_data: Json | null
+          old_data: Json | null
+          record_id: string | null
+          table_name: string
+          user_id: string | null
+        }
+        Insert: {
+          action: string
+          created_at?: string
+          id?: string
+          ip_address?: string | null
+          new_data?: Json | null
+          old_data?: Json | null
+          record_id?: string | null
+          table_name: string
+          user_id?: string | null
+        }
+        Update: {
+          action?: string
+          created_at?: string
+          id?: string
+          ip_address?: string | null
+          new_data?: Json | null
+          old_data?: Json | null
+          record_id?: string | null
+          table_name?: string
+          user_id?: string | null
+        }
+        Relationships: []
+      }
       cpt_codes: {
         Row: {
           category: string
@@ -40,6 +76,143 @@ export type Database = {
           updated_at?: string
         }
         Relationships: []
+      }
+      dispense_records: {
+        Row: {
+          created_at: string
+          date_written: string | null
+          days_supply: number | null
+          dea_schedule: string | null
+          diagnosis_code: string | null
+          directions: string | null
+          dispensed_at: string
+          dispensed_by: string | null
+          hint_billed_at: string | null
+          hint_billing_error: string | null
+          hint_billing_status: string | null
+          hint_charge_id: string | null
+          hint_patient_id: string | null
+          hint_voided_at: string | null
+          hint_voided_by: string | null
+          id: string
+          lot_number: string | null
+          medication_id: string | null
+          medication_name: string
+          notes: string | null
+          patient_address: string | null
+          patient_dob: string | null
+          patient_name: string
+          patient_phone: string | null
+          pharmacist_license: string | null
+          prescriber: string | null
+          prescriber_dea: string | null
+          prescriber_npi: string | null
+          prescriber_phone: string | null
+          prescription_queue_id: string | null
+          quantity: number
+          refill_number: number | null
+          refills_authorized: number | null
+          reversal_reason: string | null
+          reversed_at: string | null
+          reversed_by: string | null
+          rx_number: string | null
+          stock_returned_at: string | null
+          total_cost: number | null
+          unit_price: number | null
+        }
+        Insert: {
+          created_at?: string
+          date_written?: string | null
+          days_supply?: number | null
+          dea_schedule?: string | null
+          diagnosis_code?: string | null
+          directions?: string | null
+          dispensed_at?: string
+          dispensed_by?: string | null
+          hint_billed_at?: string | null
+          hint_billing_error?: string | null
+          hint_billing_status?: string | null
+          hint_charge_id?: string | null
+          hint_patient_id?: string | null
+          hint_voided_at?: string | null
+          hint_voided_by?: string | null
+          id?: string
+          lot_number?: string | null
+          medication_id?: string | null
+          medication_name: string
+          notes?: string | null
+          patient_address?: string | null
+          patient_dob?: string | null
+          patient_name: string
+          patient_phone?: string | null
+          pharmacist_license?: string | null
+          prescriber?: string | null
+          prescriber_dea?: string | null
+          prescriber_npi?: string | null
+          prescriber_phone?: string | null
+          prescription_queue_id?: string | null
+          quantity: number
+          refill_number?: number | null
+          refills_authorized?: number | null
+          reversal_reason?: string | null
+          reversed_at?: string | null
+          reversed_by?: string | null
+          rx_number?: string | null
+          stock_returned_at?: string | null
+          total_cost?: number | null
+          unit_price?: number | null
+        }
+        Update: {
+          created_at?: string
+          date_written?: string | null
+          days_supply?: number | null
+          dea_schedule?: string | null
+          diagnosis_code?: string | null
+          directions?: string | null
+          dispensed_at?: string
+          dispensed_by?: string | null
+          hint_billed_at?: string | null
+          hint_billing_error?: string | null
+          hint_billing_status?: string | null
+          hint_charge_id?: string | null
+          hint_patient_id?: string | null
+          hint_voided_at?: string | null
+          hint_voided_by?: string | null
+          id?: string
+          lot_number?: string | null
+          medication_id?: string | null
+          medication_name?: string
+          notes?: string | null
+          patient_address?: string | null
+          patient_dob?: string | null
+          patient_name?: string
+          patient_phone?: string | null
+          pharmacist_license?: string | null
+          prescriber?: string | null
+          prescriber_dea?: string | null
+          prescriber_npi?: string | null
+          prescriber_phone?: string | null
+          prescription_queue_id?: string | null
+          quantity?: number
+          refill_number?: number | null
+          refills_authorized?: number | null
+          reversal_reason?: string | null
+          reversed_at?: string | null
+          reversed_by?: string | null
+          rx_number?: string | null
+          stock_returned_at?: string | null
+          total_cost?: number | null
+          unit_price?: number | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "dispense_records_prescription_queue_id_fkey"
+            columns: ["prescription_queue_id"]
+            isOneToOne: false
+            referencedRelation: "prescription_queue"
+            referencedColumns: ["id"]
+          },
+        ]
       }
       email_send_log: {
         Row: {
@@ -1069,6 +1242,72 @@ export type Database = {
         }
         Relationships: []
       }
+      medications: {
+        Row: {
+          category: string
+          cost_per_unit: number
+          created_at: string
+          date_inventoried: string
+          dispense_price_per_unit: number
+          dosage_form: string
+          expiry_date: string | null
+          generic_name: string
+          id: string
+          lot_number: string | null
+          manufacturer: string | null
+          name: string
+          ndc_number: string
+          quantity: number
+          reorder_level: number
+          strength: string
+          supplier: string | null
+          unit_type: string
+          updated_at: string
+        }
+        Insert: {
+          category?: string
+          cost_per_unit?: number
+          created_at?: string
+          date_inventoried?: string
+          dispense_price_per_unit?: number
+          dosage_form?: string
+          expiry_date?: string | null
+          generic_name?: string
+          id?: string
+          lot_number?: string | null
+          manufacturer?: string | null
+          name: string
+          ndc_number?: string
+          quantity?: number
+          reorder_level?: number
+          strength?: string
+          supplier?: string | null
+          unit_type?: string
+          updated_at?: string
+        }
+        Update: {
+          category?: string
+          cost_per_unit?: number
+          created_at?: string
+          date_inventoried?: string
+          dispense_price_per_unit?: number
+          dosage_form?: string
+          expiry_date?: string | null
+          generic_name?: string
+          id?: string
+          lot_number?: string | null
+          manufacturer?: string | null
+          name?: string
+          ndc_number?: string
+          quantity?: number
+          reorder_level?: number
+          strength?: string
+          supplier?: string | null
+          unit_type?: string
+          updated_at?: string
+        }
+        Relationships: []
+      }
       phi_access_log: {
         Row: {
           created_at: string
@@ -1111,6 +1350,99 @@ export type Database = {
           user_agent?: string | null
           user_email?: string | null
           user_id?: string | null
+        }
+        Relationships: []
+      }
+      prescription_queue: {
+        Row: {
+          created_at: string
+          date_written: string | null
+          days_supply: number | null
+          dea_schedule: string | null
+          diagnosis_code: string | null
+          directions: string | null
+          elation_prescription_id: string | null
+          id: string
+          lot_number: string | null
+          medication_manufacturer: string | null
+          medication_name: string | null
+          medication_ndc: string | null
+          medication_strength: string | null
+          note_to_pharmacy: string | null
+          patient_address: string | null
+          patient_dob: string | null
+          patient_name: string | null
+          patient_phone: string | null
+          prescriber_dea: string | null
+          prescriber_name: string | null
+          prescriber_npi: string | null
+          prescriber_phone: string | null
+          quantity: number | null
+          raw_payload: Json | null
+          refills_authorized: number | null
+          status: string
+          status_reason: string | null
+          updated_at: string
+        }
+        Insert: {
+          created_at?: string
+          date_written?: string | null
+          days_supply?: number | null
+          dea_schedule?: string | null
+          diagnosis_code?: string | null
+          directions?: string | null
+          elation_prescription_id?: string | null
+          id?: string
+          lot_number?: string | null
+          medication_manufacturer?: string | null
+          medication_name?: string | null
+          medication_ndc?: string | null
+          medication_strength?: string | null
+          note_to_pharmacy?: string | null
+          patient_address?: string | null
+          patient_dob?: string | null
+          patient_name?: string | null
+          patient_phone?: string | null
+          prescriber_dea?: string | null
+          prescriber_name?: string | null
+          prescriber_npi?: string | null
+          prescriber_phone?: string | null
+          quantity?: number | null
+          raw_payload?: Json | null
+          refills_authorized?: number | null
+          status?: string
+          status_reason?: string | null
+          updated_at?: string
+        }
+        Update: {
+          created_at?: string
+          date_written?: string | null
+          days_supply?: number | null
+          dea_schedule?: string | null
+          diagnosis_code?: string | null
+          directions?: string | null
+          elation_prescription_id?: string | null
+          id?: string
+          lot_number?: string | null
+          medication_manufacturer?: string | null
+          medication_name?: string | null
+          medication_ndc?: string | null
+          medication_strength?: string | null
+          note_to_pharmacy?: string | null
+          patient_address?: string | null
+          patient_dob?: string | null
+          patient_name?: string | null
+          patient_phone?: string | null
+          prescriber_dea?: string | null
+          prescriber_name?: string | null
+          prescriber_npi?: string | null
+          prescriber_phone?: string | null
+          quantity?: number | null
+          raw_payload?: Json | null
+          refills_authorized?: number | null
+          status?: string
+          status_reason?: string | null
+          updated_at?: string
         }
         Relationships: []
       }
