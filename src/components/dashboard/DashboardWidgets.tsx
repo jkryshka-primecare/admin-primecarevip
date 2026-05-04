@@ -1,3 +1,4 @@
+import { Link } from "react-router-dom";
 import { cn } from "@/lib/utils";
 
 /* ---------- Shared primitives ---------- */
@@ -8,17 +9,33 @@ const SectionLabel = ({ children }: { children: React.ReactNode }) => (
   </p>
 );
 
-const Card = ({ className, children }: { className?: string; children: React.ReactNode }) => (
-  <div
-    className={cn(
-      "bg-card border border-border rounded-lg px-5 py-4",
-      className,
-    )}
-    style={{ borderWidth: "0.5px" }}
-  >
-    {children}
-  </div>
-);
+const Card = ({
+  className,
+  children,
+  to,
+}: {
+  className?: string;
+  children: React.ReactNode;
+  to?: string;
+}) => {
+  const base = cn(
+    "block bg-card border border-border rounded-lg px-5 py-4 transition-colors",
+    to && "hover:border-accent/60 hover:bg-accent/5 cursor-pointer focus:outline-none focus:ring-2 focus:ring-accent/40",
+    className,
+  );
+  if (to) {
+    return (
+      <Link to={to} className={base} style={{ borderWidth: "0.5px" }}>
+        {children}
+      </Link>
+    );
+  }
+  return (
+    <div className={base} style={{ borderWidth: "0.5px" }}>
+      {children}
+    </div>
+  );
+};
 
 const StatLabel = ({ children }: { children: React.ReactNode }) => (
   <p className="text-[11px] font-semibold uppercase tracking-[0.12em] text-muted-foreground">
@@ -67,7 +84,7 @@ const PatientActivityRow = () => (
   <section>
     <SectionLabel>Patient Activity</SectionLabel>
     <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-      <Card>
+      <Card to="/patients">
         <StatLabel>New Patients (30d)</StatLabel>
         <div className="flex items-baseline justify-between mt-1.5">
           <StatValue>128</StatValue>
@@ -75,7 +92,7 @@ const PatientActivityRow = () => (
         </div>
         <Sparkline data={[4, 7, 5, 9, 6, 11, 14]} colorVar="--accent" />
       </Card>
-      <Card>
+      <Card to="/care">
         <StatLabel>Appointments This Week</StatLabel>
         <div className="flex items-baseline justify-between mt-1.5">
           <StatValue>87</StatValue>
@@ -83,7 +100,7 @@ const PatientActivityRow = () => (
         </div>
         <Sparkline data={[10, 12, 9, 14, 11, 15, 16]} colorVar="--success" />
       </Card>
-      <Card>
+      <Card to="/care">
         <StatLabel>Avg Response Time</StatLabel>
         <div className="flex items-baseline justify-between mt-1.5">
           <StatValue>2.4h</StatValue>
@@ -122,7 +139,7 @@ const InvoicesRow = () => (
   <section>
     <SectionLabel>Invoices &amp; Billing</SectionLabel>
     <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-      <Card>
+      <Card to="/estimator">
         <div className="flex items-start justify-between">
           <div>
             <StatLabel>Outstanding Invoices</StatLabel>
@@ -136,7 +153,7 @@ const InvoicesRow = () => (
           <InvoiceRow label="Pending" value="$17,320" />
         </div>
       </Card>
-      <Card>
+      <Card to="/insights">
         <div className="flex items-start justify-between">
           <div>
             <StatLabel>Revenue (MTD)</StatLabel>
@@ -188,7 +205,7 @@ const CareConnectRow = () => (
   <section>
     <SectionLabel>Care Connect</SectionLabel>
     <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-      <Card>
+      <Card to="/care">
         <div className="flex items-center justify-between mb-3">
           <StatLabel>Recent Messages</StatLabel>
         </div>
@@ -209,7 +226,7 @@ const CareConnectRow = () => (
           ))}
         </ul>
       </Card>
-      <Card>
+      <Card to="/care">
         <div className="flex items-center justify-between mb-3">
           <StatLabel>Open Tasks</StatLabel>
         </div>
@@ -235,21 +252,21 @@ const RxRow = () => (
   <section>
     <SectionLabel>PrimeCare VIP RX</SectionLabel>
     <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-      <Card>
+      <Card to="/pharmacy">
         <StatLabel>Active Rx Members</StatLabel>
         <div className="flex items-baseline justify-between mt-1.5">
           <StatValue>1,284</StatValue>
           <Pill tone="success">+3.1%</Pill>
         </div>
       </Card>
-      <Card>
+      <Card to="/pharmacy/dispense">
         <StatLabel>Refills Pending</StatLabel>
         <div className="flex items-baseline justify-between mt-1.5">
           <StatValue>42</StatValue>
           <Pill tone="warning">8 expiring</Pill>
         </div>
       </Card>
-      <Card>
+      <Card to="/pharmacy/inventory">
         <StatLabel>Formulary Alerts</StatLabel>
         <div className="flex items-baseline justify-between mt-1.5">
           <StatValue>6</StatValue>
