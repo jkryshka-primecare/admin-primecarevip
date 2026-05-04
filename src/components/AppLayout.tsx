@@ -44,7 +44,7 @@ type ModuleItem = {
 
 const MODULES: ModuleItem[] = [
   { title: "Dashboard", url: "/", icon: LayoutDashboard, roles: [] },
-  { title: "Pharmacy", url: "/pharmacy", icon: Pill, roles: ["super_admin", "admin", "pharmacy"] },
+  { title: "Primecare VIP RX", url: "/pharmacy", icon: Pill, roles: ["super_admin", "admin", "pharmacy"] },
   { title: "Care Connect", url: "/care", icon: HeartPulse, roles: ["super_admin", "admin", "clinical", "billing"] },
   { title: "HR", url: "/hr", icon: Users2, roles: ["super_admin", "admin", "hr", "billing"] },
   { title: "Insights", url: "/insights", icon: BarChart3, roles: ["super_admin", "admin", "clinical"] },

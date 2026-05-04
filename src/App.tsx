@@ -13,12 +13,11 @@ import NotFound from "./pages/NotFound.tsx";
 import Unsubscribe from "./pages/Unsubscribe.tsx";
 import DashboardHome from "./pages/DashboardHome.tsx";
 import PharmacyLayout from "./pages/pharmacy/PharmacyLayout.tsx";
-import DispenseQueue from "./pages/pharmacy/DispenseQueue.tsx";
-import Inventory from "./pages/pharmacy/Inventory.tsx";
-import Scanner from "./pages/pharmacy/Scanner.tsx";
-import PharmacyPatients from "./pages/pharmacy/Patients.tsx";
-import RefillRequests from "./pages/pharmacy/RefillRequests.tsx";
-import Adherence from "./pages/pharmacy/Adherence.tsx";
+import PharmacyDashboard from "./pages/pharmacy/Dashboard.tsx";
+import PharmacyInventory from "./pages/pharmacy/Inventory.tsx";
+import PharmacyDispense from "./pages/pharmacy/Dispense.tsx";
+import PharmacyHistory from "./pages/pharmacy/History.tsx";
+import PharmacyScanner from "./pages/pharmacy/Scanner.tsx";
 import CareHome from "./pages/care/CareHome.tsx";
 import HrHome from "./pages/hr/HrHome.tsx";
 import InsightsHome from "./pages/insights/InsightsHome.tsx";
@@ -60,13 +59,12 @@ const App = () => (
                   </ProtectedRoute>
                 }
               >
-                <Route index element={<DispenseQueue />} />
-                <Route path="dispense" element={<DispenseQueue />} />
-                <Route path="scanner" element={<Scanner />} />
-                <Route path="inventory" element={<Inventory />} />
-                <Route path="patients" element={<PharmacyPatients />} />
-                <Route path="refills" element={<RefillRequests />} />
-                <Route path="adherence" element={<Adherence />} />
+                <Route index element={<PharmacyDashboard />} />
+                <Route path="dashboard" element={<PharmacyDashboard />} />
+                <Route path="inventory" element={<PharmacyInventory />} />
+                <Route path="dispense" element={<PharmacyDispense />} />
+                <Route path="history" element={<PharmacyHistory />} />
+                <Route path="scanner" element={<PharmacyScanner />} />
               </Route>
 
               {/* Care Connect */}
