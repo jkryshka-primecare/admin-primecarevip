@@ -81,37 +81,42 @@ const Sparkline = ({ data, colorVar }: { data: number[]; colorVar: string }) => 
 
 /* ---------- Row 1: Patient Activity ---------- */
 
-const PatientActivityRow = () => (
-  <section>
-    <SectionLabel>Patient Activity</SectionLabel>
-    <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-      <Card to="/patients">
-        <StatLabel>New Patients (30d)</StatLabel>
-        <div className="flex items-baseline justify-between mt-1.5">
-          <StatValue>128</StatValue>
-          <Pill tone="success">+12.4%</Pill>
-        </div>
-        <Sparkline data={[4, 7, 5, 9, 6, 11, 14]} colorVar="--accent" />
-      </Card>
-      <Card to="/care">
-        <StatLabel>Appointments This Week</StatLabel>
-        <div className="flex items-baseline justify-between mt-1.5">
-          <StatValue>87</StatValue>
-          <span className="text-[11px] text-muted-foreground">9 upcoming today</span>
-        </div>
-        <Sparkline data={[10, 12, 9, 14, 11, 15, 16]} colorVar="--success" />
-      </Card>
-      <Card to="/care">
-        <StatLabel>Avg Response Time</StatLabel>
-        <div className="flex items-baseline justify-between mt-1.5">
-          <StatValue>2.4h</StatValue>
-          <Pill tone="success">On target</Pill>
-        </div>
-        <Sparkline data={[3, 2.5, 3.1, 2.2, 2.8, 2.4, 2.1]} colorVar="--destructive" />
-      </Card>
-    </div>
-  </section>
-);
+const PatientActivityRow = () => {
+  const { patients, memberships, loading, error } = useHintDashboard();
+  const fmt = (n: number | null) => (loading ? "…" : n ?? "—");
+  return (
+    <section>
+      <SectionLabel>Patient Activity {error && <span className="text-destructive normal-case tracking-normal ml-2">· {error}</span>}</SectionLabel>
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+        <Card to="/patients">
+          <StatLabel>Total Patients (Hint)</StatLabel>
+          <div className="flex items-baseline justify-between mt-1.5">
+            <StatValue>{fmt(patients.total)}</StatValue>
+            <Pill tone="accent">Live</Pill>
+          </div>
+          <Sparkline data={[4, 7, 5, 9, 6, 11, 14]} colorVar="--accent" />
+        </Card>
+        <Card to="/patients">
+          <StatLabel>Active Memberships</StatLabel>
+          <div className="flex items-baseline justify-between mt-1.5">
+            <StatValue>{fmt(memberships.active)}</StatValue>
+            <Pill tone="success">Hint</Pill>
+          </div>
+          <Sparkline data={[10, 12, 9, 14, 11, 15, 16]} colorVar="--success" />
+        </Card>
+        <Card to="/care">
+          <StatLabel>Avg Response Time</StatLabel>
+          <div className="flex items-baseline justify-between mt-1.5">
+            <StatValue>2.4h</StatValue>
+            <Pill tone="success">On target</Pill>
+          </div>
+          <Sparkline data={[3, 2.5, 3.1, 2.2, 2.8, 2.4, 2.1]} colorVar="--destructive" />
+        </Card>
+      </div>
+    </section>
+  );
+};
+
 
 /* ---------- Row 2: Invoices & Billing ---------- */
 
