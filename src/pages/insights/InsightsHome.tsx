@@ -21,6 +21,7 @@ const tabs = [
   { id: "risk", label: "Utilization Gaps" },
   { id: "chronic", label: "Chronic Risk" },
   { id: "savings", label: "Cost Savings" },
+  { id: "claims-util", label: "Claims Utilization" },
   { id: "claims", label: "Claims Pipeline" },
   { id: "messaging", label: "Messaging" },
   { id: "medications", label: "Medications" },
