@@ -16,7 +16,7 @@ import { cn } from "@/lib/utils";
 const tabs = [
   { id: "overview", label: "Executive Registry" },
   { id: "engagement", label: "Engagement & Utilization" },
-  { id: "risk", label: "Risk Stratification" },
+  { id: "risk", label: "Utilization Gaps" },
   { id: "savings", label: "Cost Savings" },
   { id: "claims", label: "Claims Pipeline" },
   { id: "messaging", label: "Messaging" },
