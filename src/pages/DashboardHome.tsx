@@ -1,5 +1,6 @@
 import AppLayout from "@/components/AppLayout";
 import KPICard from "@/components/KPICard";
+import DashboardWidgets from "@/components/dashboard/DashboardWidgets";
 import { useAuth } from "@/hooks/useAuth";
 
 export default function DashboardHome() {
