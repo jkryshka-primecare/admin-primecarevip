@@ -14,6 +14,12 @@ import HintSandbox from "@/components/HintSandbox";
 import ElationStatusCard from "@/components/ElationStatusCard";
 import ElationLivePanel from "@/components/ElationLivePanel";
 import LabOrders from "@/components/LabOrders";
+import ElationOverviewKPIs from "@/components/elation-live/ElationOverviewKPIs";
+import ElationLiveMedications from "@/components/elation-live/ElationLiveMedications";
+import ElationLiveLabs from "@/components/elation-live/ElationLiveLabs";
+import ElationLiveChronicRisk from "@/components/elation-live/ElationLiveChronicRisk";
+import ElationLiveAppointments from "@/components/elation-live/ElationLiveAppointments";
+import ElationLiveVitals from "@/components/elation-live/ElationLiveVitals";
 import { cn } from "@/lib/utils";
 
 const tabs = [
@@ -58,6 +64,7 @@ export default function InsightsHome() {
 
         {tab === "overview" && (
           <>
+            <ElationOverviewKPIs />
             <section className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-5">
               <KPICard label="Weighted HCC Risk" value="1.84" delta="+0.024 Δ" deltaType="negative" progress={84} progressColor="bg-destructive" />
               <KPICard label="Engagement Rate" value="64.8%" delta="Normal" deltaType="positive" progress={64.8} progressColor="bg-success" />
@@ -65,18 +72,40 @@ export default function InsightsHome() {
               <KPICard label="Claims Accuracy" value="99.1%" subtitle="14,102 claims processed" />
             </section>
             <RiskTable />
+            <ElationLiveAppointments limit={25} />
           </>
         )}
 
         {tab === "engagement" && <EngagementPanel />}
-        {tab === "risk" && <UtilizationGapsPanel />}
-        {tab === "chronic" && <ChronicRiskPanel />}
+        {tab === "risk" && (
+          <>
+            <ElationLiveAppointments limit={50} />
+            <UtilizationGapsPanel />
+          </>
+        )}
+        {tab === "chronic" && (
+          <>
+            <ElationLiveChronicRisk limit={100} />
+            <ElationLiveVitals limit={50} />
+            <ChronicRiskPanel />
+          </>
+        )}
         {tab === "savings" && <CostSavingsPanel />}
         {tab === "claims-util" && <ClaimsUtilizationPanel />}
         {tab === "claims" && <ClaimsPipeline />}
         {tab === "messaging" && <MessagingAnalytics />}
-        {tab === "medications" && <MedicationStats />}
-        {tab === "labs" && <LabOrders />}
+        {tab === "medications" && (
+          <>
+            <ElationLiveMedications limit={50} />
+            <MedicationStats />
+          </>
+        )}
+        {tab === "labs" && (
+          <>
+            <ElationLiveLabs limit={50} />
+            <LabOrders />
+          </>
+        )}
         {tab === "elation" && (
           <>
             <ElationStatusCard />
