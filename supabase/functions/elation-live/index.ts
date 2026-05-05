@@ -96,6 +96,7 @@ async function getAccessToken(
     body: form.toString(),
   });
   const text = await res.text();
+  console.log("[elation-live] token response", res.status, text.slice(0, 500), "clientIdLen=", clientId.length, "secretLen=", clientSecret.length);
   if (!res.ok) {
     throw new Error(`Elation token exchange failed [${res.status}]: ${text.slice(0, 500)}`);
   }
