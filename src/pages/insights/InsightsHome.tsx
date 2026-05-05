@@ -20,6 +20,10 @@ import ElationLiveLabs from "@/components/elation-live/ElationLiveLabs";
 import ElationLiveChronicRisk from "@/components/elation-live/ElationLiveChronicRisk";
 import ElationLiveAppointments from "@/components/elation-live/ElationLiveAppointments";
 import ElationLiveVitals from "@/components/elation-live/ElationLiveVitals";
+import HintLiveEngagement from "@/components/hint-live/HintLiveEngagement";
+import HintLiveCostSavings from "@/components/hint-live/HintLiveCostSavings";
+import HintLiveClaimsPipeline from "@/components/hint-live/HintLiveClaimsPipeline";
+import HintLiveMessaging from "@/components/hint-live/HintLiveMessaging";
 import { cn } from "@/lib/utils";
 
 const tabs = [
