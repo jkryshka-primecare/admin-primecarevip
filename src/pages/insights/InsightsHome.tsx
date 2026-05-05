@@ -12,6 +12,7 @@ import MessagingAnalytics from "@/components/MessagingAnalytics";
 import MedicationStats from "@/components/MedicationStats";
 import HintSandbox from "@/components/HintSandbox";
 import ElationStatusCard from "@/components/ElationStatusCard";
+import ElationLivePanel from "@/components/ElationLivePanel";
 import LabOrders from "@/components/LabOrders";
 import { cn } from "@/lib/utils";
 
@@ -26,6 +27,7 @@ const tabs = [
   { id: "messaging", label: "Messaging" },
   { id: "medications", label: "Medications" },
   { id: "labs", label: "Lab Orders" },
+  { id: "elation", label: "Elation Live" },
   { id: "hint", label: "Hint Sandbox" },
 ] as const;
 
@@ -75,6 +77,12 @@ export default function InsightsHome() {
         {tab === "messaging" && <MessagingAnalytics />}
         {tab === "medications" && <MedicationStats />}
         {tab === "labs" && <LabOrders />}
+        {tab === "elation" && (
+          <>
+            <ElationStatusCard />
+            <ElationLivePanel />
+          </>
+        )}
         {tab === "hint" && (
           <>
             <ElationStatusCard />
