@@ -20,6 +20,10 @@ import ElationLiveLabs from "@/components/elation-live/ElationLiveLabs";
 import ElationLiveChronicRisk from "@/components/elation-live/ElationLiveChronicRisk";
 import ElationLiveAppointments from "@/components/elation-live/ElationLiveAppointments";
 import ElationLiveVitals from "@/components/elation-live/ElationLiveVitals";
+import HintLiveEngagement from "@/components/hint-live/HintLiveEngagement";
+import HintLiveCostSavings from "@/components/hint-live/HintLiveCostSavings";
+import HintLiveClaimsPipeline from "@/components/hint-live/HintLiveClaimsPipeline";
+import HintLiveMessaging from "@/components/hint-live/HintLiveMessaging";
 import { cn } from "@/lib/utils";
 
 const tabs = [
@@ -76,7 +80,12 @@ export default function InsightsHome() {
           </>
         )}
 
-        {tab === "engagement" && <EngagementPanel />}
+        {tab === "engagement" && (
+          <>
+            <HintLiveEngagement />
+            <EngagementPanel />
+          </>
+        )}
         {tab === "risk" && (
           <>
             <ElationLiveAppointments limit={50} />
@@ -90,10 +99,25 @@ export default function InsightsHome() {
             <ChronicRiskPanel />
           </>
         )}
-        {tab === "savings" && <CostSavingsPanel />}
+        {tab === "savings" && (
+          <>
+            <HintLiveCostSavings />
+            <CostSavingsPanel />
+          </>
+        )}
         {tab === "claims-util" && <ClaimsUtilizationPanel />}
-        {tab === "claims" && <ClaimsPipeline />}
-        {tab === "messaging" && <MessagingAnalytics />}
+        {tab === "claims" && (
+          <>
+            <HintLiveClaimsPipeline />
+            <ClaimsPipeline />
+          </>
+        )}
+        {tab === "messaging" && (
+          <>
+            <HintLiveMessaging />
+            <MessagingAnalytics />
+          </>
+        )}
         {tab === "medications" && (
           <>
             <ElationLiveMedications limit={50} />
