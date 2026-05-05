@@ -80,7 +80,12 @@ export default function InsightsHome() {
           </>
         )}
 
-        {tab === "engagement" && <EngagementPanel />}
+        {tab === "engagement" && (
+          <>
+            <HintLiveEngagement />
+            <EngagementPanel />
+          </>
+        )}
         {tab === "risk" && (
           <>
             <ElationLiveAppointments limit={50} />
@@ -94,10 +99,25 @@ export default function InsightsHome() {
             <ChronicRiskPanel />
           </>
         )}
-        {tab === "savings" && <CostSavingsPanel />}
+        {tab === "savings" && (
+          <>
+            <HintLiveCostSavings />
+            <CostSavingsPanel />
+          </>
+        )}
         {tab === "claims-util" && <ClaimsUtilizationPanel />}
-        {tab === "claims" && <ClaimsPipeline />}
-        {tab === "messaging" && <MessagingAnalytics />}
+        {tab === "claims" && (
+          <>
+            <HintLiveClaimsPipeline />
+            <ClaimsPipeline />
+          </>
+        )}
+        {tab === "messaging" && (
+          <>
+            <HintLiveMessaging />
+            <MessagingAnalytics />
+          </>
+        )}
         {tab === "medications" && (
           <>
             <ElationLiveMedications limit={50} />
