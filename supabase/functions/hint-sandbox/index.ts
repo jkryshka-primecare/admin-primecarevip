@@ -108,8 +108,8 @@ Deno.serve(async (req) => {
       headers: {
         Accept: "application/json",
         "Content-Type": "application/json",
-        // Hint uses Bearer token auth (RFC 6750).
-        Authorization: `Bearer ${apiKey}`,
+        // Hint uses HTTP Basic auth with the API key as the username and an empty password.
+        Authorization: `Basic ${btoa(`${apiKey}:`)}`,
       },
       body: method === "GET" || method === "DELETE"
         ? undefined
