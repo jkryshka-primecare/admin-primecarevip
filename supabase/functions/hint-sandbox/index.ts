@@ -17,9 +17,10 @@
 
 import { corsHeaders, requireStaff, logPhiAccess } from "../_shared/auth.ts";
 
-const HINT_HOST = "https://api.staging.hint.com";
-const HINT_PRACTICE_BASE = `${HINT_HOST}/api/provider`;
-const HINT_PARTNER_BASE = `${HINT_HOST}/api/partner`;
+const HINT_HOSTS = [
+  "https://api.sandbox.hint.com",
+  "https://api.staging.hint.com",
+];
 
 type RequestBody = {
   resource?: string;
@@ -92,29 +93,29 @@ Deno.serve(async (req) => {
       );
     }
 
-    // Build target URL — partner scope hits /api/partner/*, practice hits /api/provider/*
-    const base = scope === "partner" ? HINT_PARTNER_BASE : HINT_PRACTICE_BASE;
     const path = body.id ? `${resource}/${encodeURIComponent(body.id)}` : resource;
-    const url = new URL(`${base}/${path}`);
-    if (body.query) {
-      for (const [k, v] of Object.entries(body.query)) {
-        url.searchParams.set(k, String(v));
-      }
-    }
 
     const started = Date.now();
-    const upstream = await fetch(url.toString(), {
-      method,
-      headers: {
-        Accept: "application/json",
-        "Content-Type": "application/json",
-        // Hint API requests use Bearer token authentication.
-        Authorization: `Bearer ${apiKey}`,
-      },
-      body: method === "GET" || method === "DELETE"
-        ? undefined
-        : JSON.stringify(body.payload ?? {}),
-    });
+    const attempts: { url: URL; response: Response }[] = [];
+    for (const host of HINT_HOSTS) {
+      const base = `${host}${scope === "partner" ? "/api/partner" : "/api/provider"}`;
+      const url = new URL(`${base}/${path}`);
+      if (body.query) {
+        for (const [k, v] of Object.entries(body.query)) url.searchParams.set(k, String(v));
+      }
+      const response = await fetch(url.toString(), {
+        method,
+        headers: {
+          Accept: "application/json",
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${apiKey}`,
+        },
+        body: method === "GET" || method === "DELETE" ? undefined : JSON.stringify(body.payload ?? {}),
+      });
+      attempts.push({ url, response });
+      if (response.status !== 401) break;
+    }
+    const { url, response: upstream } = attempts.at(-1)!;
 
     const elapsedMs = Date.now() - started;
     const text = await upstream.text();
