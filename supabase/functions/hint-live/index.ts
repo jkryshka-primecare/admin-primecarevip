@@ -78,7 +78,7 @@ Deno.serve(async (req) => {
       headers: {
         Accept: "application/json",
         "Content-Type": "application/json",
-        Authorization: `Basic ${btoa(`${apiKey}:`)}`,
+        Authorization: `Bearer ${apiKey}`,
       },
       body: method === "GET" || method === "DELETE" ? undefined : JSON.stringify(body.payload ?? {}),
     });
