@@ -84,7 +84,7 @@ Deno.serve(async (req) => {
       );
     }
 
-    const apiKey = scope === "partner" ? partnerKey : practiceKey;
+    const apiKey = (scope === "partner" ? partnerKey : practiceKey)?.trim();
     if (!apiKey) {
       return json(
         { error: `Hint ${scope} API key is not configured.` },
@@ -108,8 +108,8 @@ Deno.serve(async (req) => {
       headers: {
         Accept: "application/json",
         "Content-Type": "application/json",
-        // Hint uses HTTP Basic auth with the API key as the username and an empty password.
-        Authorization: `Basic ${btoa(`${apiKey}:`)}`,
+        // Hint API requests use Bearer token authentication.
+        Authorization: `Bearer ${apiKey}`,
       },
       body: method === "GET" || method === "DELETE"
         ? undefined
