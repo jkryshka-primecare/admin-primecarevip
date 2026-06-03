@@ -65,7 +65,7 @@ export function useManualPricing() {
             categories: input.categories ?? [],
             ...(primarySpecialty ? { specialty_id: primarySpecialty } : {}),
             last_price_update: new Date().toISOString().slice(0, 10),
-          })
+          } as any)
           .eq("id", input.providerId);
         if (error) throw error;
         providerId = input.providerId;
