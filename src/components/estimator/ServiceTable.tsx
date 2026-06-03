@@ -303,6 +303,8 @@ function SortableServiceCard({
   providers: Provider[];
   sortMode: SortMode;
 }) {
+  const { isAdmin } = useAuth();
+  const [addPriceOpen, setAddPriceOpen] = useState(false);
   const providerIds = useMemo(() => providers.map((p) => p.id), [providers]);
   const { data: totals = {} } = useProviderTotals(service.id, providerIds);
 
