@@ -260,7 +260,7 @@ export function ImportPricingDialog({ activeSpecialty }: ImportPricingDialogProp
             Import Pricing
           </Button>
         </DialogTrigger>
-        <DialogContent className="sm:max-w-md">
+        <DialogContent className="sm:max-w-xl max-h-[90vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle>Import Hospital Pricing</DialogTitle>
             <DialogDescription>
