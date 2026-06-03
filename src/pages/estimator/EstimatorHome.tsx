@@ -58,7 +58,20 @@ function EstimatorContent() {
               )}
             </div>
             <div className="flex items-center gap-3">
-              {isAdmin && <ImportPricingDialog activeSpecialty={activeSpecialty} />}
+              {isAdmin && (
+                <>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="gap-1.5"
+                    onClick={() => setManualOpen(true)}
+                  >
+                    <PencilLine className="h-3.5 w-3.5" />
+                    Add Pricing Manually
+                  </Button>
+                  <ImportPricingDialog activeSpecialty={activeSpecialty} />
+                </>
+              )}
               {items.length > 0 && (
                 <button
                   onClick={clearAll}
