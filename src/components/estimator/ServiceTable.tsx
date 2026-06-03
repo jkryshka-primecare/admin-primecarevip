@@ -403,8 +403,29 @@ function SortableServiceCard({
       ) : (
         <div className="py-4 px-4 text-xs text-muted-foreground">
           No providers with pricing for this service yet.
+          {isAdmin && (
+            <>
+              {" "}
+              <button
+                onClick={() => setAddPriceOpen(true)}
+                className="text-primary hover:underline font-medium"
+              >
+                Add the first price →
+              </button>
+            </>
+          )}
         </div>
       )}
+
+      <ManualPricingDialog
+        open={addPriceOpen}
+        onOpenChange={setAddPriceOpen}
+        initial={{
+          cptCode: service.cpt_code ?? "",
+          serviceName: service.name,
+          lockCpt: !!service.cpt_code,
+        }}
+      />
     </motion.div>
   );
 }
