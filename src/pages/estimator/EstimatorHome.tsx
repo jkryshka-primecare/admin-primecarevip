@@ -124,6 +124,8 @@ function EstimatorContent() {
       </div>
 
       <EstimatePanel />
+
+      <ManualPricingDialog open={manualOpen} onOpenChange={setManualOpen} />
     </div>
   );
 }
