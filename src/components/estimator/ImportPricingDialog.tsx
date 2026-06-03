@@ -402,45 +402,49 @@ export function ImportPricingDialog({ activeSpecialty }: ImportPricingDialogProp
                 </div>
               )}
 
-              <div className="space-y-1.5">
-                <label className="text-xs font-medium text-foreground">
-                  Existing Provider <span className="text-muted-foreground font-normal">(optional)</span>
-                </label>
-                <select
-                  className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-                  value={selectedProviderId}
-                  onChange={(e) => setSelectedProviderId(e.target.value)}
-                >
-                  <option value="">New provider (use hospital info above)</option>
-                  {providers.map((p) => (
-                    <option key={p.id} value={p.id}>
-                      {p.name} — {p.city}, {p.state}
-                    </option>
-                  ))}
-                </select>
-              </div>
-
-              {uploading && (
-                <div className="space-y-1.5">
-                  <div className="flex items-center gap-2 text-sm text-muted-foreground">
-                    <Loader2 className="h-4 w-4 animate-spin" />
-                    Uploading… {uploadProgress}%
+              {inputMode !== "manual" && (
+                <>
+                  <div className="space-y-1.5">
+                    <label className="text-xs font-medium text-foreground">
+                      Existing Provider <span className="text-muted-foreground font-normal">(optional)</span>
+                    </label>
+                    <select
+                      className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                      value={selectedProviderId}
+                      onChange={(e) => setSelectedProviderId(e.target.value)}
+                    >
+                      <option value="">New provider (use hospital info above)</option>
+                      {providers.map((p) => (
+                        <option key={p.id} value={p.id}>
+                          {p.name} — {p.city}, {p.state}
+                        </option>
+                      ))}
+                    </select>
                   </div>
-                  <Progress value={uploadProgress} className="h-2" />
-                </div>
-              )}
 
-              <Button onClick={handleStart} disabled={isBusy} className="w-full">
-                {uploading ? (
-                  <><Loader2 className="h-4 w-4 mr-2 animate-spin" /> Uploading… {uploadProgress}%</>
-                ) : checking ? (
-                  <><Loader2 className="h-4 w-4 mr-2 animate-spin" /> Checking…</>
-                ) : createJob.isPending ? (
-                  <><Loader2 className="h-4 w-4 mr-2 animate-spin" /> Starting…</>
-                ) : (
-                  "Start Import"
-                )}
-              </Button>
+                  {uploading && (
+                    <div className="space-y-1.5">
+                      <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                        <Loader2 className="h-4 w-4 animate-spin" />
+                        Uploading… {uploadProgress}%
+                      </div>
+                      <Progress value={uploadProgress} className="h-2" />
+                    </div>
+                  )}
+
+                  <Button onClick={handleStart} disabled={isBusy} className="w-full">
+                    {uploading ? (
+                      <><Loader2 className="h-4 w-4 mr-2 animate-spin" /> Uploading… {uploadProgress}%</>
+                    ) : checking ? (
+                      <><Loader2 className="h-4 w-4 mr-2 animate-spin" /> Checking…</>
+                    ) : createJob.isPending ? (
+                      <><Loader2 className="h-4 w-4 mr-2 animate-spin" /> Starting…</>
+                    ) : (
+                      "Start Import"
+                    )}
+                  </Button>
+                </>
+              )}
             </div>
           ) : (
             <div className="space-y-4 pt-2">
