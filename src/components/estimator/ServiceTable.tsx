@@ -17,6 +17,7 @@ import {
   AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
   AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
+import { ManualPricingDialog } from "@/components/estimator/ManualPricingDialog";
 import type { Database } from "@/integrations/supabase/types";
 
 type Service = Database["public"]["Tables"]["services"]["Row"];
