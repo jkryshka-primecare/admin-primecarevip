@@ -363,7 +363,7 @@ export function ImportPricingDialog({ activeSpecialty }: ImportPricingDialogProp
                 </div>
               )}
 
-              {!selectedProviderId && (
+              {inputMode !== "manual" && !selectedProviderId && (
                 <div className="space-y-2 rounded-md border border-input p-3">
                   <label className="text-xs font-medium text-foreground">Hospital Info</label>
                   <Input
