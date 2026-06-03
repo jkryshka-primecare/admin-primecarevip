@@ -7,12 +7,16 @@ import { ServiceTable } from "@/components/estimator/ServiceTable";
 import { AuditLogPanel } from "@/components/estimator/AuditLogPanel";
 import { EstimatePanel } from "@/components/estimator/EstimatePanel";
 import { ImportPricingDialog } from "@/components/estimator/ImportPricingDialog";
+import { ManualPricingDialog } from "@/components/estimator/ManualPricingDialog";
+import { Button } from "@/components/ui/button";
+import { PencilLine } from "lucide-react";
 import { EstimateProvider, useEstimate } from "@/contexts/EstimateContext";
 import { useServices, useProviders, useNhsnCategories } from "@/hooks/useEstimatorDb";
 import { useAuth } from "@/hooks/useAuth";
 
 function EstimatorContent() {
   const [activeSpecialty, setActiveSpecialty] = useState("all");
+  const [manualOpen, setManualOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
   const [locationFilter, setLocationFilter] = useState("");
   const [providerSearch, setProviderSearch] = useState("");
@@ -54,7 +58,20 @@ function EstimatorContent() {
               )}
             </div>
             <div className="flex items-center gap-3">
-              {isAdmin && <ImportPricingDialog activeSpecialty={activeSpecialty} />}
+              {isAdmin && (
+                <>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="gap-1.5"
+                    onClick={() => setManualOpen(true)}
+                  >
+                    <PencilLine className="h-3.5 w-3.5" />
+                    Add Pricing Manually
+                  </Button>
+                  <ImportPricingDialog activeSpecialty={activeSpecialty} />
+                </>
+              )}
               {items.length > 0 && (
                 <button
                   onClick={clearAll}
@@ -107,6 +124,8 @@ function EstimatorContent() {
       </div>
 
       <EstimatePanel />
+
+      <ManualPricingDialog open={manualOpen} onOpenChange={setManualOpen} />
     </div>
   );
 }

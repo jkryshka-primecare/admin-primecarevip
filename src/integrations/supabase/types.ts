@@ -1518,43 +1518,49 @@ export type Database = {
       providers: {
         Row: {
           address: string | null
-          city: string
+          categories: string[]
+          city: string | null
           created_at: string
           distance: number | null
+          fax: string | null
           id: string
           last_price_update: string | null
           name: string
-          phone: string
-          specialty_id: string
-          state: string
+          phone: string | null
+          specialty_id: string | null
+          state: string | null
           updated_at: string
           zip: string | null
         }
         Insert: {
           address?: string | null
-          city: string
+          categories?: string[]
+          city?: string | null
           created_at?: string
           distance?: number | null
+          fax?: string | null
           id?: string
           last_price_update?: string | null
           name: string
-          phone: string
-          specialty_id: string
-          state?: string
+          phone?: string | null
+          specialty_id?: string | null
+          state?: string | null
           updated_at?: string
           zip?: string | null
         }
         Update: {
           address?: string | null
-          city?: string
+          categories?: string[]
+          city?: string | null
           created_at?: string
           distance?: number | null
+          fax?: string | null
           id?: string
           last_price_update?: string | null
           name?: string
-          phone?: string
-          specialty_id?: string
-          state?: string
+          phone?: string | null
+          specialty_id?: string | null
+          state?: string | null
           updated_at?: string
           zip?: string | null
         }

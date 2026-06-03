@@ -17,6 +17,7 @@ import {
   AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
   AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
+import { ManualPricingDialog } from "@/components/estimator/ManualPricingDialog";
 import type { Database } from "@/integrations/supabase/types";
 
 type Service = Database["public"]["Tables"]["services"]["Row"];
@@ -302,6 +303,8 @@ function SortableServiceCard({
   providers: Provider[];
   sortMode: SortMode;
 }) {
+  const { isAdmin } = useAuth();
+  const [addPriceOpen, setAddPriceOpen] = useState(false);
   const providerIds = useMemo(() => providers.map((p) => p.id), [providers]);
   const { data: totals = {} } = useProviderTotals(service.id, providerIds);
 
@@ -337,28 +340,40 @@ function SortableServiceCard({
       className="bg-card rounded-lg border border-border overflow-hidden"
     >
       <div className="px-4 py-2.5 border-b border-border bg-muted/30">
-        <div className="flex items-baseline gap-3 flex-wrap">
-          <h3 className="text-sm font-semibold text-foreground font-serif">{service.name}</h3>
-          {service.cpt_code && (
-            <span className="inline-flex px-1.5 py-0.5 rounded bg-primary/10 text-[11px] font-mono text-primary tabular-nums">
-              CPT {service.cpt_code}
-            </span>
-          )}
-          {service.nhsn_category && (
-            <span
-              className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-accent/15 text-[11px] font-mono text-accent"
-              title="NHSN-approved operative procedure"
+        <div className="flex items-start justify-between gap-3">
+          <div className="flex items-baseline gap-3 flex-wrap min-w-0">
+            <h3 className="text-sm font-semibold text-foreground font-serif">{service.name}</h3>
+            {service.cpt_code && (
+              <span className="inline-flex px-1.5 py-0.5 rounded bg-primary/10 text-[11px] font-mono text-primary tabular-nums">
+                CPT {service.cpt_code}
+              </span>
+            )}
+            {service.nhsn_category && (
+              <span
+                className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-accent/15 text-[11px] font-mono text-accent"
+                title="NHSN-approved operative procedure"
+              >
+                ✓ NHSN · {service.nhsn_category}
+              </span>
+            )}
+            {service.id.startsWith("lab-") && (
+              <span className="inline-flex px-1.5 py-0.5 rounded bg-muted text-[11px] font-mono text-muted-foreground">
+                #{service.id.replace("lab-", "")}
+              </span>
+            )}
+            {service.description && !service.description.startsWith("LabCorp Test") && (
+              <span className="text-xs text-muted-foreground">{service.description}</span>
+            )}
+          </div>
+          {isAdmin && (
+            <button
+              onClick={() => setAddPriceOpen(true)}
+              className="shrink-0 inline-flex items-center gap-1 px-2 py-0.5 rounded text-[11px] font-medium text-primary border border-primary/30 hover:bg-primary/5 transition-colors"
+              title="Add a provider price for this service"
             >
-              ✓ NHSN · {service.nhsn_category}
-            </span>
-          )}
-          {service.id.startsWith("lab-") && (
-            <span className="inline-flex px-1.5 py-0.5 rounded bg-muted text-[11px] font-mono text-muted-foreground">
-              #{service.id.replace("lab-", "")}
-            </span>
-          )}
-          {service.description && !service.description.startsWith("LabCorp Test") && (
-            <span className="text-xs text-muted-foreground">{service.description}</span>
+              <Plus className="h-3 w-3" />
+              Add price
+            </button>
           )}
         </div>
         <div className="flex gap-1.5 mt-1.5 flex-wrap">
@@ -388,8 +403,29 @@ function SortableServiceCard({
       ) : (
         <div className="py-4 px-4 text-xs text-muted-foreground">
           No providers with pricing for this service yet.
+          {isAdmin && (
+            <>
+              {" "}
+              <button
+                onClick={() => setAddPriceOpen(true)}
+                className="text-primary hover:underline font-medium"
+              >
+                Add the first price →
+              </button>
+            </>
+          )}
         </div>
       )}
+
+      <ManualPricingDialog
+        open={addPriceOpen}
+        onOpenChange={setAddPriceOpen}
+        initial={{
+          cptCode: service.cpt_code ?? "",
+          serviceName: service.name,
+          lockCpt: !!service.cpt_code,
+        }}
+      />
     </motion.div>
   );
 }
