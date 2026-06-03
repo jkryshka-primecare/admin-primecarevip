@@ -16,6 +16,7 @@ import { useAuth } from "@/hooks/useAuth";
 
 function EstimatorContent() {
   const [activeSpecialty, setActiveSpecialty] = useState("all");
+  const [manualOpen, setManualOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
   const [locationFilter, setLocationFilter] = useState("");
   const [providerSearch, setProviderSearch] = useState("");
