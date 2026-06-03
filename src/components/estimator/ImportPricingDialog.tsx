@@ -295,7 +295,23 @@ export function ImportPricingDialog({ activeSpecialty }: ImportPricingDialogProp
                   <FileUp className="h-3.5 w-3.5" />
                   Upload File
                 </button>
+                <button
+                  type="button"
+                  onClick={() => setInputMode("manual")}
+                  className={`flex-1 flex items-center justify-center gap-1.5 px-3 py-2 text-xs font-medium transition-colors ${
+                    inputMode === "manual"
+                      ? "bg-primary text-primary-foreground"
+                      : "bg-background text-muted-foreground hover:text-foreground"
+                  }`}
+                >
+                  <PencilLine className="h-3.5 w-3.5" />
+                  Manual Entry
+                </button>
               </div>
+
+              {inputMode === "manual" && (
+                <ManualPricingForm embedded onDone={() => setOpen(false)} />
+              )}
 
               {inputMode === "url" && (
                 <div className="space-y-1.5">
