@@ -22,7 +22,7 @@ interface ImportPricingDialogProps {
   activeSpecialty: string;
 }
 
-type InputMode = "url" | "upload";
+type InputMode = "url" | "upload" | "manual";
 const MAX_UPLOAD_SIZE = 50 * 1024 * 1024; // 50 MB
 const BUCKET_NAME = "pricing-uploads";
 
