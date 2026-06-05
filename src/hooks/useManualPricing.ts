@@ -109,7 +109,7 @@ export function useManualPricing() {
       for (const row of validRows) {
         const cpt = row.cptCode.trim().toUpperCase();
         const component = row.component.trim() || "cash";
-        const price = parseFloat(row.price);
+        const price = sanitizePrice(row.price);
 
         // Find existing service by CPT
         const { data: existing } = await supabase
