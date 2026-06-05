@@ -89,10 +89,13 @@ export function useManualPricing() {
         providerId = data.id;
       }
 
-      // 2. Process rows
+      // 2. Process rows — sanitize price (strip $, commas, spaces) so user
+      // input like "$1,200.00" or " 125 " doesn't get silently dropped.
+      const sanitizePrice = (raw: string) =>
+        parseFloat(String(raw ?? "").replace(/[$,\s]/g, ""));
       const validRows = input.rows.filter((r) => {
         const cpt = r.cptCode.trim();
-        const price = parseFloat(r.price);
+        const price = sanitizePrice(r.price);
         return cpt.length > 0 && !isNaN(price) && price > 0;
       });
 
@@ -106,7 +109,7 @@ export function useManualPricing() {
       for (const row of validRows) {
         const cpt = row.cptCode.trim().toUpperCase();
         const component = row.component.trim() || "cash";
-        const price = parseFloat(row.price);
+        const price = sanitizePrice(row.price);
 
         // Find existing service by CPT
         const { data: existing } = await supabase

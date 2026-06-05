@@ -106,11 +106,17 @@ export function ManualPricingForm({ initial, onDone, embedded }: ManualPricingFo
   const removeRow = (i: number) =>
     setRows((rs) => (rs.length === 1 ? [emptyRow()] : rs.filter((_, idx) => idx !== i)));
 
+  const sanitizePrice = (raw: string) =>
+    parseFloat(String(raw ?? "").replace(/[$,\s]/g, ""));
+  const hasAnyRowInput = useMemo(() => {
+    const source = pasteMode ? parsePastedRows(pasted) : rows;
+    return source.some((r) => r.cptCode.trim().length > 0 || r.price.trim().length > 0);
+  }, [rows, pasted, pasteMode]);
   const validRowCount = useMemo(() => {
     const source = pasteMode ? parsePastedRows(pasted) : rows;
     return source.filter((r) => {
       const cpt = r.cptCode.trim();
-      const price = parseFloat(r.price);
+      const price = sanitizePrice(r.price);
       return cpt.length > 0 && !isNaN(price) && price > 0;
     }).length;
   }, [rows, pasted, pasteMode]);
@@ -126,6 +132,16 @@ export function ManualPricingForm({ initial, onDone, embedded }: ManualPricingFo
     }
 
     const rowsToSend = pasteMode ? parsePastedRows(pasted) : rows;
+
+    if (hasAnyRowInput && validRowCount === 0) {
+      toast({
+        title: "No valid prices to save",
+        description:
+          "You started a row but the CPT or price is missing/invalid. Each row needs a CPT code and a numeric price greater than 0.",
+        variant: "destructive",
+      });
+      return;
+    }
 
     try {
       const result = await submit.mutateAsync({
