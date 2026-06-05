@@ -133,6 +133,16 @@ export function ManualPricingForm({ initial, onDone, embedded }: ManualPricingFo
 
     const rowsToSend = pasteMode ? parsePastedRows(pasted) : rows;
 
+    if (hasAnyRowInput && validRowCount === 0) {
+      toast({
+        title: "No valid prices to save",
+        description:
+          "You started a row but the CPT or price is missing/invalid. Each row needs a CPT code and a numeric price greater than 0.",
+        variant: "destructive",
+      });
+      return;
+    }
+
     try {
       const result = await submit.mutateAsync({
         providerId: providerId || null,
