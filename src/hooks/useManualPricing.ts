@@ -89,10 +89,13 @@ export function useManualPricing() {
         providerId = data.id;
       }
 
-      // 2. Process rows
+      // 2. Process rows — sanitize price (strip $, commas, spaces) so user
+      // input like "$1,200.00" or " 125 " doesn't get silently dropped.
+      const sanitizePrice = (raw: string) =>
+        parseFloat(String(raw ?? "").replace(/[$,\s]/g, ""));
       const validRows = input.rows.filter((r) => {
         const cpt = r.cptCode.trim();
-        const price = parseFloat(r.price);
+        const price = sanitizePrice(r.price);
         return cpt.length > 0 && !isNaN(price) && price > 0;
       });
 
