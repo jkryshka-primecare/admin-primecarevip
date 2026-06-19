@@ -26,19 +26,22 @@ export default function Auth() {
   const [submitting, setSubmitting] = useState(false);
   const [inviteEmail, setInviteEmail] = useState<string | null>(null);
 
-  // Prefill from invitation token (public read by token policy)
+  // Prefill from invitation token — looked up via secure edge function so the
+  // invitations table is not publicly enumerable.
   useEffect(() => {
     if (!inviteToken) return;
-    supabase.from("invitations")
-      .select("email, first_name, last_name, status")
-      .eq("token", inviteToken)
-      .maybeSingle()
-      .then(({ data }) => {
-        if (!data) { toast.error("Invitation link is invalid"); return; }
-        if (data.status !== "pending") { toast.error("This invitation has already been used"); return; }
-        setEmail(data.email);
-        setInviteEmail(data.email);
-        setDisplayName(`${data.first_name ?? ""} ${data.last_name ?? ""}`.trim());
+    supabase.functions
+      .invoke("lookup-invitation", { body: { token: inviteToken } })
+      .then(({ data, error }) => {
+        if (error || !data || (data as { error?: string }).error) {
+          toast.error("Invitation link is invalid");
+          return;
+        }
+        const inv = data as { email: string; first_name: string | null; last_name: string | null; status: string };
+        if (inv.status !== "pending") { toast.error("This invitation has already been used"); return; }
+        setEmail(inv.email);
+        setInviteEmail(inv.email);
+        setDisplayName(`${inv.first_name ?? ""} ${inv.last_name ?? ""}`.trim());
         setMode("signup");
       });
   }, [inviteToken]);
