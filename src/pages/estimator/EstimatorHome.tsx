@@ -8,6 +8,7 @@ import { AuditLogPanel } from "@/components/estimator/AuditLogPanel";
 import { EstimatePanel } from "@/components/estimator/EstimatePanel";
 import { ImportPricingDialog } from "@/components/estimator/ImportPricingDialog";
 import { ManualPricingDialog } from "@/components/estimator/ManualPricingDialog";
+import { BulkUploadDialog } from "@/components/estimator/BulkUploadDialog";
 import { Button } from "@/components/ui/button";
 import { PencilLine } from "lucide-react";
 import { EstimateProvider, useEstimate } from "@/contexts/EstimateContext";
@@ -69,9 +70,10 @@ function EstimatorContent() {
                     <PencilLine className="h-3.5 w-3.5" />
                     Add Pricing Manually
                   </Button>
-                  <ImportPricingDialog activeSpecialty={activeSpecialty} />
-                </>
-              )}
+                    <ImportPricingDialog activeSpecialty={activeSpecialty} />
+                    <BulkUploadDialog />
+                  </>
+                )}
               {items.length > 0 && (
                 <button
                   onClick={clearAll}
