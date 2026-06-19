@@ -1138,57 +1138,66 @@ export type Database = {
           created_at: string
           created_by: string | null
           error_message: string | null
+          file_path: string | null
           hospital_address: string | null
           hospital_city: string | null
           hospital_name: string | null
           hospital_state: string | null
           hospital_zip: string | null
           id: string
+          kind: string
+          network: string | null
           provider_id: string | null
           rows_imported: number
           status: string
           total_bytes: number | null
           total_rows: number | null
           updated_at: string
-          url: string
+          url: string | null
         }
         Insert: {
           byte_offset?: number
           created_at?: string
           created_by?: string | null
           error_message?: string | null
+          file_path?: string | null
           hospital_address?: string | null
           hospital_city?: string | null
           hospital_name?: string | null
           hospital_state?: string | null
           hospital_zip?: string | null
           id?: string
+          kind?: string
+          network?: string | null
           provider_id?: string | null
           rows_imported?: number
           status?: string
           total_bytes?: number | null
           total_rows?: number | null
           updated_at?: string
-          url: string
+          url?: string | null
         }
         Update: {
           byte_offset?: number
           created_at?: string
           created_by?: string | null
           error_message?: string | null
+          file_path?: string | null
           hospital_address?: string | null
           hospital_city?: string | null
           hospital_name?: string | null
           hospital_state?: string | null
           hospital_zip?: string | null
           id?: string
+          kind?: string
+          network?: string | null
           provider_id?: string | null
           rows_imported?: number
           status?: string
           total_bytes?: number | null
           total_rows?: number | null
           updated_at?: string
-          url?: string
+          url?: string | null
         }
         Relationships: [
           {
@@ -1526,6 +1535,7 @@ export type Database = {
           id: string
           last_price_update: string | null
           name: string
+          network: string | null
           phone: string | null
           specialty_id: string | null
           state: string | null
@@ -1542,6 +1552,7 @@ export type Database = {
           id?: string
           last_price_update?: string | null
           name: string
+          network?: string | null
           phone?: string | null
           specialty_id?: string | null
           state?: string | null
@@ -1558,6 +1569,7 @@ export type Database = {
           id?: string
           last_price_update?: string | null
           name?: string
+          network?: string | null
           phone?: string | null
           specialty_id?: string | null
           state?: string | null
