@@ -70,9 +70,10 @@ function EstimatorContent() {
                     <PencilLine className="h-3.5 w-3.5" />
                     Add Pricing Manually
                   </Button>
-                  <ImportPricingDialog activeSpecialty={activeSpecialty} />
-                </>
-              )}
+                    <ImportPricingDialog activeSpecialty={activeSpecialty} />
+                    <BulkUploadDialog />
+                  </>
+                )}
               {items.length > 0 && (
                 <button
                   onClick={clearAll}
