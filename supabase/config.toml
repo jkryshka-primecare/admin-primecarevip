@@ -29,4 +29,7 @@ project_id = "imewkweatgvqledptdna"
     verify_jwt = true
   [functions.lookup-invitation]
     verify_jwt = false
+  [functions.integration-health-check]
+    verify_jwt = false
+
 

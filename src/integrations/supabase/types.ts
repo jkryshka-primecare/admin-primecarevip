@@ -1209,6 +1209,45 @@ export type Database = {
           },
         ]
       }
+      integration_health_checks: {
+        Row: {
+          checked_at: string
+          created_at: string
+          elapsed_ms: number | null
+          error_message: string | null
+          http_status: number | null
+          id: string
+          integration: string
+          ok: boolean
+          resource: string | null
+          scope: string | null
+        }
+        Insert: {
+          checked_at?: string
+          created_at?: string
+          elapsed_ms?: number | null
+          error_message?: string | null
+          http_status?: number | null
+          id?: string
+          integration: string
+          ok: boolean
+          resource?: string | null
+          scope?: string | null
+        }
+        Update: {
+          checked_at?: string
+          created_at?: string
+          elapsed_ms?: number | null
+          error_message?: string | null
+          http_status?: number | null
+          id?: string
+          integration?: string
+          ok?: boolean
+          resource?: string | null
+          scope?: string | null
+        }
+        Relationships: []
+      }
       invitations: {
         Row: {
           created_at: string

@@ -1,5 +1,7 @@
 import { Activity, Link2, CheckCircle2, Clock, ExternalLink } from "lucide-react";
 import { motion } from "framer-motion";
+import ConnectionHealth from "@/components/admin/ConnectionHealth";
+
 
 type IntegrationStatus = "ready" | "planned" | "live";
 
@@ -75,6 +77,9 @@ export default function IntegrationsAdmin() {
           API connection status and configuration for EMR, membership, and clinical data sources.
         </p>
       </div>
+
+      <ConnectionHealth />
+
 
       {/* EMR Connection card */}
       <motion.div
