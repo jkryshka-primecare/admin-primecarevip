@@ -42,7 +42,13 @@ import {
 } from "@/components/ui/table";
 import { ScrollArea } from "@/components/ui/scroll-area";
 
+function formatCents(cents?: number | null) {
+  if (cents == null || Number.isNaN(Number(cents))) return null;
+  return `$${(Number(cents) / 100).toFixed(2)}`;
+}
+
 function formatDate(iso?: string) {
+
   if (!iso) return "—";
   try {
     return format(parseISO(iso), "MMM d, yyyy");
