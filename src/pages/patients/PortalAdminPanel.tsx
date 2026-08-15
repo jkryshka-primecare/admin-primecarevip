@@ -35,6 +35,45 @@ import { Textarea } from "@/components/ui/textarea";
 import { toast } from "@/hooks/use-toast";
 
 
+type HiddenEntry = { collection: string; id: string; label?: string; hiddenAt?: string };
+
+/**
+ * The control plane returns hiddenItems either as a flat array or as an object
+ * keyed by module ({ labs: [...], imaging: [...] }). Normalize both, and never
+ * throw on an absent/odd shape.
+ */
+function normalizeHidden(raw: unknown): HiddenEntry[] {
+  if (!raw) return [];
+  if (Array.isArray(raw)) {
+    return raw.filter(Boolean).map((h: Record<string, unknown> | string) =>
+      typeof h === "string"
+        ? { collection: "unknown", id: h }
+        : {
+            collection: String(h.collection ?? h.module ?? "unknown"),
+            id: String(h.id ?? ""),
+            label: h.label ? String(h.label) : undefined,
+            hiddenAt: h.hiddenAt ? String(h.hiddenAt) : undefined,
+          },
+    );
+  }
+  if (typeof raw === "object") {
+    return Object.entries(raw as Record<string, unknown>).flatMap(([collection, items]) => {
+      if (!Array.isArray(items)) return [];
+      return items.filter(Boolean).map((it: Record<string, unknown> | string) =>
+        typeof it === "string"
+          ? { collection, id: it }
+          : {
+              collection: String(it.collection ?? collection),
+              id: String(it.id ?? ""),
+              label: it.label ? String(it.label) : undefined,
+              hiddenAt: it.hiddenAt ? String(it.hiddenAt) : undefined,
+            },
+      );
+    });
+  }
+  return [];
+}
+
 function fmt(iso?: string | null) {
   if (!iso) return "—";
   try {
@@ -67,7 +106,7 @@ export default function PortalAdminPanel({ elationId }: { elationId: string | nu
   const access = snapshot?.access ?? {};
   const suspended = access.status === "suspended";
   const modules = access.modules ?? {};
-  const hidden = access.hiddenItems ?? [];
+  const hidden = normalizeHidden(access.hiddenItems);
 
   function guard(): boolean {
     if (!isAdmin) {
