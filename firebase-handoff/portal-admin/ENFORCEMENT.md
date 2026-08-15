@@ -87,7 +87,11 @@ of a generic error, and it is why every other handler still fails closed.
 const access = await getPortalAccess(elationPatientId);
 
 if (access.status === 'suspended') {
-  // 200, but no PHI: identity and status only.
+  // 200, but zero PHI. Confirmed contract: the response body is exactly this
+  // object and nothing else — no name, DOB, MRN, contact details, provider,
+  // membership, appointments, or any clinical field. `modules` is deliberately
+  // empty rather than the real map, so the paused screen leaks nothing about
+  // what the member would otherwise have. Do not add fields here "for the UI".
   return res.status(200).json({
     payload: { portal: { status: 'suspended', modules: {} } },
   });
