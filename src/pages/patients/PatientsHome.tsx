@@ -323,6 +323,10 @@ function PatientDetailDrawer({
                     <MembershipTab elationId={id} />
                   </TabsContent>
 
+                  <TabsContent value="portal" className="mt-4">
+                    <PortalAdminPanel elationId={id} />
+                  </TabsContent>
+
 
                   <TabsContent value="problems" className="mt-4">
                     <ResourceList
