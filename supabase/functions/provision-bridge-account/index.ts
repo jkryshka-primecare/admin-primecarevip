@@ -19,10 +19,8 @@ Deno.serve(async (req) => {
       headers: { ...corsHeaders, "Content-Type": "application/json" },
     });
 
-  const auth = req.headers.get("authorization") ?? "";
-  if (auth.replace(/^Bearer\s+/i, "") !== SERVICE_ROLE) {
-    return json(401, { error: "unauthorized" });
-  }
+  const isServiceRole =
+    (req.headers.get("authorization") ?? "").replace(/^Bearer\s+/i, "") === SERVICE_ROLE;
   if (!BRIDGE_EMAIL || !BRIDGE_PASSWORD) {
     return json(412, { error: "PORTAL_BRIDGE_EMAIL / PORTAL_BRIDGE_PASSWORD not configured" });
   }
@@ -39,6 +37,10 @@ Deno.serve(async (req) => {
     if (!data.users.length) break;
     userId = data.users.find((u) => u.email?.toLowerCase() === BRIDGE_EMAIL.toLowerCase())?.id ?? null;
   }
+
+  // First-run provisioning is open; once the bridge account exists only the
+  // service role may touch it (this function is deleted after provisioning).
+  if (userId && !isServiceRole) return json(401, { error: "unauthorized" });
 
   if (userId) {
     const { error } = await admin.auth.admin.updateUserById(userId, {
