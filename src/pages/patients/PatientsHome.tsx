@@ -156,12 +156,14 @@ export default function PatientsHome() {
                   <TableHead>Sex</TableHead>
                   <TableHead>MRN</TableHead>
                   <TableHead>Status</TableHead>
+                  <TableHead>Systems</TableHead>
                   <TableHead>Contact</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
                 {patients.map((p) => {
                   const age = ageFromDob(p.dob);
+                  const inMemberApp = memberIds.has(String(p.id));
                   return (
                     <TableRow
                       key={String(p.id)}
@@ -182,12 +184,34 @@ export default function PatientsHome() {
                           {p.status ?? "unknown"}
                         </Badge>
                       </TableCell>
+                      <TableCell>
+                        <div className="flex gap-1">
+                          <Badge variant="outline" className="text-[10px]">
+                            Elation
+                          </Badge>
+                          {memberRoster.loading ? (
+                            <Loader2 className="h-3 w-3 animate-spin text-muted-foreground" />
+                          ) : inMemberApp ? (
+                            <Badge variant="outline" className="text-[10px]">
+                              Member app
+                            </Badge>
+                          ) : (
+                            <Badge
+                              variant="outline"
+                              className="text-[10px] border-dashed text-muted-foreground"
+                            >
+                              No member app
+                            </Badge>
+                          )}
+                        </div>
+                      </TableCell>
                       <TableCell className="text-xs text-muted-foreground">
                         {p.cell_phone ?? p.home_phone ?? p.email ?? "—"}
                       </TableCell>
                     </TableRow>
                   );
                 })}
+
               </TableBody>
             </Table>
           )}
