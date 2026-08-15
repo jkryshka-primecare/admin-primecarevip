@@ -88,7 +88,12 @@ exports.adminIssueInvite = functions
       return jsonError(res, gate.status, 'PERMISSION_DENIED', gate.reason);
     }
 
-    const body = typeof req.body === 'string' ? JSON.parse(req.body || '{}') : req.body || {};
+    let body;
+    try {
+      body = typeof req.body === 'string' ? JSON.parse(req.body || '{}') : req.body || {};
+    } catch (e) {
+      return jsonError(res, 400, 'INVALID_ARGUMENT', 'MALFORMED_BODY');
+    }
     const elationPatientId = String(body.elationPatientId || '').trim();
     const actor = String(body.actor || '').trim().toLowerCase();
     const reason = String(body.reason || '').slice(0, 500);

@@ -42,7 +42,12 @@ exports.adminGetPortalAccess = functions
       return jsonError(res, gate.status, 'PERMISSION_DENIED', gate.reason);
     }
 
-    const body = typeof req.body === 'string' ? JSON.parse(req.body || '{}') : req.body || {};
+    let body;
+    try {
+      body = typeof req.body === 'string' ? JSON.parse(req.body || '{}') : req.body || {};
+    } catch (e) {
+      return jsonError(res, 400, 'INVALID_ARGUMENT', 'MALFORMED_BODY');
+    }
     const elationPatientId = String(body.elationPatientId || '').trim();
     if (!elationPatientId) return jsonError(res, 400, 'INVALID_ARGUMENT', 'PATIENT_ID_REQUIRED');
 
