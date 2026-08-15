@@ -74,23 +74,75 @@ async function callPortalAdmin<T>(body: Record<string, unknown>): Promise<Envelo
   return data;
 }
 
+/**
+ * The Cloud Function answers with `{ claim: { state, claimedAt, liveToken, ... }, access, roster }`.
+ * The panel speaks a flatter dialect, so translate once here rather than in
+ * every field — this is the only place that knows the upstream shape.
+ */
+type RawAccessResponse = {
+  elationPatientId?: string;
+  claim?: {
+    state?: "claimed" | "invited" | "expired_or_revoked" | "not_invited" | string;
+    claimedAt?: string | null;
+    liveToken?: { expiresAt?: string | null; issuedAt?: string | null } | null;
+    lastIssuedAt?: string | null;
+    webAccessVerifiedAt?: string | null;
+  };
+  access?: PortalAccessState;
+  roster?: Record<string, unknown> | null;
+  // Older/alternate shape — kept so a backend rollback doesn't blank the panel.
+  claimed?: boolean;
+  inviteStatus?: string;
+  email?: string | null;
+  uid?: string | null;
+};
+
+function normalizeSnapshot(raw: RawAccessResponse | null | undefined): PortalAccessSnapshot | null {
+  if (!raw) return null;
+  const claim = raw.claim;
+  if (!claim) return raw as PortalAccessSnapshot;
+
+  const roster = (raw.roster ?? null) as Record<string, unknown> | null;
+  const inviteStatus =
+    claim.state === "claimed"
+      ? "claimed"
+      : claim.state === "invited"
+        ? "pending"
+        : claim.state === "expired_or_revoked"
+          ? "revoked"
+          : "none";
+
+  return {
+    claimed: claim.state === "claimed",
+    claimedAt: claim.claimedAt ?? null,
+    inviteStatus,
+    inviteSentAt: claim.liveToken?.issuedAt ?? claim.lastIssuedAt ?? null,
+    inviteExpiresAt: claim.liveToken?.expiresAt ?? null,
+    email: (roster?.email as string | null) ?? raw.email ?? null,
+    uid: raw.uid ?? null,
+    access: raw.access ?? {},
+    roster,
+  };
+}
+
 export function usePortalAccess(elationPatientId: string | null, enabled = true) {
   const result = useQuery({
     queryKey: ["portal-admin", "access", elationPatientId],
     queryFn: () =>
-      callPortalAdmin<PortalAccessSnapshot>({ action: "get", elationPatientId }),
+      callPortalAdmin<RawAccessResponse>({ action: "get", elationPatientId }),
     enabled: enabled && !!elationPatientId,
     staleTime: 60 * 1000,
     retry: false,
   });
 
   return {
-    snapshot: result.data?.data ?? null,
+    snapshot: normalizeSnapshot(result.data?.data),
     loading: result.isLoading,
     error: result.error instanceof Error ? result.error.message : null,
     refetch: result.refetch,
   };
 }
+
 
 export function usePortalMutations(elationPatientId: string | null) {
   const qc = useQueryClient();
