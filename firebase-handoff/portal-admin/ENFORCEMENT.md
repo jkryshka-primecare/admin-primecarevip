@@ -43,6 +43,11 @@ if (!isModuleVisible(access, 'labs')) {
 }
 ```
 
+`assertNotSuspended` and `getPortalAccess` each read the same
+`portalAccess/{elationPatientId}` doc. If you prefer one read per request, call
+`getPortalAccess` first and check `access.status === 'suspended'` yourself —
+but then you lose the fail-closed behaviour on a Firestore error, so only do it
+if you also treat a read error as a denial.
 
 Then filter the result set right before responding, using **that handler's own
 response variable and shape** — the list handlers return `{ items }`, but

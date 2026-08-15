@@ -270,3 +270,16 @@ email and reason. **No bulk invite waves until 6a–6h pass.**
 - A curl to a new function returns `200` unauthenticated.
 - An existing function's "Last deployed" timestamp changes unexpectedly.
 - Any step needs a permission broader than those listed.
+
+### Two audit trails, two names
+
+Both exist by design and both must show the action:
+
+- **`portalAdminAudit`** (Firestore, written by the Cloud Functions) — the
+  portal-side record of what was actually mutated.
+- **`portal_admin_actions`** (Prime Care OS database, written by the
+  `portal-admin` edge function) — the staff-side record of who clicked what and
+  why, tied to a verified staff session.
+
+When verifying go-live, check both. A row in one and not the other means the
+call failed partway and should be investigated.
