@@ -24,6 +24,8 @@ import HintLiveEngagement from "@/components/hint-live/HintLiveEngagement";
 import HintLiveCostSavings from "@/components/hint-live/HintLiveCostSavings";
 import HintLiveClaimsPipeline from "@/components/hint-live/HintLiveClaimsPipeline";
 import HintLiveMessaging from "@/components/hint-live/HintLiveMessaging";
+import DemoDataNotice from "@/components/insights/DemoDataNotice";
+
 import { cn } from "@/lib/utils";
 
 const tabs = [
