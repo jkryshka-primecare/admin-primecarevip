@@ -181,29 +181,55 @@ further allowlist append.
 
 ### Reset to unclaimed (only after rows 4–10 pass)
 
-Order matters: clear the roster binding first, then the Auth user, so no window
-exists where a live session maps to an unbound roster doc.
+Use the script — not a console walk:
+`firebase-handoff/portal-admin/scripts/reset-test-fixture.js`
 
-1. `patients/816455979040769` — delete the fields `firebaseUid`, `boundAt`,
-   `webAccessVerifiedAt`, `claimedAt`; set `hydrationStatus` back to whatever a
-   never-claimed roster doc carries (`pending`, or delete the field). Keep
-   `email` — the invite is sent to `patients/<id>.email`.
-2. `claimTokens` where `elationPatientId == '816455979040769'` — delete the
-   docs (or set `usedAt`). Any spent/expired token left behind is harmless for
-   minting but makes the panel report `expired_or_revoked` instead of
-   `not_invited`; delete them for a clean row-2 baseline.
-3. Firebase Auth user `neozyhs59ue0vooapsrocygo1ah3` — delete. This also kills
-   any live member session and the forgot-password reset used for rows 4–10.
-4. Any per-user portal doc keyed by that uid (e.g. `users/<uid>`, profile,
-   push-token, or session docs the portal writes at claim time) — delete.
-   Anything keyed by `elationPatientId` instead of uid can stay.
-5. Leave `portalAccess/816455979040769` alone if rows 4–10 ended with
-   everything restored (status `active`, all modules true, `hiddenItems`
-   empty); otherwise restore it first — claim state and visibility are
-   independent.
+```bash
+# from the Firebase repo's functions/ dir (needs firebase-admin + ADC)
+node reset-test-fixture.js           # dry run: reads only, prints the plan
+node reset-test-fixture.js --apply   # performs the deletes, then verifies
+```
 
-Not part of the reset: `portalAdminAudit`, `portal_admin_actions`,
-`phi_access_log`. Those are append-only evidence and must survive.
+The Elation id (`816455979040769`) and Auth uid (`neozyhs59ue0vooapsrocygo1ah3`)
+are hard-pinned constants, not arguments. The script aborts unless the roster
+doc matches the synthetic name *and* `patient-test-1@primecarevip.com` *and* the
+pinned uid, so it cannot be aimed at a real patient by mistake.
+
+What it does, in this order (roster binding first, Auth user last, so no window
+exists where a live session maps to an unbound doc):
+
+1. `patients/816455979040769` — deletes `firebaseUid`, `authUid`, `boundAt`,
+   `claimedAt`, `webAccessVerifiedAt`, `hydrationStatus`, `hydrationPendingAt`.
+   `email` and `status: active` are preserved — the invite goes to
+   `patients/<id>.email`, and the ingest gates require `status === 'active'`.
+   `hydrationStatus` must end up **unset**, not `pending`: `claimAccount` only
+   re-fires hydration when it is absent.
+2. `claimTokens` where `elationPatientId == '816455979040769'` — deletes them.
+   Spent tokens don't block minting but make the panel report
+   `expired_or_revoked` instead of `not_invited`.
+3. `users/<uid>` and `directory/<uid>` — deleted. `syncDirectoryEntry` removes
+   the directory mirror on the `users` delete; the script deletes it explicitly
+   too, in case the trigger lags.
+4. Firebase Auth user — deleted last. This also kills the member session from
+   the forgot-password reset used for rows 4–10.
+
+Then it re-reads and prints the residue count; a non-clean result exits 2.
+
+Untouched by design: `portalAccess/816455979040769` (claim state and visibility
+are independent — restore it via the panel if rows 4–10 didn't end restored),
+and the append-only evidence `portalAdminAudit`, `phi_access_log`,
+`phi_acknowledgments`, `portal_admin_actions`.
+
+### Artifact signed-URL TTL
+
+Confirmed in the deployed source: `getLabs`, `getImaging`, and
+`getMedicalRecords` all mint v4 signed URLs with `Date.now() + 30 * 60 * 1000`
+— an identical 30-minute TTL. `getLetters` is list-only: letter bodies are
+stored in the doc and `attachments[]` are references to other Elation entities,
+so there is no artifact and no signed URL to expire. Hiding an item therefore
+blocks new URLs immediately (row 7's 404) and any outstanding one dies within
+30 minutes.
+
 
 **Verify before row 2:** the Portal tab reads **Not invited**, no live token,
 and a `curl` of `adminIssueInvite` no longer returns 409 `ALREADY_CLAIMED`.
