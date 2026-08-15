@@ -174,22 +174,37 @@ Ground truth is the env file on the deployed function.
 
 ## Smoke-test fixtures (rows 1–10)
 
-Two members are needed, because a claimed account cannot be re-invited
-(`adminIssueInvite` returns 409 `ALREADY_CLAIMED` whenever `firebaseUid` is set)
-and an unclaimed one cannot exercise the module/visibility rows.
+Single fixture: **Test Kieffer — `816455979040769`** (synthetic, disposable,
+already on `ELATION_READ_ALLOWLIST_PRODUCTION`). Run rows 1 and 4–10 while it is
+claimed, then reset it to unclaimed and run rows 2–3. No second member and no
+further allowlist append.
 
-| Fixture | State | Rows |
-| --- | --- | --- |
-| Test Kieffer — `816455979040769` | claimed (`firebaseUid` present) | 1, 4–10 (module off/on, hide/unhide, suspend/restore) |
-| Second test member — id TBD | genuinely unclaimed, no `firebaseUid` | 2–3 (invite → email → claim) |
+### Reset to unclaimed (only after rows 4–10 pass)
 
-Do **not** reset the claimed fixture by clearing `firebaseUid`/`boundAt`/
-`webAccessVerifiedAt` and deleting the Auth user. That is a destructive write to
-production Firestore and Firebase Auth, it destroys the only claimed fixture,
-and it leaves rows 2–3 unrepeatable. Use a second member instead.
+Order matters: clear the roster binding first, then the Auth user, so no window
+exists where a live session maps to an unbound roster doc.
 
-Before rows 2–3 the new member's Elation id must be appended to
-`ELATION_READ_ALLOWLIST_PRODUCTION` using the procedure above (production is in
-allowlist mode, not full sync), and its roster doc must carry a deliverable
-`email` — the invite is sent to `patients/<id>.email`, not to anything typed in
-the admin panel.
+1. `patients/816455979040769` — delete the fields `firebaseUid`, `boundAt`,
+   `webAccessVerifiedAt`, `claimedAt`; set `hydrationStatus` back to whatever a
+   never-claimed roster doc carries (`pending`, or delete the field). Keep
+   `email` — the invite is sent to `patients/<id>.email`.
+2. `claimTokens` where `elationPatientId == '816455979040769'` — delete the
+   docs (or set `usedAt`). Any spent/expired token left behind is harmless for
+   minting but makes the panel report `expired_or_revoked` instead of
+   `not_invited`; delete them for a clean row-2 baseline.
+3. Firebase Auth user `neozyhs59ue0vooapsrocygo1ah3` — delete. This also kills
+   any live member session and the forgot-password reset used for rows 4–10.
+4. Any per-user portal doc keyed by that uid (e.g. `users/<uid>`, profile,
+   push-token, or session docs the portal writes at claim time) — delete.
+   Anything keyed by `elationPatientId` instead of uid can stay.
+5. Leave `portalAccess/816455979040769` alone if rows 4–10 ended with
+   everything restored (status `active`, all modules true, `hiddenItems`
+   empty); otherwise restore it first — claim state and visibility are
+   independent.
+
+Not part of the reset: `portalAdminAudit`, `portal_admin_actions`,
+`phi_access_log`. Those are append-only evidence and must survive.
+
+**Verify before row 2:** the Portal tab reads **Not invited**, no live token,
+and a `curl` of `adminIssueInvite` no longer returns 409 `ALREADY_CLAIMED`.
+
