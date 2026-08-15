@@ -76,6 +76,9 @@ export default function IntegrationsAdmin() {
         </p>
       </div>
 
+      <ConnectionHealth />
+
+
       {/* EMR Connection card */}
       <motion.div
         initial={{ opacity: 0, y: 12 }}
