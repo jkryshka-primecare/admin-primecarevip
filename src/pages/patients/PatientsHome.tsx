@@ -12,7 +12,9 @@ import {
   Activity,
   Stethoscope,
   CreditCard,
+  ShieldCheck,
 } from "lucide-react";
+
 import {
   useElationPatients,
   useElationResource,
