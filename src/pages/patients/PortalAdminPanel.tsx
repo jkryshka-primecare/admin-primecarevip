@@ -22,9 +22,18 @@ import {
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Input } from "@/components/ui/input";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
 import { toast } from "@/hooks/use-toast";
+
 
 function fmt(iso?: string | null) {
   if (!iso) return "—";
@@ -278,13 +287,83 @@ export default function PortalAdminPanel({ elationId }: { elationId: string | nu
             <EyeOff className="h-4 w-4" /> Hidden individual items
           </CardTitle>
         </CardHeader>
-        <CardContent>
-          {hidden.length === 0 ? (
+        <CardContent className="space-y-4">
+          <div className="space-y-2 rounded-md border p-3">
+            <div className="text-xs uppercase tracking-wide text-muted-foreground">
+              Hide a specific item
+            </div>
+            <div className="grid gap-2 sm:grid-cols-3">
+              <Select
+                value={hideCollection}
+                onValueChange={(v) => setHideCollection(v as PortalModule)}
+                disabled={!isAdmin || busy}
+              >
+                <SelectTrigger className="text-sm">
+                  <SelectValue placeholder="Section" />
+                </SelectTrigger>
+                <SelectContent>
+                  {PORTAL_MODULES.map((m) => (
+                    <SelectItem key={m.key} value={m.key}>
+                      {m.label}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              <Input
+                value={hideId}
+                onChange={(e) => setHideId(e.target.value)}
+                placeholder="Item id"
+                className="font-mono text-sm"
+                disabled={!isAdmin || busy}
+              />
+              <Input
+                value={hideLabel}
+                onChange={(e) => setHideLabel(e.target.value)}
+                placeholder="Label (optional)"
+                className="text-sm"
+                disabled={!isAdmin || busy}
+              />
+            </div>
+            <Button
+              size="sm"
+              variant="destructive"
+              disabled={!isAdmin || busy || !hideId.trim()}
+              onClick={() => {
+                if (!guard()) return;
+                run(
+                  setAccess
+                    .mutateAsync({
+                      reason,
+                      patch: {
+                        hideItem: {
+                          collection: hideCollection,
+                          id: hideId.trim(),
+                          label: hideLabel.trim() || undefined,
+                        },
+                      },
+                    })
+                    .then((r) => {
+                      setHideId("");
+                      setHideLabel("");
+                      return r;
+                    }),
+                  "Item hidden from the member's portal",
+                );
+              }}
+            >
+              <EyeOff className="h-3.5 w-3.5 mr-1" /> Hide item
+            </Button>
             <p className="text-xs text-muted-foreground">
-              Nothing is individually hidden. Hide a specific result from the Labs or
-              Documents list once enforcement is deployed.
+              Use the item's id exactly as it appears in the portal. The member sees the
+              rest of the section unchanged, and the item's document returns "not
+              available".
             </p>
+          </div>
+
+          {hidden.length === 0 ? (
+            <p className="text-xs text-muted-foreground">Nothing is individually hidden.</p>
           ) : (
+
             <ul className="space-y-2">
               {hidden.map((h) => (
                 <li
