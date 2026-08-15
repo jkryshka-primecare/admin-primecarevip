@@ -171,3 +171,25 @@ Ground truth is the env file on the deployed function.
 - Re-run the `get-iam-policy` loop over the four `admin*` functions and confirm
   each lists only `portal-admin`. Firebase adds `allUsers` on create, not
   update, so it should stay stripped — but verify, don't assume.
+
+## Smoke-test fixtures (rows 1–10)
+
+Two members are needed, because a claimed account cannot be re-invited
+(`adminIssueInvite` returns 409 `ALREADY_CLAIMED` whenever `firebaseUid` is set)
+and an unclaimed one cannot exercise the module/visibility rows.
+
+| Fixture | State | Rows |
+| --- | --- | --- |
+| Test Kieffer — `816455979040769` | claimed (`firebaseUid` present) | 1, 4–10 (module off/on, hide/unhide, suspend/restore) |
+| Second test member — id TBD | genuinely unclaimed, no `firebaseUid` | 2–3 (invite → email → claim) |
+
+Do **not** reset the claimed fixture by clearing `firebaseUid`/`boundAt`/
+`webAccessVerifiedAt` and deleting the Auth user. That is a destructive write to
+production Firestore and Firebase Auth, it destroys the only claimed fixture,
+and it leaves rows 2–3 unrepeatable. Use a second member instead.
+
+Before rows 2–3 the new member's Elation id must be appended to
+`ELATION_READ_ALLOWLIST_PRODUCTION` using the procedure above (production is in
+allowlist mode, not full sync), and its roster doc must carry a deliverable
+`email` — the invite is sent to `patients/<id>.email`, not to anything typed in
+the admin panel.
