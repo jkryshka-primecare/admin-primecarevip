@@ -140,6 +140,115 @@ async function checkHintPractice(): Promise<CheckResult> {
   }
 }
 
+// Read-only Firestore reachability probe: mints a service-account token and
+// runs a 1-document query. No writes.
+async function checkFirestore(): Promise<CheckResult> {
+  const started = Date.now();
+  const base = {
+    integration: "Firestore",
+    scope: "read",
+    resource: "patients",
+  };
+  const raw = Deno.env.get("FIREBASE_SERVICE_ACCOUNT");
+  if (!raw) {
+    return {
+      ...base,
+      ok: false,
+      http_status: null,
+      elapsed_ms: Date.now() - started,
+      error_message: "FIREBASE_SERVICE_ACCOUNT is not configured.",
+    };
+  }
+  try {
+    const sa = JSON.parse(raw) as {
+      client_email: string;
+      private_key: string;
+      project_id: string;
+    };
+    const now = Math.floor(Date.now() / 1000);
+    const b64url = (input: Uint8Array | string) => {
+      const bytes = typeof input === "string" ? new TextEncoder().encode(input) : input;
+      let bin = "";
+      for (const b of bytes) bin += String.fromCharCode(b);
+      return btoa(bin).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+    };
+    const unsigned = `${b64url(JSON.stringify({ alg: "RS256", typ: "JWT" }))}.${b64url(
+      JSON.stringify({
+        iss: sa.client_email,
+        scope: "https://www.googleapis.com/auth/datastore",
+        aud: "https://oauth2.googleapis.com/token",
+        iat: now,
+        exp: now + 3600,
+      }),
+    )}`;
+    const pem = sa.private_key
+      .replace(/\\n/g, "\n")
+      .replace(/-----BEGIN PRIVATE KEY-----/, "")
+      .replace(/-----END PRIVATE KEY-----/, "")
+      .replace(/\s+/g, "");
+    const bin = atob(pem);
+    const der = new Uint8Array(bin.length);
+    for (let i = 0; i < bin.length; i++) der[i] = bin.charCodeAt(i);
+    const key = await crypto.subtle.importKey(
+      "pkcs8",
+      der.buffer,
+      { name: "RSASSA-PKCS1-v1_5", hash: "SHA-256" },
+      false,
+      ["sign"],
+    );
+    const sig = new Uint8Array(
+      await crypto.subtle.sign("RSASSA-PKCS1-v1_5", key, new TextEncoder().encode(unsigned)),
+    );
+    const tokenRes = await fetch("https://oauth2.googleapis.com/token", {
+      method: "POST",
+      headers: { "Content-Type": "application/x-www-form-urlencoded" },
+      body: new URLSearchParams({
+        grant_type: "urn:ietf:params:oauth:grant-type:jwt-bearer",
+        assertion: `${unsigned}.${b64url(sig)}`,
+      }),
+    });
+    const tokenBody = await tokenRes.json();
+    if (!tokenRes.ok || !tokenBody.access_token) {
+      return {
+        ...base,
+        ok: false,
+        http_status: tokenRes.status,
+        elapsed_ms: Date.now() - started,
+        error_message: `Token exchange failed: ${JSON.stringify(tokenBody).slice(0, 300)}`,
+      };
+    }
+    const res = await fetch(
+      `https://firestore.googleapis.com/v1/projects/${sa.project_id}/databases/(default)/documents:runQuery`,
+      {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${tokenBody.access_token}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          structuredQuery: { from: [{ collectionId: "patients" }], limit: 1 },
+        }),
+      },
+    );
+    const text = await res.text();
+    return {
+      ...base,
+      ok: res.ok,
+      http_status: res.status,
+      elapsed_ms: Date.now() - started,
+      error_message: res.ok ? null : text.slice(0, 300),
+    };
+  } catch (e) {
+    return {
+      ...base,
+      ok: false,
+      http_status: null,
+      elapsed_ms: Date.now() - started,
+      error_message: e instanceof Error ? e.message : "Request failed",
+    };
+  }
+}
+
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
 
@@ -148,7 +257,12 @@ Deno.serve(async (req) => {
     Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!,
   );
 
-  const results = await Promise.all([checkElationRest(), checkHintPractice()]);
+  const results = await Promise.all([
+    checkElationRest(),
+    checkHintPractice(),
+    checkFirestore(),
+  ]);
+
   const checkedAt = new Date().toISOString();
 
   const { error: insertErr } = await supabase
