@@ -294,9 +294,10 @@ Deno.serve(async (req) => {
   const url = `${FUNCTIONS_BASE}/${fnName}`;
   const started = Date.now();
 
-  let sa: ServiceAccount;
+  const useWif = wifConfigured();
+  let sa: ServiceAccount | null = null;
   try {
-    sa = loadServiceAccount();
+    if (!useWif) sa = loadServiceAccount();
   } catch (e) {
     const message = e instanceof Error ? e.message : String(e);
     await recordAction(ctx, {
@@ -317,7 +318,18 @@ Deno.serve(async (req) => {
   let errorMessage: string | null = null;
 
   try {
-    const idToken = await getIdentityToken(sa, url);
+    const now = Math.floor(Date.now() / 1000);
+    const cached = tokenCache.get(url);
+    let idToken: string;
+    if (cached && cached.expiresAt - 60 > now) {
+      idToken = cached.token;
+    } else if (useWif) {
+      idToken = await getIdentityTokenViaWif(url);
+      tokenCache.set(url, { token: idToken, expiresAt: now + 3000 });
+    } else {
+      idToken = await getIdentityToken(sa as ServiceAccount, url);
+    }
+
     const res = await fetch(url, {
       method: "POST",
       headers: {
