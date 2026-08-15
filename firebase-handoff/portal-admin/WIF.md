@@ -32,8 +32,16 @@ before it ever reaches for a Google token, and it writes the acting person to
 
 ## Google-side commands
 
-Run in Cloud Shell on `prive-care-vip`. Substitute `<BRIDGE_SUB>` with the
-bridge account's user id (Prime Care OS will provide it).
+Run in Cloud Shell on `prive-care-vip`. The bridge account now exists — these
+are the real values, no substitution needed:
+
+| Field | Value |
+| --- | --- |
+| `<BRIDGE_SUB>` | `c85a8977-1fa6-40c5-a819-decdf43e7177` |
+| bridge email | `portal-bridge@bridge.primecarevip.invalid` |
+
+Verified live from a real sign-in: `alg=ES256`, `iss=https://imewkweatgvqledptdna.supabase.co/auth/v1`,
+`aud=authenticated`, `sub=c85a8977-1fa6-40c5-a819-decdf43e7177`.
 
 ```bash
 PROJECT=prive-care-vip
@@ -53,10 +61,10 @@ gcloud iam workload-identity-pools providers create-oidc supabase-bridge \
   --issuer-uri="$ISSUER" \
   --allowed-audiences="authenticated" \
   --attribute-mapping="google.subject=assertion.sub,attribute.role=assertion.role" \
-  --attribute-condition="assertion.sub=='<BRIDGE_SUB>'"
+  --attribute-condition="assertion.sub=='c85a8977-1fa6-40c5-a819-decdf43e7177'"
 
 # 3. Let only that subject impersonate portal-admin.
-POOL=principal://iam.googleapis.com/projects/$PROJNUM/locations/global/workloadIdentityPools/prime-care-os/subject/<BRIDGE_SUB>
+POOL=principal://iam.googleapis.com/projects/$PROJNUM/locations/global/workloadIdentityPools/prime-care-os/subject/c85a8977-1fa6-40c5-a819-decdf43e7177
 gcloud iam service-accounts add-iam-policy-binding \
   portal-admin@$PROJECT.iam.gserviceaccount.com --project=$PROJECT \
   --role=roles/iam.workloadIdentityUser --member="$POOL"
@@ -101,6 +109,31 @@ The resulting token has `iss=accounts.google.com`,
 `email=portal-admin@prive-care-vip.iam.gserviceaccount.com`, and `aud` equal to
 the function URL — exactly what `requireAdminCaller` already checks, so the
 Cloud Functions need no change for WIF.
+
+## Bridge account hardening (done)
+
+The Google key is gone, so the bridge password is the standing secret. What is
+in place:
+
+- **No role.** The account holds zero rows in `user_roles` (the signup trigger's
+  default `pending` row was removed), so `is_staff()` / `has_role()` are false
+  and every RLS policy denies it. A `BEFORE INSERT OR UPDATE` trigger on
+  `user_roles` raises an exception if anyone — including an admin — tries to
+  grant this uid a role.
+- **No password-reset path.** The address is on the reserved, non-routable
+  `.invalid` TLD, so a recovery mail can never be delivered to a mailbox anyone
+  can open. `recovery_sent_at` is null and must stay null.
+- **Password.** 64-char CSPRNG value, stored only as the `PORTAL_BRIDGE_PASSWORD`
+  secret; never printed, committed, or emailed. Rotate quarterly by regenerating
+  the secret and re-applying it to the account — the `sub` never changes, so the
+  Google-side WIF config is untouched by a rotation.
+- **MFA.** Supabase TOTP enrolment requires an interactive enrol/verify step and
+  a factor challenge on every sign-in, which a headless bridge cannot complete;
+  it would also not change the `sub` pin that actually gates GCP. The compensating
+  controls are the `sub`-pinned provider condition, invoker rights on exactly the
+  four `admin*` functions, the staff-session + admin-role check that runs in
+  `portal-admin` **before** any Google token is requested, and the
+  `portal_admin_actions` / `portalAdminAudit` trails.
 
 ## Also required before the first invite
 
