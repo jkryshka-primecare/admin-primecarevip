@@ -4,11 +4,15 @@ import UsersAdmin from "@/components/admin/UsersAdmin";
 import PhiAuditLog from "@/components/admin/PhiAuditLog";
 import IntegrationsAdmin from "@/components/admin/IntegrationsAdmin";
 import SeedDataPanel from "@/components/admin/SeedDataPanel";
+import MemberBillingPanel from "@/components/firestore/MemberBillingPanel";
+import MemberAppExplorer from "@/components/firestore/MemberAppExplorer";
 import { cn } from "@/lib/utils";
 
 const tabs = [
   { id: "users", label: "Users & Invitations" },
   { id: "integrations", label: "Integrations" },
+  { id: "member-billing", label: "Member Billing" },
+  { id: "member-data", label: "Member App Data" },
   { id: "seed", label: "Data Seeding" },
   { id: "audit", label: "PHI Audit Log" },
 ] as const;
@@ -40,6 +44,8 @@ export default function AdminHome() {
 
         {tab === "users" && <UsersAdmin />}
         {tab === "integrations" && <IntegrationsAdmin />}
+        {tab === "member-billing" && <MemberBillingPanel />}
+        {tab === "member-data" && <MemberAppExplorer />}
         {tab === "seed" && <SeedDataPanel />}
         {tab === "audit" && <PhiAuditLog />}
       </div>
