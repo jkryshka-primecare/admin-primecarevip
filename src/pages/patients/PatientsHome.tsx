@@ -84,10 +84,19 @@ export default function PatientsHome() {
     limit: 50,
   });
 
+  // Member-app roster, used only to flag which Elation records also exist in
+  // the member apps so sync gaps are visible instead of silent.
+  const memberRoster = useFirestoreList("patients", { limit: 300 });
+  const memberIds = useMemo(
+    () => new Set(memberRoster.docs.map((d) => String(d.id))),
+    [memberRoster.docs],
+  );
+
   const selected = useMemo(
     () => patients.find((p) => String(p.id) === String(selectedId)) ?? null,
     [patients, selectedId],
   );
+
 
   return (
     <div className="container mx-auto p-6 space-y-6">
