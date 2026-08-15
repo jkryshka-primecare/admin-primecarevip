@@ -6,7 +6,7 @@ import { CheckCircle2, Loader2, RefreshCw, XCircle } from "lucide-react";
 type Probe = {
   key: string;
   label: string;
-  fn: "elation-live" | "hint-live";
+  fn: "elation-live" | "hint-live" | "firestore-bridge";
   body: Record<string, unknown>;
   hint: string;
 };
@@ -40,7 +40,15 @@ const PROBES: Probe[] = [
     body: { resource: "practices", scope: "partner", query: { limit: 1 } },
     hint: "HINT_PARTNER_API_KEY · optional, not used by dashboards",
   },
+  {
+    key: "firestore",
+    label: "Firestore (member apps)",
+    fn: "firestore-bridge",
+    body: { collection: "patients", limit: 1 },
+    hint: "Google service account · read-only bridge",
+  },
 ];
+
 
 type Result = {
   status?: number;

@@ -11,12 +11,15 @@ import {
   ShieldAlert,
   Activity,
   Stethoscope,
+  CreditCard,
 } from "lucide-react";
 import {
   useElationPatients,
   useElationResource,
   type ElationPatient,
 } from "@/hooks/useElation";
+import { useFirestoreDoc, useFirestoreList, pickString } from "@/hooks/useFirestore";
+
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -243,8 +246,11 @@ function PatientDetailDrawer({
             <ScrollArea className="flex-1">
               <div className="p-6">
                 <Tabs defaultValue="overview" className="w-full">
-                  <TabsList className="grid grid-cols-5 w-full">
+                  <TabsList className="grid grid-cols-6 w-full">
                     <TabsTrigger value="overview">Overview</TabsTrigger>
+                    <TabsTrigger value="membership">
+                      <CreditCard className="h-3 w-3 mr-1" /> Member
+                    </TabsTrigger>
                     <TabsTrigger value="problems">
                       <Stethoscope className="h-3 w-3 mr-1" /> Problems
                     </TabsTrigger>
@@ -267,6 +273,11 @@ function PatientDetailDrawer({
                       error={appts.error}
                     />
                   </TabsContent>
+
+                  <TabsContent value="membership" className="mt-4">
+                    <MembershipTab elationId={id} />
+                  </TabsContent>
+
 
                   <TabsContent value="problems" className="mt-4">
                     <ResourceList
@@ -343,6 +354,100 @@ function PatientDetailDrawer({
     </Sheet>
   );
 }
+
+// Membership + billing context sourced from the member apps (Firestore).
+// Read-only: nothing here mutates the live member record.
+function MembershipTab({ elationId }: { elationId: string | null }) {
+  const member = useFirestoreDoc("patients", elationId);
+  const subs = useFirestoreList(
+    "billing_subscriptions",
+    elationId
+      ? { where: [{ field: "patientId", value: elationId }], limit: 10 }
+      : {},
+    !!elationId,
+  );
+  const invoices = useFirestoreList(
+    "billing_invoices",
+    elationId
+      ? {
+          where: [{ field: "patientId", value: elationId }],
+          orderBy: { field: "createdAt", direction: "desc" },
+          limit: 10,
+        }
+      : {},
+    !!elationId,
+  );
+
+  const doc = member.doc;
+  const anyError = member.error ?? subs.error ?? invoices.error;
+
+  return (
+    <div className="space-y-4">
+      {anyError && (
+        <div className="flex items-start gap-2 rounded-md border border-destructive/40 bg-destructive/10 p-3 text-xs text-destructive">
+          <AlertCircle className="h-4 w-4 shrink-0" />
+          <span>{anyError}</span>
+        </div>
+      )}
+
+      <Card>
+        <CardHeader className="pb-3">
+          <CardTitle className="text-sm flex items-center gap-2">
+            <CreditCard className="h-4 w-4" /> Membership
+          </CardTitle>
+        </CardHeader>
+        <CardContent>
+          {member.loading ? (
+            <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />
+          ) : !doc ? (
+            <p className="text-xs text-muted-foreground">
+              No member-app record found for this patient.
+            </p>
+          ) : (
+            <div className="grid grid-cols-2 gap-3 text-sm">
+              <Field
+                label="Member status"
+                value={pickString(doc, "membershipStatus", "status")}
+              />
+              <Field label="Plan" value={pickString(doc, "planName", "plan", "tier")} />
+              <Field label="Member since" value={pickString(doc, "memberSince", "createdAt")} />
+              <Field label="Email" value={pickString(doc, "email")} />
+              <Field label="Phone" value={pickString(doc, "phone", "cellPhone")} />
+              <Field label="Household" value={pickString(doc, "familyId", "householdId")} />
+            </div>
+          )}
+        </CardContent>
+      </Card>
+
+      <ResourceList
+        title="Subscriptions"
+        icon={CreditCard}
+        items={subs.docs}
+        loading={subs.loading}
+        error={subs.error}
+        render={(s: any) => ({
+          primary: s.planName ?? s.plan ?? "Subscription",
+          secondary: [s.status, s.interval].filter(Boolean).join(" · "),
+          meta: s.amount != null ? `$${s.amount}` : "",
+        })}
+      />
+
+      <ResourceList
+        title="Recent invoices"
+        icon={CreditCard}
+        items={invoices.docs}
+        loading={invoices.loading}
+        error={invoices.error}
+        render={(inv: any) => ({
+          primary: inv.description ?? inv.number ?? "Invoice",
+          secondary: inv.status ?? "",
+          meta: inv.amount != null ? `$${inv.amount}` : "",
+        })}
+      />
+    </div>
+  );
+}
+
 
 function DemographicsCard({ patient }: { patient: ElationPatient }) {
   const a = patient.address;
