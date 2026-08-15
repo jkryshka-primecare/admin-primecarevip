@@ -1401,6 +1401,51 @@ export type Database = {
         }
         Relationships: []
       }
+      portal_admin_actions: {
+        Row: {
+          action: string
+          actor_email: string | null
+          actor_user_id: string | null
+          after_state: Json | null
+          before_state: Json | null
+          created_at: string
+          elation_patient_id: string | null
+          error_message: string | null
+          http_status: number | null
+          id: string
+          ok: boolean
+          reason: string | null
+        }
+        Insert: {
+          action: string
+          actor_email?: string | null
+          actor_user_id?: string | null
+          after_state?: Json | null
+          before_state?: Json | null
+          created_at?: string
+          elation_patient_id?: string | null
+          error_message?: string | null
+          http_status?: number | null
+          id?: string
+          ok?: boolean
+          reason?: string | null
+        }
+        Update: {
+          action?: string
+          actor_email?: string | null
+          actor_user_id?: string | null
+          after_state?: Json | null
+          before_state?: Json | null
+          created_at?: string
+          elation_patient_id?: string | null
+          error_message?: string | null
+          http_status?: number | null
+          id?: string
+          ok?: boolean
+          reason?: string | null
+        }
+        Relationships: []
+      }
       prescription_queue: {
         Row: {
           created_at: string

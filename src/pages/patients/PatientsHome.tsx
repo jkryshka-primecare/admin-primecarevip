@@ -12,13 +12,17 @@ import {
   Activity,
   Stethoscope,
   CreditCard,
+  ShieldCheck,
 } from "lucide-react";
+
 import {
   useElationPatients,
   useElationResource,
   type ElationPatient,
 } from "@/hooks/useElation";
 import { useFirestoreDoc, useFirestoreList, pickString } from "@/hooks/useFirestore";
+import PortalAdminPanel from "./PortalAdminPanel";
+
 
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
@@ -285,11 +289,15 @@ function PatientDetailDrawer({
             <ScrollArea className="flex-1">
               <div className="p-6">
                 <Tabs defaultValue="overview" className="w-full">
-                  <TabsList className="grid grid-cols-6 w-full">
+                  <TabsList className="grid grid-cols-7 w-full">
                     <TabsTrigger value="overview">Overview</TabsTrigger>
                     <TabsTrigger value="membership">
                       <CreditCard className="h-3 w-3 mr-1" /> Member
                     </TabsTrigger>
+                    <TabsTrigger value="portal">
+                      <ShieldCheck className="h-3 w-3 mr-1" /> Portal
+                    </TabsTrigger>
+
                     <TabsTrigger value="problems">
                       <Stethoscope className="h-3 w-3 mr-1" /> Problems
                     </TabsTrigger>
@@ -315,6 +323,10 @@ function PatientDetailDrawer({
 
                   <TabsContent value="membership" className="mt-4">
                     <MembershipTab elationId={id} />
+                  </TabsContent>
+
+                  <TabsContent value="portal" className="mt-4">
+                    <PortalAdminPanel elationId={id} />
                   </TabsContent>
 
 
