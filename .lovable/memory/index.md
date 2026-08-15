@@ -17,3 +17,4 @@ PHI/HIPAA hardening: app requires login (email+password or Google SSO). Roles in
 - [Live API safety](mem://live-api-safety) — read-only rule for Elation/Hint/Firestore production APIs
 - [Patient identity](mem://patient-identity) — Elation patient ID is the cross-system join key
 - [Firestore bridge](mem://firestore-bridge) — read-only Firestore edge function + collections whitelist
+- [Portal WIF bridge account](mem://portal-bridge-account) — machine account sub/email, no-role rule, password rotation policy
