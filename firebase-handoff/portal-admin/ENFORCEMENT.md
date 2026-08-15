@@ -40,7 +40,10 @@ if (!isModuleVisible(access, 'labs')) {
 ```
 
 
-Then filter the result set right before responding:
+Then filter the result set right before responding, using **that handler's own
+response variable and shape** — the list handlers return `{ items }`, but
+`getMyPatientRecord` returns a `payload` object, so do not assume `{ items }`
+everywhere:
 
 ```js
 const visible = filterHidden(access, 'labs', items, (it) => it.id);
