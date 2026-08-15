@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { Fragment, useMemo, useState } from "react";
 import { AlertCircle, Database, Loader2, RefreshCw } from "lucide-react";
 import { useFirestoreList, type FirestoreCollection } from "@/hooks/useFirestore";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -141,9 +141,8 @@ export default function MemberAppExplorer() {
                 </TableHeader>
                 <TableBody>
                   {docs.map((d) => (
-                    <>
+                    <Fragment key={String(d.id)}>
                       <TableRow
-                        key={String(d.id)}
                         className="cursor-pointer hover:bg-muted/50"
                         onClick={() =>
                           setExpanded(expanded === String(d.id) ? null : String(d.id))
@@ -156,7 +155,7 @@ export default function MemberAppExplorer() {
                         ))}
                       </TableRow>
                       {expanded === String(d.id) && (
-                        <TableRow key={`${d.id}-raw`}>
+                        <TableRow>
                           <TableCell colSpan={columns.length} className="bg-muted/40">
                             <pre className="max-h-72 overflow-auto text-[11px] font-mono whitespace-pre-wrap">
                               {JSON.stringify(d, null, 2)}
@@ -164,7 +163,7 @@ export default function MemberAppExplorer() {
                           </TableCell>
                         </TableRow>
                       )}
-                    </>
+                    </Fragment>
                   ))}
                 </TableBody>
               </Table>
