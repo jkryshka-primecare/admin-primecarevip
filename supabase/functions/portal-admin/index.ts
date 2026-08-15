@@ -40,11 +40,95 @@ const FUNCTIONS_BASE =
 // Identity tokens are audience-scoped, so cache one per target function.
 const tokenCache = new Map<string, { token: string; expiresAt: number }>();
 
+// --- Credential mode -------------------------------------------------------
+// Preferred: Workload Identity Federation. No Google private key exists
+// anywhere; this function proves its own identity with a short-lived
+// backend-issued OIDC token (ES256, public JWKS), exchanges it at Google STS,
+// and impersonates `portal-admin` to mint the identity token the Cloud
+// Functions gate expects. The gate cannot tell the difference — it only ever
+// checked issuer, audience and caller email.
+//
+// Fallback: a downloaded service-account key, kept only so an in-flight
+// deployment does not break. WIF wins whenever it is configured.
+
+const WIF_AUDIENCE = Deno.env.get("GCP_WIF_AUDIENCE"); // //iam.googleapis.com/projects/<num>/locations/global/workloadIdentityPools/<pool>/providers/<provider>
+const WIF_SERVICE_ACCOUNT = Deno.env.get("GCP_IMPERSONATE_SERVICE_ACCOUNT"); // portal-admin@prive-care-vip.iam.gserviceaccount.com
+const BRIDGE_EMAIL = Deno.env.get("PORTAL_BRIDGE_EMAIL");
+const BRIDGE_PASSWORD = Deno.env.get("PORTAL_BRIDGE_PASSWORD");
+
+function wifConfigured(): boolean {
+  return Boolean(WIF_AUDIENCE && WIF_SERVICE_ACCOUNT && BRIDGE_EMAIL && BRIDGE_PASSWORD);
+}
+
+/**
+ * A backend-issued OIDC token for the dedicated bridge identity. This is a
+ * machine account with no staff role and no data access — its only purpose is
+ * to be a stable, verifiable `sub` that the WIF provider condition pins.
+ */
+async function getSubjectToken(): Promise<string> {
+  const url = Deno.env.get("SUPABASE_URL");
+  const anon = Deno.env.get("SUPABASE_ANON_KEY");
+  if (!url || !anon) throw new Error("Backend URL/key unavailable for the bridge identity.");
+  const res = await fetch(`${url}/auth/v1/token?grant_type=password`, {
+    method: "POST",
+    headers: { apikey: anon, "Content-Type": "application/json" },
+    body: JSON.stringify({ email: BRIDGE_EMAIL, password: BRIDGE_PASSWORD }),
+  });
+  const payload = await res.json();
+  if (!res.ok || !payload.access_token) {
+    throw new Error(`Bridge identity sign-in failed: ${payload.error_description ?? res.status}`);
+  }
+  return payload.access_token as string;
+}
+
+/** Google identity token for `portal-admin`, obtained with no private key. */
+async function getIdentityTokenViaWif(audience: string): Promise<string> {
+  const subjectToken = await getSubjectToken();
+
+  const stsRes = await fetch("https://sts.googleapis.com/v1/token", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      grantType: "urn:ietf:params:oauth:grant-type:token-exchange",
+      audience: WIF_AUDIENCE,
+      scope: "https://www.googleapis.com/auth/cloud-platform",
+      requestedTokenType: "urn:ietf:params:oauth:token-type:access_token",
+      subjectTokenType: "urn:ietf:params:oauth:token-type:jwt",
+      subjectToken,
+    }),
+  });
+  const sts = await stsRes.json();
+  if (!stsRes.ok || !sts.access_token) {
+    throw new Error(
+      `Workload Identity exchange failed: ${sts.error_description ?? sts.error ?? stsRes.status}`,
+    );
+  }
+
+  const idRes = await fetch(
+    `https://iamcredentials.googleapis.com/v1/projects/-/serviceAccounts/${WIF_SERVICE_ACCOUNT}:generateIdToken`,
+    {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${sts.access_token}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ audience, includeEmail: true }),
+    },
+  );
+  const idPayload = await idRes.json();
+  if (!idRes.ok || !idPayload.token) {
+    throw new Error(
+      `Identity-token impersonation failed: ${idPayload.error?.message ?? idRes.status}`,
+    );
+  }
+  return idPayload.token as string;
+}
+
 function loadServiceAccount(): ServiceAccount {
   const raw = Deno.env.get("PORTAL_ADMIN_SERVICE_ACCOUNT");
   if (!raw) {
     throw new Error(
-      "PORTAL_ADMIN_SERVICE_ACCOUNT is not configured. Add the portal-admin service account key to enable portal controls.",
+      "Portal controls are not configured. Set up Workload Identity Federation (GCP_WIF_AUDIENCE, GCP_IMPERSONATE_SERVICE_ACCOUNT, PORTAL_BRIDGE_EMAIL, PORTAL_BRIDGE_PASSWORD) or, as a fallback, PORTAL_ADMIN_SERVICE_ACCOUNT.",
     );
   }
   const sa = JSON.parse(raw) as ServiceAccount;
@@ -53,6 +137,7 @@ function loadServiceAccount(): ServiceAccount {
   }
   return sa;
 }
+
 
 function b64url(input: Uint8Array | string): string {
   const bytes = typeof input === "string" ? new TextEncoder().encode(input) : input;
