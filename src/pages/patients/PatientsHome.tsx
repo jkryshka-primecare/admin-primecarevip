@@ -21,6 +21,8 @@ import {
   type ElationPatient,
 } from "@/hooks/useElation";
 import { useFirestoreDoc, useFirestoreList, pickString } from "@/hooks/useFirestore";
+import PortalAdminPanel from "./PortalAdminPanel";
+
 
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
