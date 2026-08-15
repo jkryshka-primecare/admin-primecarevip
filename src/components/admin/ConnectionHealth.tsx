@@ -188,6 +188,35 @@ export default function ConnectionHealth() {
           );
         })}
       </div>
+
+      {history.length > 0 && (
+        <div className="rounded-xl border border-border bg-card px-5 py-4 shadow-soft">
+          <p className="text-xs font-medium text-card-foreground">
+            Automated daily checks (8:00 AM UTC)
+          </p>
+          <ul className="mt-2 space-y-1">
+            {history.map((h) => (
+              <li key={h.id} className="flex items-center gap-2 font-mono text-[11px]">
+                <span className={h.ok ? "text-success" : "text-destructive"}>
+                  {h.ok ? "PASS" : "FAIL"}
+                </span>
+                <span className="text-muted-foreground">
+                  {new Date(h.checked_at).toLocaleString()}
+                </span>
+                <span className="text-card-foreground">{h.integration}</span>
+                <span className="text-muted-foreground">
+                  HTTP {h.http_status ?? "—"}
+                  {h.elapsed_ms !== null ? ` · ${h.elapsed_ms}ms` : ""}
+                </span>
+                {!h.ok && h.error_message && (
+                  <span className="truncate text-destructive">{h.error_message}</span>
+                )}
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
     </section>
+
   );
 }
