@@ -6,6 +6,10 @@ the wire. Apply this to every `get*` handler.
 
 ## Pattern
 
+Applies to every list handler in the table below. **`getMyPatientRecord` is the
+one deliberate exception** — see its section at the bottom.
+
+
 Each handler already runs, in this order: `verifyPatientToken` → reject the
 `unauthenticated` sentinel ("Guard B") → **`resolvePatientForCaller(uid)`**
 (from `core/services/elation/resolvePatientForCaller`; the returned doc's `.id`
