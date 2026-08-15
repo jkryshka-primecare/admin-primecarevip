@@ -142,3 +142,32 @@ Both exist by design and both must show the action:
 
 When verifying go-live, check both. A row in one and not the other means the
 call failed partway and should be investigated.
+
+## Appending an id to `ELATION_READ_ALLOWLIST_PRODUCTION`
+
+The secret is masked everywhere in GitHub, so never reconstruct it by hand.
+Ground truth is the env file on the deployed function.
+
+1. Read the deployed value and snapshot it to **`~/allow-deployed.txt`**
+   (not `/tmp` — Cloud Shell wipes `/tmp` between sessions, and this file is
+   the rollback artifact).
+2. Dup-check the id against that snapshot; stop if already present.
+3. Build the new value with `printf '%s'` (no trailing newline) as
+   `<old>,<new-id>`, and confirm the last character is the id's last digit.
+4. Set it with `gh secret set ELATION_READ_ALLOWLIST_PRODUCTION < file`.
+   `gh` must be authenticated in Cloud Shell with secret-write scope
+   (`gh auth login` first). The web UI works but risks a stray newline.
+5. **Redeploy by re-running the last "Deploy to Production" run from the
+   Actions tab — not an empty commit.** `main` is branch-protected with
+   no-bypass, so any direct push is rejected. A re-run re-reads secrets at
+   execution time and rewrites `functions/.env.prive-care-vip`.
+
+### Verification after the redeploy (content-based, not CI-green)
+
+- `sorted diff` of old vs new deployed allowlist: exactly one `>` line, the new
+  id, and N → N+1. A count alone can mask a swapped id; the diff is the proof.
+- Repeat the diff against a **different** function (e.g. `claimAccount`) and
+  confirm its `updateTime` advanced — the D-071 silent no-op trap.
+- Re-run the `get-iam-policy` loop over the four `admin*` functions and confirm
+  each lists only `portal-admin`. Firebase adds `allUsers` on create, not
+  update, so it should stay stripped — but verify, don't assume.
