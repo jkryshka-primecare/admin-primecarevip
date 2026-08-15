@@ -246,8 +246,11 @@ function PatientDetailDrawer({
             <ScrollArea className="flex-1">
               <div className="p-6">
                 <Tabs defaultValue="overview" className="w-full">
-                  <TabsList className="grid grid-cols-5 w-full">
+                  <TabsList className="grid grid-cols-6 w-full">
                     <TabsTrigger value="overview">Overview</TabsTrigger>
+                    <TabsTrigger value="membership">
+                      <CreditCard className="h-3 w-3 mr-1" /> Member
+                    </TabsTrigger>
                     <TabsTrigger value="problems">
                       <Stethoscope className="h-3 w-3 mr-1" /> Problems
                     </TabsTrigger>
@@ -270,6 +273,11 @@ function PatientDetailDrawer({
                       error={appts.error}
                     />
                   </TabsContent>
+
+                  <TabsContent value="membership" className="mt-4">
+                    <MembershipTab elationId={id} />
+                  </TabsContent>
+
 
                   <TabsContent value="problems" className="mt-4">
                     <ResourceList
