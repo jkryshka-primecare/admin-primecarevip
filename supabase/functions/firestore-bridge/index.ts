@@ -25,7 +25,13 @@ type RequestBody = {
   orderBy?: { field: string; direction?: "asc" | "desc" };
   limit?: number;
   cursor?: number; // simple offset cursor
+  includeRaw?: boolean; // keep verbose upstream payload blobs
 };
+
+// Verbatim Stripe payloads mirrored into Firestore. Multi-KB per document and
+// never rendered — dropped unless explicitly requested.
+const HEAVY_FIELDS = ["stripeInvoice", "stripeSubscription", "stripeCustomer", "raw"];
+
 
 // Read-only whitelist. Anything not listed here is rejected.
 const ALLOWED_COLLECTIONS = new Set([
