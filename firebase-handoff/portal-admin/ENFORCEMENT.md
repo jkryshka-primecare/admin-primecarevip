@@ -6,9 +6,14 @@ the wire. Apply this to every `get*` handler.
 
 ## Pattern
 
-Each handler already resolves the caller's `elationPatientId` (via
-`verifyPatientToken` / `bindMember`). Immediately after that, and before any
-Elation or Firestore fetch:
+Each handler already runs, in this order: `verifyPatientToken` → reject the
+`unauthenticated` sentinel ("Guard B") → **`resolvePatientForCaller(uid)`**
+(from `core/services/elation/resolvePatientForCaller`; the returned doc's `.id`
+is the `elationPatientId`) → the D-068 `ELATION_READ_ALLOWLIST` gate →
+audit-first write to `phi_access_log` → the Elation/Storage read.
+
+Insert the guard **after the audit-first write and before the Elation read**,
+so every attempt — including a denial — is still audited:
 
 ```js
 const {
@@ -26,14 +31,19 @@ try {
   return jsonError(res, 503, 'UNAVAILABLE', 'ACCESS_CHECK_FAILED');
 }
 
-// Fail OPEN on visibility: a Firestore hiccup must not blank a real chart.
+// Fail OPEN on visibility. getPortalAccess never throws — it catches its own
+// Firestore errors and returns the all-visible default — so no try/catch here.
 const access = await getPortalAccess(elationPatientId);
 if (!isModuleVisible(access, 'labs')) {
   return res.status(200).json({ items: [], moduleUnavailable: true });
 }
 ```
 
-Then filter the result set right before responding:
+
+Then filter the result set right before responding, using **that handler's own
+response variable and shape** — the list handlers return `{ items }`, but
+`getMyPatientRecord` returns a `payload` object, so do not assume `{ items }`
+everywhere:
 
 ```js
 const visible = filterHidden(access, 'labs', items, (it) => it.id);
