@@ -76,6 +76,11 @@ async function getPortalAccess(elationPatientId) {
  */
 async function assertNotSuspended(elationPatientId) {
   const pid = String(elationPatientId || '').trim();
+  if (!pid) {
+    const err = new Error('Portal access check needs a patient id');
+    err.portalReason = 'ACCESS_CHECK_FAILED';
+    throw err;
+  }
   const snap = await admin.firestore().collection(COLLECTION).doc(pid).get();
   const data = snap.exists ? snap.data() : null;
   if (data && data.status === 'suspended') {
