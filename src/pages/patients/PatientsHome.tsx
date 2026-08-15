@@ -42,7 +42,13 @@ import {
 } from "@/components/ui/table";
 import { ScrollArea } from "@/components/ui/scroll-area";
 
+function formatCents(cents?: number | null) {
+  if (cents == null || Number.isNaN(Number(cents))) return null;
+  return `$${(Number(cents) / 100).toFixed(2)}`;
+}
+
 function formatDate(iso?: string) {
+
   if (!iso) return "—";
   try {
     return format(parseISO(iso), "MMM d, yyyy");
@@ -78,10 +84,19 @@ export default function PatientsHome() {
     limit: 50,
   });
 
+  // Member-app roster, used only to flag which Elation records also exist in
+  // the member apps so sync gaps are visible instead of silent.
+  const memberRoster = useFirestoreList("patients", { limit: 300 });
+  const memberIds = useMemo(
+    () => new Set(memberRoster.docs.map((d) => String(d.id))),
+    [memberRoster.docs],
+  );
+
   const selected = useMemo(
     () => patients.find((p) => String(p.id) === String(selectedId)) ?? null,
     [patients, selectedId],
   );
+
 
   return (
     <div className="container mx-auto p-6 space-y-6">
@@ -141,12 +156,14 @@ export default function PatientsHome() {
                   <TableHead>Sex</TableHead>
                   <TableHead>MRN</TableHead>
                   <TableHead>Status</TableHead>
+                  <TableHead>Systems</TableHead>
                   <TableHead>Contact</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
                 {patients.map((p) => {
                   const age = ageFromDob(p.dob);
+                  const inMemberApp = memberIds.has(String(p.id));
                   return (
                     <TableRow
                       key={String(p.id)}
@@ -167,12 +184,34 @@ export default function PatientsHome() {
                           {p.status ?? "unknown"}
                         </Badge>
                       </TableCell>
+                      <TableCell>
+                        <div className="flex gap-1">
+                          <Badge variant="outline" className="text-[10px]">
+                            Elation
+                          </Badge>
+                          {memberRoster.loading ? (
+                            <Loader2 className="h-3 w-3 animate-spin text-muted-foreground" />
+                          ) : inMemberApp ? (
+                            <Badge variant="outline" className="text-[10px]">
+                              Member app
+                            </Badge>
+                          ) : (
+                            <Badge
+                              variant="outline"
+                              className="text-[10px] border-dashed text-muted-foreground"
+                            >
+                              No member app
+                            </Badge>
+                          )}
+                        </div>
+                      </TableCell>
                       <TableCell className="text-xs text-muted-foreground">
                         {p.cell_phone ?? p.home_phone ?? p.email ?? "—"}
                       </TableCell>
                     </TableRow>
                   );
                 })}
+
               </TableBody>
             </Table>
           )}
@@ -356,30 +395,46 @@ function PatientDetailDrawer({
 }
 
 // Membership + billing context sourced from the member apps (Firestore).
+//
+// Join chain, confirmed against live documents:
+//   Elation patient id === patients/{docId}
+//   patients.email      -> billing_accounts.email
+//   billing_accounts.stripeCustomerId -> billing_subscriptions / billing_invoices
+//
 // Read-only: nothing here mutates the live member record.
 function MembershipTab({ elationId }: { elationId: string | null }) {
   const member = useFirestoreDoc("patients", elationId);
+  const memberEmail = member.doc ? pickString(member.doc, "email") : null;
+
+  const accounts = useFirestoreList(
+    "billing_accounts",
+    memberEmail ? { where: [{ field: "email", value: memberEmail }], limit: 5 } : {},
+    !!memberEmail,
+  );
+  const account = accounts.docs[0] as Record<string, any> | undefined;
+  const customerId = account?.stripeCustomerId ?? null;
+
   const subs = useFirestoreList(
     "billing_subscriptions",
-    elationId
-      ? { where: [{ field: "patientId", value: elationId }], limit: 10 }
+    customerId
+      ? { where: [{ field: "stripeCustomerId", value: customerId }], limit: 10 }
       : {},
-    !!elationId,
+    !!customerId,
   );
   const invoices = useFirestoreList(
     "billing_invoices",
-    elationId
+    customerId
       ? {
-          where: [{ field: "patientId", value: elationId }],
+          where: [{ field: "stripeCustomerId", value: customerId }],
           orderBy: { field: "createdAt", direction: "desc" },
           limit: 10,
         }
       : {},
-    !!elationId,
+    !!customerId,
   );
 
   const doc = member.doc;
-  const anyError = member.error ?? subs.error ?? invoices.error;
+  const anyError = member.error ?? accounts.error ?? subs.error ?? invoices.error;
 
   return (
     <div className="space-y-4">
@@ -405,15 +460,24 @@ function MembershipTab({ elationId }: { elationId: string | null }) {
             </p>
           ) : (
             <div className="grid grid-cols-2 gap-3 text-sm">
+              <Field label="Member status" value={pickString(doc, "status")} />
               <Field
-                label="Member status"
-                value={pickString(doc, "membershipStatus", "status")}
+                label="Tier"
+                value={account?.membershipTier ?? pickString(doc, "membershipTier")}
               />
-              <Field label="Plan" value={pickString(doc, "planName", "plan", "tier")} />
-              <Field label="Member since" value={pickString(doc, "memberSince", "createdAt")} />
+              <Field label="Signed up" value={formatDate(pickString(doc, "createdAt") ?? undefined)} />
               <Field label="Email" value={pickString(doc, "email")} />
-              <Field label="Phone" value={pickString(doc, "phone", "cellPhone")} />
-              <Field label="Household" value={pickString(doc, "familyId", "householdId")} />
+              <Field label="Phone" value={pickString(doc, "phone")} />
+              <Field
+                label="Payment method"
+                value={
+                  account?.defaultPaymentMethodLast4
+                    ? `${account.defaultPaymentMethodBrand ?? "card"} ···· ${account.defaultPaymentMethodLast4}`
+                    : accounts.loading
+                      ? "…"
+                      : "None on file"
+                }
+              />
             </div>
           )}
         </CardContent>
@@ -426,9 +490,16 @@ function MembershipTab({ elationId }: { elationId: string | null }) {
         loading={subs.loading}
         error={subs.error}
         render={(s: any) => ({
-          primary: s.planName ?? s.plan ?? "Subscription",
-          secondary: [s.status, s.interval].filter(Boolean).join(" · "),
-          meta: s.amount != null ? `$${s.amount}` : "",
+          primary: s.lineItems?.[0]?.label ?? s.membershipTier ?? "Subscription",
+          secondary: [s.status, s.interval && `per ${s.interval}`]
+            .filter(Boolean)
+            .join(" · "),
+          meta: [
+            formatCents(s.lineItems?.[0]?.totalCents),
+            s.currentPeriodEnd && `thru ${formatDate(s.currentPeriodEnd)}`,
+          ]
+            .filter(Boolean)
+            .join(" · "),
         })}
       />
 
@@ -439,13 +510,16 @@ function MembershipTab({ elationId }: { elationId: string | null }) {
         loading={invoices.loading}
         error={invoices.error}
         render={(inv: any) => ({
-          primary: inv.description ?? inv.number ?? "Invoice",
-          secondary: inv.status ?? "",
-          meta: inv.amount != null ? `$${inv.amount}` : "",
+          primary: inv.lineItems?.[0]?.label ?? "Invoice",
+          secondary: [inv.status, inv.periodStart && formatDate(inv.periodStart)]
+            .filter(Boolean)
+            .join(" · "),
+          meta: formatCents(inv.amountDueCents) ?? "",
         })}
       />
     </div>
   );
+
 }
 
 

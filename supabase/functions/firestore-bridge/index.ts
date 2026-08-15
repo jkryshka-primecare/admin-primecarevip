@@ -25,7 +25,13 @@ type RequestBody = {
   orderBy?: { field: string; direction?: "asc" | "desc" };
   limit?: number;
   cursor?: number; // simple offset cursor
+  includeRaw?: boolean; // keep verbose upstream payload blobs
 };
+
+// Verbatim Stripe payloads mirrored into Firestore. Multi-KB per document and
+// never rendered — dropped unless explicitly requested.
+const HEAVY_FIELDS = ["stripeInvoice", "stripeSubscription", "stripeCustomer", "raw"];
+
 
 // Read-only whitelist. Anything not listed here is rejected.
 const ALLOWED_COLLECTIONS = new Set([
@@ -252,18 +258,25 @@ Deno.serve(async (req) => {
     let data: unknown = parsed;
     let rowCount: number | null = null;
 
+    const strip = (doc: Record<string, unknown>) => {
+      if (body.includeRaw) return doc;
+      for (const f of HEAVY_FIELDS) delete doc[f];
+      return doc;
+    };
+
     if (upstream.ok) {
       if (body.id) {
-        data = decodeDoc(parsed as never);
+        data = strip(decodeDoc(parsed as never));
         rowCount = 1;
       } else {
         const rows = (parsed as { document?: never }[])
           .filter((r) => r && r.document)
-          .map((r) => decodeDoc(r.document as never));
+          .map((r) => strip(decodeDoc(r.document as never)));
         data = rows;
         rowCount = rows.length;
       }
     }
+
 
     await logPhiAccess(auth, req, {
       source: "firestore-bridge",
