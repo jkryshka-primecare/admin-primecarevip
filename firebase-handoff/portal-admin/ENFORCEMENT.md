@@ -72,7 +72,6 @@ single "Records" toggle governs both, matching what a member sees in the nav.
 
 ## getMyPatientRecord
 
-## getMyPatientRecord
 
 **Decision: this handler does NOT call `assertNotSuspended`.** It is the one
 endpoint the portal can always reach, so suspension is returned as state rather
