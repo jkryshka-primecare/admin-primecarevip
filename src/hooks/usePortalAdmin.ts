@@ -38,7 +38,9 @@ export const PORTAL_MODULES: { key: PortalModule; label: string; description: st
 export type PortalAccessState = {
   status?: "active" | "suspended" | string;
   modules?: Partial<Record<PortalModule, boolean>>;
-  hiddenItems?: { collection: string; id: string; label?: string; hiddenAt?: string }[];
+  hiddenItems?:
+    | { collection: string; id: string; label?: string; hiddenAt?: string }[]
+    | Record<string, unknown>;
   updatedAt?: string;
   updatedBy?: string;
 };

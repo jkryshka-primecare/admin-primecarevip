@@ -67,7 +67,7 @@ export default function PortalAdminPanel({ elationId }: { elationId: string | nu
   const access = snapshot?.access ?? {};
   const suspended = access.status === "suspended";
   const modules = access.modules ?? {};
-  const hidden = access.hiddenItems ?? [];
+  const hidden = normalizeHidden(access.hiddenItems);
 
   function guard(): boolean {
     if (!isAdmin) {
