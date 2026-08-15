@@ -88,18 +88,24 @@ exports.adminIssueInvite = functions
       return jsonError(res, gate.status, 'PERMISSION_DENIED', gate.reason);
     }
 
-    const body = typeof req.body === 'string' ? JSON.parse(req.body || '{}') : req.body || {};
+    let body;
+    try {
+      body = typeof req.body === 'string' ? JSON.parse(req.body || '{}') : req.body || {};
+    } catch (e) {
+      return jsonError(res, 400, 'INVALID_ARGUMENT', 'MALFORMED_BODY');
+    }
     const elationPatientId = String(body.elationPatientId || '').trim();
     const actor = String(body.actor || '').trim().toLowerCase();
     const reason = String(body.reason || '').slice(0, 500);
     const reissue = body.reissue === true;
-    const toOverride = typeof body.toOverride === 'string' ? body.toOverride.trim() : null;
 
     if (!elationPatientId) return jsonError(res, 400, 'INVALID_ARGUMENT', 'PATIENT_ID_REQUIRED');
     if (!actor) return jsonError(res, 400, 'INVALID_ARGUMENT', 'ACTOR_REQUIRED');
 
-    // Roster doc is the only source for the recipient address — the caller
-    // cannot direct an invite at an arbitrary email.
+    // Roster doc is the only source for the recipient address. There is no
+    // caller-supplied override: the emailed link is a single-use account-claim
+    // token, so directing it at an arbitrary address would be an account-
+    // takeover path. Wrong roster email => fix the roster, then invite.
     let patient;
     try {
       const snap = await admin.firestore().collection('patients').doc(elationPatientId).get();
@@ -114,7 +120,7 @@ exports.adminIssueInvite = functions
       return jsonError(res, 409, 'ALREADY_EXISTS', 'ALREADY_CLAIMED',
         'This member has already activated their portal account.');
     }
-    const recipient = toOverride || patient.email;
+    const recipient = typeof patient.email === 'string' ? patient.email.trim() : '';
     if (!recipient) return jsonError(res, 422, 'FAILED_PRECONDITION', 'NO_EMAIL_ON_ROSTER');
 
     if (reissue) {
@@ -153,7 +159,9 @@ exports.adminIssueInvite = functions
       // The token is live but undelivered. Revoke it so a half-sent invite
       // never leaves a dangling claim link behind.
       try { await revokeLiveTokens(elationPatientId, actor, 'send failed'); } catch (_) { /* noop */ }
-      await audit({ action: 'invite_send_failed', elationPatientId, actor, reason, ok: false });
+      await audit({
+        action: 'invite_send_failed', elationPatientId, actor, reason, sentTo: recipient, ok: false,
+      });
       return jsonError(res, 502, 'UNAVAILABLE', 'EMAIL_SEND_FAILED');
     }
 
@@ -162,7 +170,9 @@ exports.adminIssueInvite = functions
       elationPatientId,
       actor,
       reason,
-      override: Boolean(toOverride),
+      // The destination is the whole risk surface for this action, so it is
+      // recorded verbatim. It is roster data, never caller-supplied.
+      sentTo: recipient,
       ok: true,
     });
     log('adminIssueInvite', 'sent', { elationPatientId, reissue });

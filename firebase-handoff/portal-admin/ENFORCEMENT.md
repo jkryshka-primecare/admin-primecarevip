@@ -6,6 +6,10 @@ the wire. Apply this to every `get*` handler.
 
 ## Pattern
 
+Applies to every list handler in the table below. **`getMyPatientRecord` is the
+one deliberate exception** — see its section at the bottom.
+
+
 Each handler already runs, in this order: `verifyPatientToken` → reject the
 `unauthenticated` sentinel ("Guard B") → **`resolvePatientForCaller(uid)`**
 (from `core/services/elation/resolvePatientForCaller`; the returned doc's `.id`
@@ -39,6 +43,11 @@ if (!isModuleVisible(access, 'labs')) {
 }
 ```
 
+`assertNotSuspended` and `getPortalAccess` each read the same
+`portalAccess/{elationPatientId}` doc. If you prefer one read per request, call
+`getPortalAccess` first and check `access.status === 'suspended'` yourself —
+but then you lose the fail-closed behaviour on a Firestore error, so only do it
+if you also treat a read error as a denial.
 
 Then filter the result set right before responding, using **that handler's own
 response variable and shape** — the list handlers return `{ items }`, but
@@ -68,18 +77,35 @@ single "Records" toggle governs both, matching what a member sees in the nav.
 
 ## getMyPatientRecord
 
-Return the resolved module map so the portal can hide navigation for sections
-the member cannot open, and surface suspension as a first-class state:
+
+**Decision: this handler does NOT call `assertNotSuspended`.** It is the one
+endpoint the portal can always reach, so suspension is returned as state rather
+than as a `403`. That is what lets the portal render the paused screen instead
+of a generic error, and it is why every other handler still fails closed.
 
 ```js
 const access = await getPortalAccess(elationPatientId);
+
+if (access.status === 'suspended') {
+  // 200, but no PHI: identity and status only.
+  return res.status(200).json({
+    payload: { portal: { status: 'suspended', modules: {} } },
+  });
+}
+
 payload.portal = { status: access.status, modules: access.modules };
 ```
+
+Because `getPortalAccess` fails open, a Firestore outage here yields a normal
+record rather than a false paused screen — while the PHI list endpoints, which
+do call `assertNotSuspended`, still deny. Suspension therefore never leaks data
+through this path: it returns no clinical payload of its own.
 
 Do **not** send `hiddenItems` to the client — item-level suppression is a
 server-side concern and the id list is itself a hint about what exists.
 
 ## Two things to keep true
+
 
 1. `moduleUnavailable: true` with an empty list is not the same as "no results".
    The portal should say the section is unavailable, not "no labs on file" —

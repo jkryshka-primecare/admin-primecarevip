@@ -91,7 +91,10 @@ async function requireAdminCaller(req, expectedAudience) {
   if (!GOOGLE_ISSUERS.includes(claims.iss)) {
     return { ok: false, status: 401, reason: 'BAD_ISSUER' };
   }
-  if (expectedAudience && claims.aud !== expectedAudience) {
+  // Fail CLOSED on audience: a handler that forgets to pass its own URL must
+  // not silently accept a token minted for a different function.
+  if (!expectedAudience) return { ok: false, status: 500, reason: 'AUDIENCE_NOT_CONFIGURED' };
+  if (claims.aud !== expectedAudience) {
     return { ok: false, status: 401, reason: 'BAD_AUDIENCE' };
   }
   const callerEmail = String(claims.email || '').toLowerCase();

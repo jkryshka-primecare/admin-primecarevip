@@ -129,3 +129,16 @@ Each step reverses on its own, with no data to unwind:
   `care.primecarevip.com` is repointed, after a parity review and your sign-off.
 - Any write to Elation. Demographics remain view-and-flag only.
 - Bulk invite waves. Single invites must be proven first.
+
+### Two audit trails, two names
+
+Both exist by design and both must show the action:
+
+- **`portalAdminAudit`** (Firestore, written by the Cloud Functions) — the
+  portal-side record of what was actually mutated.
+- **`portal_admin_actions`** (Prime Care OS database, written by the
+  `portal-admin` edge function) — the staff-side record of who clicked what and
+  why, tied to a verified staff session.
+
+When verifying go-live, check both. A row in one and not the other means the
+call failed partway and should be investigated.
