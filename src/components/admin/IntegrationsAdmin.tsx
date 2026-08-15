@@ -1,5 +1,7 @@
 import { Activity, Link2, CheckCircle2, Clock, ExternalLink } from "lucide-react";
 import { motion } from "framer-motion";
+import ConnectionHealth from "@/components/admin/ConnectionHealth";
+
 
 type IntegrationStatus = "ready" | "planned" | "live";
 
