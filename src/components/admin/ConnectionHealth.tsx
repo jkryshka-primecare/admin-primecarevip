@@ -50,9 +50,30 @@ type Result = {
   checkedAt: string;
 };
 
+type HistoryRow = {
+  id: string;
+  integration: string;
+  ok: boolean;
+  http_status: number | null;
+  elapsed_ms: number | null;
+  error_message: string | null;
+  checked_at: string;
+};
+
 export default function ConnectionHealth() {
   const [results, setResults] = useState<Record<string, Result>>({});
   const [running, setRunning] = useState<Record<string, boolean>>({});
+  const [history, setHistory] = useState<HistoryRow[]>([]);
+
+  useEffect(() => {
+    supabase
+      .from("integration_health_checks")
+      .select("id, integration, ok, http_status, elapsed_ms, error_message, checked_at")
+      .order("checked_at", { ascending: false })
+      .limit(10)
+      .then(({ data }) => setHistory((data as HistoryRow[]) ?? []));
+  }, []);
+
 
   const runProbe = useCallback(async (probe: Probe) => {
     setRunning((r) => ({ ...r, [probe.key]: true }));
