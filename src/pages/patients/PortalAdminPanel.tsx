@@ -56,6 +56,10 @@ export default function PortalAdminPanel({ elationId }: { elationId: string | nu
   const { snapshot, loading, error, refetch } = usePortalAccess(elationId);
   const { issueInvite, revokeInvite, setAccess } = usePortalMutations(elationId);
   const [reason, setReason] = useState("");
+  const [hideCollection, setHideCollection] = useState<PortalModule>("labs");
+  const [hideId, setHideId] = useState("");
+  const [hideLabel, setHideLabel] = useState("");
+
 
   const busy =
     issueInvite.isPending || revokeInvite.isPending || setAccess.isPending;
