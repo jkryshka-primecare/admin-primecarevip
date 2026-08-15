@@ -51,6 +51,17 @@ Mirrors `useHintResource` — list + detail fetch, loading/error state, TanStack
 - Add a Firestore row to Administration -> Integrations -> Connection Health and to the daily automated check, so a broken service account is caught the next morning.
 - Document in security memory that the bridge is read-only, staff-gated, and PHI-logged.
 
+## Live-production safety rule (applies to every integration, permanently)
+
+Elation, Hint, and Firestore are LIVE production systems holding real patient records. Standing rule:
+
+- Read-only by default. No create, update, or delete against any live system without explicit per-action approval from you first.
+- The Firestore bridge accepts only `get` and `runQuery`; write verbs are not implemented, so a write is impossible even by mistake.
+- The Elation and Hint proxies stay restricted to GET. Any future write capability is proposed to you as its own change and built behind an explicit confirmation step in the UI.
+- No destructive testing against production. Verification uses reads only.
+- This rule is saved to project memory so it carries into every future session.
+
+
 ## Out of scope for this phase
 
 - Any write path back into Firestore.
