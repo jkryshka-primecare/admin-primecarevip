@@ -12,20 +12,28 @@ import { supabase } from "@/integrations/supabase/client";
 
 export type PortalModule =
   | "labs"
+  | "imaging"
   | "medications"
+  | "records"
   | "appointments"
-  | "documents"
-  | "messages"
-  | "billing";
+  | "conditions"
+  | "allergies";
 
+/**
+ * These keys are the contract with the portal's Cloud Functions — they must
+ * stay identical to MODULES in core/services/patient/portalAccess.js, since
+ * each enforcing handler checks its own key by name.
+ */
 export const PORTAL_MODULES: { key: PortalModule; label: string; description: string }[] = [
   { key: "labs", label: "Lab results", description: "Results released to the member" },
+  { key: "imaging", label: "Imaging", description: "Radiology reports and scans" },
   { key: "medications", label: "Medications", description: "Active medication list" },
+  { key: "records", label: "Documents & letters", description: "Records, letters and uploads" },
   { key: "appointments", label: "Appointments", description: "Upcoming and past visits" },
-  { key: "documents", label: "Documents", description: "Uploaded files and forms" },
-  { key: "messages", label: "Messages", description: "Secure care-team messaging" },
-  { key: "billing", label: "Billing", description: "Invoices and payment method" },
+  { key: "conditions", label: "Conditions", description: "Problem list" },
+  { key: "allergies", label: "Allergies", description: "Recorded allergies" },
 ];
+
 
 export type PortalAccessState = {
   status?: "active" | "suspended" | string;
