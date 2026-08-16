@@ -218,13 +218,10 @@ async function resolvePatient(member) {
     return { id: null, confident: false, reason: 'NO_MATCH', candidates: 0 };
   }
 
-  // Email may only narrow an already name+DOB-matched set — never widen it,
-  // and never act alone.
-  if (candidates.length > 1 && email) {
-    const byEmail = candidates.filter((p) => lower(p.email) === email);
-    if (byEmail.length === 1) candidates = byEmail;
-  }
-
+  // Two charts agreeing on first + last + DOB are a duplicate-chart data
+  // problem. We deliberately do NOT break the tie on email: a shared family
+  // email is not identity evidence, and picking wrong hands one member
+  // another person's chart. Route to a human instead.
   if (candidates.length > 1) {
     return {
       id: null,
@@ -233,6 +230,7 @@ async function resolvePatient(member) {
       candidates: candidates.length,
     };
   }
+
 
   return {
     id: String(candidates[0].id),
