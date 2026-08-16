@@ -90,7 +90,7 @@ function normalizeHidden(raw: unknown): HiddenEntry[] {
             collection: String(h.collection ?? h.module ?? "unknown"),
             id: String(h.id ?? ""),
             label: h.label ? String(h.label) : undefined,
-            hiddenAt: h.hiddenAt ? String(h.hiddenAt) : undefined,
+            hiddenAt: h.hiddenAt ?? undefined,
           },
     );
   }
@@ -104,7 +104,7 @@ function normalizeHidden(raw: unknown): HiddenEntry[] {
               collection: String(it.collection ?? collection),
               id: String(it.id ?? ""),
               label: it.label ? String(it.label) : undefined,
-              hiddenAt: it.hiddenAt ? String(it.hiddenAt) : undefined,
+              hiddenAt: it.hiddenAt ?? undefined,
             },
       );
     });
