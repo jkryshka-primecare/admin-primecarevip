@@ -1,10 +1,12 @@
 import { useMemo, useState } from "react";
-import { AlertCircle, Loader2, RefreshCw, Search, Users } from "lucide-react";
+import { AlertCircle, Loader2, RefreshCw, Search, UserPlus, Users } from "lucide-react";
 import {
   useMemberReconciliation,
   BUCKET_LABELS,
   type ReconBucket,
 } from "@/hooks/useMemberReconciliation";
+import { useAuth } from "@/hooks/useAuth";
+import ProvisionMissingDialog from "@/components/firestore/ProvisionMissingDialog";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
