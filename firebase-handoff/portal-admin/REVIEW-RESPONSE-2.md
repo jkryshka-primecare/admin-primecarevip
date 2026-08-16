@@ -76,3 +76,26 @@ pool exists.
 unblocked and can proceed in parallel: branch, land the six files, the
 `index.js` export fix, the enforcement patches, both CI `FUNCTIONS` arrays,
 staging matrix, PR, merge.
+
+---
+
+## Hide-item no-op fix (rows 6–7)
+
+**Client (OS app — shipped):** `usePortalAdmin.setAccess` now translates the
+panel's `hideItem` / `unhideItem` intent into the backend's `hiddenItems`
+module-keyed map. It re-reads the access snapshot immediately before the write
+and computes the next array from that fresh read.
+
+*Known limitation:* the read-modify-write happens on the client, so two
+concurrent hides on the same member can clobber each other (last write wins).
+Acceptable for a single-operator control plane; it disappears once the atomic
+server-side op below is deployed and the client switches to sending
+`hideItem` / `unhideItem` straight through.
+
+**Backend (this repo — own PR through CI):**
+1. `adminSetPortalAccess` now rejects unknown top-level patch keys with
+   `400 UNKNOWN_PATCH_KEY` (and `400 EMPTY_PATCH`). An unrecognized key can no
+   longer return `ok:true` and write a misleading audit row.
+2. `hideItem` / `unhideItem` are first-class patch ops, validated for a known
+   module and a non-empty, case-sensitive id, and applied **atomically inside
+   `setPortalAccess`'s transaction** (read current list, add/remove id, write).
