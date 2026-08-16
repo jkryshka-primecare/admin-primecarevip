@@ -124,6 +124,8 @@ export default function MemberAppExplorer() {
             onClick={() => {
               setActive(c.id);
               setExpanded(null);
+              setStatus("all");
+              setSearch("");
             }}
             className={cn(
               "px-3 py-1.5 rounded-full text-xs font-medium transition-colors",
@@ -137,6 +139,42 @@ export default function MemberAppExplorer() {
         ))}
       </div>
 
+      <div className="flex flex-wrap items-center gap-3">
+        {hasStatus && (
+          <div className="flex flex-wrap gap-1 bg-muted/50 border border-border rounded-full p-1 w-fit">
+            {([
+              { id: "all", label: "All" },
+              { id: "active", label: "Active" },
+              { id: "invited", label: "Invited" },
+              { id: "other", label: "Other" },
+            ] as const).map((f) => (
+              <button
+                key={f.id}
+                onClick={() => setStatus(f.id)}
+                className={cn(
+                  "px-3 py-1 rounded-full text-xs font-medium transition-colors",
+                  status === f.id
+                    ? "bg-accent text-accent-foreground"
+                    : "text-muted-foreground hover:text-foreground",
+                )}
+              >
+                {f.label}
+                <span className="ml-1.5 font-mono text-[10px] opacity-70">{counts[f.id]}</span>
+              </button>
+            ))}
+          </div>
+        )}
+        <div className="relative min-w-[220px] flex-1 max-w-sm">
+          <Search className="absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
+          <Input
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            placeholder="Search name, email, phone or ID…"
+            className="h-9 pl-8 text-xs"
+          />
+        </div>
+      </div>
+
       <Card>
         <CardHeader className="pb-3">
           <CardTitle className="text-base flex items-center gap-2">
@@ -144,12 +182,17 @@ export default function MemberAppExplorer() {
             {COLLECTIONS.find((c) => c.id === active)?.label}
             {!loading && !error && (
               <Badge variant="secondary" className="font-mono text-[10px]">
-                {docs.length}
+                {rows.length.toLocaleString()}
+                {rows.length !== docs.length && ` / ${docs.length.toLocaleString()}`}
               </Badge>
+            )}
+            {fetching && !loading && (
+              <Loader2 className="h-3.5 w-3.5 animate-spin text-muted-foreground" />
             )}
           </CardTitle>
         </CardHeader>
         <CardContent>
+
           {error ? (
             <div className="flex items-start gap-2 rounded-md border border-destructive/40 bg-destructive/10 p-3 text-sm text-destructive">
               <AlertCircle className="h-4 w-4 shrink-0" />
