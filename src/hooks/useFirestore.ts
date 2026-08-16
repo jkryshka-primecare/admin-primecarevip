@@ -31,7 +31,17 @@ export type FirestoreQuery = {
   orderBy?: { field: string; direction?: "asc" | "desc" };
   limit?: number;
   cursor?: number;
+  /**
+   * Page through the whole collection instead of a single request.
+   * The bridge caps each page at 300 rows, so this loops the offset cursor
+   * until a short page comes back (or the safety ceiling is hit).
+   */
+  fetchAll?: boolean;
 };
+
+/** Never pull more than this many documents in one fetchAll sweep. */
+const MAX_DOCS = 10_000;
+const PAGE_SIZE = 300;
 
 /**
  * READ-ONLY. The bridge exposes no write path — live member records are
@@ -53,9 +63,35 @@ export function useFirestoreList(
   query: FirestoreQuery = {},
   enabled = true,
 ) {
+  const { fetchAll, ...rest } = query;
+
   const result = useQuery({
     queryKey: ["firestore", collection, "list", query],
-    queryFn: () => callBridge<FirestoreDoc[]>({ collection, ...query }),
+    queryFn: async () => {
+      if (!fetchAll) return callBridge<FirestoreDoc[]>({ collection, ...rest });
+
+      const all: FirestoreDoc[] = [];
+      let cursor = 0;
+      // eslint-disable-next-line no-constant-condition
+      while (true) {
+        const page = await callBridge<FirestoreDoc[]>({
+          ...rest,
+          collection,
+          limit: PAGE_SIZE,
+          cursor,
+        });
+        const rows = page.data ?? [];
+        all.push(...rows);
+        if (rows.length < PAGE_SIZE || all.length >= MAX_DOCS) break;
+        cursor += PAGE_SIZE;
+      }
+      return {
+        ok: true,
+        status: 200,
+        pagination: { total: all.length },
+        data: all,
+      } as FirestoreEnvelope<FirestoreDoc[]>;
+    },
     enabled,
     staleTime: 2 * 60 * 1000,
     retry: false,
@@ -65,10 +101,12 @@ export function useFirestoreList(
     docs: result.data?.data ?? [],
     total: result.data?.pagination?.total ?? null,
     loading: result.isLoading,
+    fetching: result.isFetching,
     error: result.error instanceof Error ? result.error.message : null,
     refetch: result.refetch,
   };
 }
+
 
 export function useFirestoreDoc(
   collection: FirestoreCollection,
