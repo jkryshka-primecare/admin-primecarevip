@@ -165,7 +165,7 @@ function dobOf(patient) {
  * @returns {Promise<{id:string|null, confident:boolean, reason:string, candidates:number}>}
  *
  * `confident: true` is returned ONLY when exactly one non-deleted chart matches
- * first name + last name + DOB (email may narrow further, never widen).
+ * first name + last name + DOB (email is never a tiebreak).
  * Two charts with identical first+last+DOB return AMBIGUOUS_MATCH. Everything
  * else — zero matches, several matches, an API failure — comes back
  * confident:false and the member stays unprovisioned.
@@ -174,7 +174,7 @@ async function resolvePatient(member) {
   const firstName = lower(member && member.firstName);
   const lastName = lower(member && member.lastName);
   const dob = norm(member && member.dob).slice(0, 10);
-  const email = lower(member && member.email);
+  // Email is intentionally unused: it is never a match key or tiebreak here.
 
   // First name is REQUIRED in the key. A single last-name + DOB hit is not
   // enough: a twin or same-DOB sibling who has no Elation chart yet would
@@ -218,13 +218,10 @@ async function resolvePatient(member) {
     return { id: null, confident: false, reason: 'NO_MATCH', candidates: 0 };
   }
 
-  // Email may only narrow an already name+DOB-matched set — never widen it,
-  // and never act alone.
-  if (candidates.length > 1 && email) {
-    const byEmail = candidates.filter((p) => lower(p.email) === email);
-    if (byEmail.length === 1) candidates = byEmail;
-  }
-
+  // Two charts agreeing on first + last + DOB are a duplicate-chart data
+  // problem. We deliberately do NOT break the tie on email: a shared family
+  // email is not identity evidence, and picking wrong hands one member
+  // another person's chart. Route to a human instead.
   if (candidates.length > 1) {
     return {
       id: null,
@@ -233,6 +230,7 @@ async function resolvePatient(member) {
       candidates: candidates.length,
     };
   }
+
 
   return {
     id: String(candidates[0].id),

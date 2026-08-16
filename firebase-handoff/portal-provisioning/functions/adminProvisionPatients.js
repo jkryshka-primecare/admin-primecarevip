@@ -64,12 +64,19 @@ async function audit(entry) {
 }
 
 /**
- * Existing-record guard. Families here share an email, so a match needs the
- * date of birth in the key — email alone would happily collide a child with
- * their parent and silently skip a real member.
+ * Existing-record guard. Families here share an email, so a match needs BOTH
+ * the date of birth AND the name in the key. Email + DOB alone would match a
+ * twin/sibling on the shared family email: the new member would be wrongly
+ * skipped as ALREADY_EXISTS and the sibling's record would get the wrong
+ * hintPatientId backfilled onto it.
  */
 async function findExisting(db, member) {
   const col = db.collection('patients');
+
+  const sameIdentity = (data) =>
+    lower(data.firstName) === lower(member.firstName) &&
+    lower(data.lastName) === lower(member.lastName) &&
+    lower(data.dob) === lower(member.dob);
 
   if (member.elationPatientId) {
     const byId = await col.doc(member.elationPatientId).get();
@@ -78,21 +85,14 @@ async function findExisting(db, member) {
 
   if (member.email) {
     const snap = await col.where('email', '==', member.email).get();
-    const hit = snap.docs.find((d) => lower((d.data() || {}).dob) === lower(member.dob));
+    const hit = snap.docs.find((d) => sameIdentity(d.data() || {}));
     if (hit) return hit;
   }
 
   const snap = await col.where('dob', '==', member.dob).get();
-  return (
-    snap.docs.find((d) => {
-      const data = d.data() || {};
-      return (
-        lower(data.firstName) === lower(member.firstName) &&
-        lower(data.lastName) === lower(member.lastName)
-      );
-    }) || null
-  );
+  return snap.docs.find((d) => sameIdentity(d.data() || {})) || null;
 }
+
 
 exports.adminProvisionPatients = functions
   .runWith({ timeoutSeconds: 540, memory: '512MB' })
