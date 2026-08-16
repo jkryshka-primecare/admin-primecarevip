@@ -91,6 +91,8 @@ export function useMemberReconciliation(enabled = true) {
       out.push({
         key: `hint:${m.hintId}`,
         name: m.name,
+        firstName: m.firstName,
+        lastName: m.lastName,
         email: m.email,
         phone: m.phone,
         dob: m.dob,
@@ -110,6 +112,8 @@ export function useMemberReconciliation(enabled = true) {
       out.push({
         key: `portal:${id}`,
         name: portalName(doc),
+        firstName: String(doc.firstName ?? ""),
+        lastName: String(doc.lastName ?? ""),
         email: doc.email ? String(doc.email) : null,
         phone: doc.phone ? String(doc.phone) : null,
         dob: doc.dob ? String(doc.dob) : null,
@@ -122,7 +126,11 @@ export function useMemberReconciliation(enabled = true) {
       });
     }
 
-    return out.sort((a, b) => a.name.localeCompare(b.name));
+    // Smoke-test fixtures are real documents in production. They must never
+    // appear in a count that a bulk write is sized against.
+    return out
+      .filter((r) => !isTestFixture(r.elationId))
+      .sort((a, b) => a.name.localeCompare(b.name));
   }, [hint.members, firestore.docs]);
 
   const counts = useMemo(() => {
@@ -136,21 +144,33 @@ export function useMemberReconciliation(enabled = true) {
     return c;
   }, [rows]);
 
+  /**
+   * The exact, reviewable set of active members with no portal record — the
+   * only rows a bulk provision may ever act on. Fixtures are already gone.
+   */
+  const missingMembers = useMemo(
+    () => rows.filter((r) => r.bucket === "member_no_portal" && r.hintId),
+    [rows],
+  );
+
   const totals = useMemo(() => {
     const activeMembers =
       counts.member_active + counts.member_invited + counts.member_no_portal;
+    const fixtures = firestore.docs.filter((d) => isTestFixture(d.id)).length;
     return {
       activeMembers,
       withPortal: counts.member_active + counts.member_invited,
       hintPatients: hint.members.length,
-      portalRecords: firestore.docs.length,
+      portalRecords: firestore.docs.length - fixtures,
+      fixturesExcluded: fixtures,
     };
-  }, [counts, hint.members.length, firestore.docs.length]);
+  }, [counts, hint.members.length, firestore.docs]);
 
   return {
     rows,
     counts,
     totals,
+    missingMembers,
     loading: hint.loading || firestore.loading,
     fetching: hint.fetching || firestore.fetching,
     error: hint.error ?? firestore.error,
