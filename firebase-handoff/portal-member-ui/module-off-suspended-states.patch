@@ -1,0 +1,328 @@
+diff --git a/artifacts/web-member/src/App.jsx b/artifacts/web-member/src/App.jsx
+index a7fd730..0e33ba0 100644
+--- a/artifacts/web-member/src/App.jsx
++++ b/artifacts/web-member/src/App.jsx
+@@ -86,12 +86,55 @@ function ErrorScreen({ error, onRetry }) {
+   );
+ }
+ 
++function AccessPausedScreen() {
++  return (
++    <FullScreen>
++      <div style={{ maxWidth: 380, textAlign: 'center', background: '#fff', border: `1px solid ${COLORS.border}`, borderRadius: 12, padding: 28 }}>
++        <h1 style={{ fontSize: 18, fontWeight: 700, color: COLORS.navy, margin: 0 }}>Portal access is paused</h1>
++        <p style={{ fontSize: 13, color: COLORS.textMuted, marginTop: 8, lineHeight: 1.5 }}>
++          Your care team has paused access to your health portal. Please contact the practice to have it restored.
++        </p>
++        <div style={{ marginTop: 14, fontSize: 12, color: COLORS.textMuted }}>
++          24/7 Concierge: <a href="tel:+15619482020" style={{ color: '#0077aa', textDecoration: 'none', fontWeight: 600 }}>(561) 948-2020</a>
++        </div>
++        <button type="button" onClick={() => signOut(auth)} style={{ marginTop: 16, background: COLORS.accent, color: COLORS.navy, border: 'none', borderRadius: 6, padding: '10px 16px', fontSize: 13, fontWeight: 600, cursor: 'pointer', fontFamily: FONT }}>
++          Sign out
++        </button>
++      </div>
++    </FullScreen>
++  );
++}
++
++function ModuleOffScreen() {
++  return (
++    <FullScreen>
++      <div style={{ maxWidth: 380, textAlign: 'center', background: '#fff', border: `1px solid ${COLORS.border}`, borderRadius: 12, padding: 28 }}>
++        <h1 style={{ fontSize: 18, fontWeight: 700, color: COLORS.navy, margin: 0 }}>This section is turned off</h1>
++        <p style={{ fontSize: 13, color: COLORS.textMuted, marginTop: 8, lineHeight: 1.5 }}>
++          Your care team has turned this section off for now. Nothing is wrong with your account — please contact the practice if you need this information.
++        </p>
++        <div style={{ marginTop: 14, fontSize: 12, color: COLORS.textMuted }}>
++          24/7 Concierge: <a href="tel:+15619482020" style={{ color: '#0077aa', textDecoration: 'none', fontWeight: 600 }}>(561) 948-2020</a>
++        </div>
++      </div>
++    </FullScreen>
++  );
++}
++
+ function PatientGate() {
+   const { status, patient, error, reload } = usePatientRecord();
+ 
+   if (status === 'loading') {
+     return <FullScreen><div style={{ color: COLORS.textMuted, fontSize: 14 }}>Loading your record…</div></FullScreen>;
+   }
++  // Suspension is a care-team decision, not a failure: getMyPatientRecord answers
++  // 200 with portal.status 'suspended' and no PHI. Calm screen, no retry loop.
++  if (status === 'suspended') {
++    return <AccessPausedScreen />;
++  }
++  if (status === 'module_off') {
++    return <ModuleOffScreen />;
++  }
+   if (status === 'error') {
+     return <ErrorScreen error={error} onRetry={reload} />;
+   }
+diff --git a/artifacts/web-member/src/components/ReportListPane.jsx b/artifacts/web-member/src/components/ReportListPane.jsx
+index 680718a..14c615f 100644
+--- a/artifacts/web-member/src/components/ReportListPane.jsx
++++ b/artifacts/web-member/src/components/ReportListPane.jsx
+@@ -5,6 +5,7 @@
+ import { useMemo, useState } from 'react';
+ import { IconChevronRight, IconFilter, IconArrowsSort } from '@tabler/icons-react';
+ import { FONT } from '../theme.js';
++import { MODULE_OFF_BODY, SUSPENDED_BODY } from './clinical.jsx';
+ 
+ const ACCENT = '#00aaef';
+ 
+@@ -283,6 +284,10 @@ export default function ReportListPane({
+       <div className="docbrowser-list">
+         {status === 'loading' ? (
+           <div className="docbrowser-status">Loading…</div>
++        ) : status === 'module_off' ? (
++          <div className="docbrowser-status">{MODULE_OFF_BODY}</div>
++        ) : status === 'suspended' ? (
++          <div className="docbrowser-status">{SUSPENDED_BODY}</div>
+         ) : status === 'error' ? (
+           <div className="docbrowser-status docbrowser-status-err">
+             {loadErrorText}
+diff --git a/artifacts/web-member/src/components/clinical.jsx b/artifacts/web-member/src/components/clinical.jsx
+index 91ce822..2a600e4 100644
+--- a/artifacts/web-member/src/components/clinical.jsx
++++ b/artifacts/web-member/src/components/clinical.jsx
+@@ -108,6 +108,34 @@ export function ClinicalRecordCard({ title, badge, children }) {
+   );
+ }
+ 
++// Calm, non-alarming states for care-team-controlled visibility. Neither is an
++// error: no red, no "Try again" (retrying cannot change the answer) — a member
++// who sees an outage-styled screen calls support.
++export function PortalNotice({ title, body }) {
++  return (
++    <div style={{ maxWidth: 460, background: '#fff', border: `1px solid ${COLORS.border}`, borderRadius: 12, padding: 22, fontFamily: FONT }}>
++      <div style={{ fontSize: 15, fontWeight: 700, color: COLORS.navy }}>{title}</div>
++      <div style={{ fontSize: 13, color: COLORS.textMuted, marginTop: 6, lineHeight: 1.5 }}>{body}</div>
++      <div style={{ marginTop: 12, fontSize: 12, color: COLORS.textMuted }}>
++        Questions? 24/7 Concierge: <a href="tel:+15619482020" style={{ color: '#0077aa', textDecoration: 'none', fontWeight: 600 }}>(561) 948-2020</a>
++      </div>
++    </div>
++  );
++}
++
++export const MODULE_OFF_TITLE = 'This section is turned off';
++export const MODULE_OFF_BODY = 'Your care team has turned this section off for now. Nothing is wrong with your account — please contact the practice if you need this information.';
++export const SUSPENDED_TITLE = 'Portal access is paused';
++export const SUSPENDED_BODY = 'Your care team has paused access to your health portal. Please contact the practice to have it restored.';
++
++export function ModuleOffNotice() {
++  return <PortalNotice title={MODULE_OFF_TITLE} body={MODULE_OFF_BODY} />;
++}
++
++export function AccessPausedNotice() {
++  return <PortalNotice title={SUSPENDED_TITLE} body={SUSPENDED_BODY} />;
++}
++
+ export function ClinicalScreen({ title, Icon, status, error, reload, itemCount, emptyText, children, hideTitle = false }) {
+   return (
+     <div style={{ display: 'flex', flexDirection: 'column', gap: 16, fontFamily: FONT }}>
+@@ -122,6 +150,10 @@ export function ClinicalScreen({ title, Icon, status, error, reload, itemCount,
+         <div style={{ fontSize: 14, color: COLORS.textMuted, padding: '24px 0' }}>Loading…</div>
+       )}
+ 
++      {status === 'module_off' && <ModuleOffNotice />}
++
++      {status === 'suspended' && <AccessPausedNotice />}
++
+       {status === 'error' && (() => {
+         const f = friendlyError(error);
+         return (
+diff --git a/artifacts/web-member/src/hooks/useClinicalData.js b/artifacts/web-member/src/hooks/useClinicalData.js
+index f403dda..200843e 100644
+--- a/artifacts/web-member/src/hooks/useClinicalData.js
++++ b/artifacts/web-member/src/hooks/useClinicalData.js
+@@ -11,6 +11,8 @@ import { useAuth } from '../auth/AuthContext.jsx';
+  *   'loading' — fetch in flight
+  *   'ready'   — success; `items` is the array (may be empty = genuinely no data)
+  *   'error'   — `error` is a parseApiError shape; branch on error.reason
++ *   'module_off' — care team turned this section off (200 { moduleUnavailable: true })
++ *   'suspended'  — portal access paused for this member (403 ACCESS_SUSPENDED)
+  *
+  * @param {(getIdToken) => Promise<{kind:'data',items}|{kind:'error',error}>} fetcher
+  *        one of fetchMyProblems / fetchMyAllergies / fetchMyLabs from clinicalApi.js
+@@ -44,6 +46,12 @@ export function useClinicalData(fetcher) {
+     if (result.kind === 'data') {
+       setItems(result.items);
+       setStatus('ready');
++    } else if (result.kind === 'moduleOff') {
++      setItems([]);
++      setStatus('module_off');
++    } else if (result.kind === 'suspended') {
++      setItems([]);
++      setStatus('suspended');
+     } else {
+       setError(result.error);
+       setStatus('error');
+diff --git a/artifacts/web-member/src/hooks/usePatientRecord.js b/artifacts/web-member/src/hooks/usePatientRecord.js
+index 8cffe5d..7fb4873 100644
+--- a/artifacts/web-member/src/hooks/usePatientRecord.js
++++ b/artifacts/web-member/src/hooks/usePatientRecord.js
+@@ -9,6 +9,8 @@ import { fetchMyPatientRecord } from '../services/api/patientApi.js';
+  *   'loading'  — initial fetch in flight
+  *   'ready'    — patient loaded (demographics in `patient`)
+  *   'error'    — terminal/transient error (see `error`, parseApiError shape)
++ *   'suspended'— portal access paused by the care team (graceful screen, no retry loop)
++ *   'module_off' — record summary turned off by the care team
+  *
+  * reload(): re-runs the initial fetch (used by the error screen's retry).
+  *
+@@ -33,6 +35,12 @@ export function usePatientRecord() {
+     if (result.kind === 'record') {
+       setPatient(result.patient);
+       setStatus('ready');
++    } else if (result.kind === 'suspended') {
++      setPatient(null);
++      setStatus('suspended');
++    } else if (result.kind === 'moduleOff') {
++      setPatient(null);
++      setStatus('module_off');
+     } else {
+       setError(result.error);
+       setStatus('error');
+diff --git a/artifacts/web-member/src/screens/Dashboard.jsx b/artifacts/web-member/src/screens/Dashboard.jsx
+index 4d1db64..aa0f934 100644
+--- a/artifacts/web-member/src/screens/Dashboard.jsx
++++ b/artifacts/web-member/src/screens/Dashboard.jsx
+@@ -101,6 +101,10 @@ function ApptSection({ label, items, emptyText, status, linkTo, showChevron = fa
+       <div className="dash-apptlist">
+         {status === 'loading' ? (
+           <div className="dash-empty">Loading…</div>
++        ) : status === 'module_off' ? (
++          <div className="dash-empty">Turned off by your care team</div>
++        ) : status === 'suspended' ? (
++          <div className="dash-empty">Portal access is paused</div>
+         ) : status === 'error' ? (
+           <div className="dash-empty">Could not load appointments.</div>
+         ) : items.length > 0 ? (
+diff --git a/artifacts/web-member/src/screens/Imaging.jsx b/artifacts/web-member/src/screens/Imaging.jsx
+index 6f892bf..3053ed8 100644
+--- a/artifacts/web-member/src/screens/Imaging.jsx
++++ b/artifacts/web-member/src/screens/Imaging.jsx
+@@ -13,6 +13,7 @@ import { fetchMyImaging, fetchArtifact } from '../services/api/clinicalApi.js';
+ import { useClinicalData } from '../hooks/useClinicalData.js';
+ import { useAuth } from '../auth/AuthContext.jsx';
+ import { COLORS } from '../theme.js';
++import { ModuleOffNotice, AccessPausedNotice } from '../components/clinical.jsx';
+ import MyHealthLayout from '../components/MyHealthLayout.jsx';
+ import ReportListPane, { formatDocDate } from '../components/ReportListPane.jsx';
+ 
+@@ -92,6 +93,14 @@ export default function Imaging() {
+     }
+   }
+ 
++  if (status === 'module_off' || status === 'suspended') {
++    return (
++      <MyHealthLayout pageTitle="Imaging" subtitle="X-rays, MRI, ultrasound, etc.">
++        {status === 'module_off' ? <ModuleOffNotice /> : <AccessPausedNotice />}
++      </MyHealthLayout>
++    );
++  }
++
+   return (
+     <MyHealthLayout
+       pageTitle="Imaging"
+diff --git a/artifacts/web-member/src/screens/LabResults.jsx b/artifacts/web-member/src/screens/LabResults.jsx
+index cf56010..61d592b 100644
+--- a/artifacts/web-member/src/screens/LabResults.jsx
++++ b/artifacts/web-member/src/screens/LabResults.jsx
+@@ -14,7 +14,7 @@ import { fetchMyLabs, fetchArtifact } from '../services/api/clinicalApi.js';
+ import { useClinicalData } from '../hooks/useClinicalData.js';
+ import { useAuth } from '../auth/AuthContext.jsx';
+ import { COLORS, FONT } from '../theme.js';
+-import { DirectionChip } from '../components/clinical.jsx';
++import { DirectionChip, ModuleOffNotice, AccessPausedNotice } from '../components/clinical.jsx';
+ import MyHealthLayout from '../components/MyHealthLayout.jsx';
+ import ReportListPane, { formatDocDate } from '../components/ReportListPane.jsx';
+ 
+@@ -177,6 +177,16 @@ export default function LabResults() {
+     setViewer({ kind: 'detail' });
+   }
+ 
++  // Care-team visibility states replace the whole browser: an empty list pane next
++  // to a "select a report" viewer would read as a broken page.
++  if (status === 'module_off' || status === 'suspended') {
++    return (
++      <MyHealthLayout pageTitle="Lab Work" subtitle="View bloodwork and panels.">
++        {status === 'module_off' ? <ModuleOffNotice /> : <AccessPausedNotice />}
++      </MyHealthLayout>
++    );
++  }
++
+   return (
+     <MyHealthLayout
+       pageTitle="Lab Work"
+diff --git a/artifacts/web-member/src/services/api/clinicalApi.js b/artifacts/web-member/src/services/api/clinicalApi.js
+index d856a52..7591d71 100644
+--- a/artifacts/web-member/src/services/api/clinicalApi.js
++++ b/artifacts/web-member/src/services/api/clinicalApi.js
+@@ -72,7 +72,20 @@ async function callRead(fnName, resultKey, getIdToken) {
+   clearTimeout(timer);
+ 
+   if (!res.ok) {
+-    return { kind: 'error', error: parseApiError(res.status, json) };
++    const error = parseApiError(res.status, json);
++    // Portal access paused by the care team (adminSetPortalAccess status:'suspended').
++    // Not an outage — callers render a calm "access paused" screen.
++    if (res.status === 403 && error.reason === 'ACCESS_SUSPENDED') {
++      return { kind: 'suspended', error };
++    }
++    return { kind: 'error', error };
++  }
++
++  // Module switched off by the care team: HTTP 200, no PHI, { moduleUnavailable: true }.
++  // MUST be checked before the shape check below, otherwise it falls through to the
++  // generic "Unexpected response" error branch and reads to the member as an outage.
++  if (json?.moduleUnavailable === true) {
++    return { kind: 'moduleOff' };
+   }
+ 
+   if (Array.isArray(json?.[resultKey])) {
+@@ -132,7 +145,15 @@ export async function fetchArtifact(fnName, reportId, getIdToken) {
+   clearTimeout(timer);
+ 
+   if (!res.ok) {
+-    return { kind: 'error', error: parseApiError(res.status, json) };
++    const error = parseApiError(res.status, json);
++    if (res.status === 403 && error.reason === 'ACCESS_SUSPENDED') {
++      return { kind: 'suspended', error };
++    }
++    return { kind: 'error', error };
++  }
++
++  if (json?.moduleUnavailable === true) {
++    return { kind: 'moduleOff' };
+   }
+ 
+   if (json && typeof json.signedUrl === 'string') {
+diff --git a/artifacts/web-member/src/services/api/patientApi.js b/artifacts/web-member/src/services/api/patientApi.js
+index 05642ef..cfc5349 100644
+--- a/artifacts/web-member/src/services/api/patientApi.js
++++ b/artifacts/web-member/src/services/api/patientApi.js
+@@ -59,7 +59,22 @@ export async function fetchMyPatientRecord(getIdToken) {
+   }
+ 
+   if (!res.ok) {
+-    return { kind: 'error', error: parseApiError(res.status, json) };
++    const error = parseApiError(res.status, json);
++    if (res.status === 403 && error.reason === 'ACCESS_SUSPENDED') {
++      return { kind: 'suspended', error };
++    }
++    return { kind: 'error', error };
++  }
++
++  // Suspension: getMyPatientRecord answers 200 with portal.status 'suspended' and
++  // zero PHI (the other handlers 403 ACCESS_SUSPENDED). Branch before the shape
++  // check — the payload has no demographics, so it would read as READ_ERROR.
++  if (json?.patient?.portal?.status === 'suspended') {
++    return { kind: 'suspended' };
++  }
++
++  if (json?.moduleUnavailable === true) {
++    return { kind: 'moduleOff' };
+   }
+ 
+   if (json?.patient) {
