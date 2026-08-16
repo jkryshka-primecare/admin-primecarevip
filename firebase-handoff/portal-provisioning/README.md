@@ -64,3 +64,51 @@ the resolver is not consulted.
 
 Run one batch of 5 with a reason like `2a dry run`, confirm the 5 docs, then
 run the remainder in batches of 300.
+
+## The resolver, drafted
+
+`functions/core/services/elation/resolvePatient.js` is now included in this
+handoff — copy it to the same path in the Firebase repo and the open dependency
+above is closed. No wiring is needed; `adminProvisionPatients` picks it up via
+`require` and falls back to `unresolved` if the file is absent.
+
+It exports both names so either import style works:
+
+```js
+const { resolvePatient, resolveElationPatient } = require('./core/services/elation/resolvePatient');
+```
+
+**Behaviour**
+
+- `GET /patients/?last_name=&dob=` only. Read-only; it never writes to Elation.
+- Every result is re-verified locally on last name + DOB — the API filter is
+  not trusted on its own.
+- Narrowing order when more than one chart matches: first name, then email.
+  Email never matches alone (families share one) and never widens the set.
+- Returns `{ id, confident, reason, candidates }`. `confident: true` only for a
+  single surviving chart. `NO_MATCH`, `AMBIGUOUS_MATCH`, `ELATION_AUTH_FAILED`
+  and `ELATION_LOOKUP_FAILED` all return `confident: false`, which the caller
+  reports as `unresolved` — nothing is written.
+- Deleted charts (`deleted_date`) are excluded.
+
+**Credentials** — Secret Manager secrets in `prive-care-vip`, falling back to
+`process.env` under the emulator:
+
+```
+ELATION_CLIENT_ID   ELATION_CLIENT_SECRET   ELATION_USERNAME   ELATION_PASSWORD
+ELATION_BASE_URL    # optional, defaults to https://app.elationemr.com/api/2.0
+```
+
+Grant the function's runtime service account `roles/secretmanager.secretAccessor`
+on those four secrets. One OAuth token is minted per batch and cached (refreshed
+a minute early, re-minted once on a 401), so a 300-member run is one auth call.
+
+**Sanity check before the dry run** — confirm a known member resolves and a
+known family email does not over-match:
+
+```bash
+node -e "require('./core/services/elation/resolvePatient').resolvePatient({firstName:'Jane',lastName:'Doe',dob:'1980-04-02',email:'jane@example.com'}).then(console.log)"
+```
+
+Expect `AMBIGUOUS_MATCH` (not a guess) for any parent/child pair sharing a name
+prefix, and `SINGLE_MATCH` for a distinct adult.
