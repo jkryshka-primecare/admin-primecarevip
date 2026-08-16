@@ -1,6 +1,7 @@
 import { Fragment, useMemo, useState } from "react";
 import { AlertCircle, Database, Loader2, RefreshCw, Search } from "lucide-react";
 import { useFirestoreList, type FirestoreCollection } from "@/hooks/useFirestore";
+import MemberRoster from "@/components/firestore/MemberRoster";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
