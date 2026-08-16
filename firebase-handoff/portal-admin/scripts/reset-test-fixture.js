@@ -28,11 +28,26 @@ const admin = require('firebase-admin');
 
 // --- Hard pins. Editing these is the only way to point this at another id,
 // --- and doing so intentionally is the whole point of them being here.
+//
+// Re-pinned after the Aug 16, 2026 Step 1 production smoke test: the fixture was
+// re-claimed under a new uid, and its roster email was pointed at the
+// staff-controlled info@ mailbox. The earlier pins stay in the ACCEPTED_* lists
+// so this script still cleans a fixture left in the pre-smoke-test shape.
 const PATIENT_ID = '816455979040769';
-const EXPECTED_UID = 'neozyhs59ue0vooapsrocygo1ah3';
-const EXPECTED_EMAIL = 'patient-test-1@primecarevip.com';
+const EXPECTED_UID = 'd8h7h6xc6axkq3k3tgnoz6ytxmx1';
+const EXPECTED_EMAIL = 'info@primecarevip.com';
 const EXPECTED_FIRST = 'test';
 const EXPECTED_LAST = 'kieffer';
+
+// Historical claims of the same synthetic fixture. Guards accept any of these;
+// nothing outside these lists is ever touched.
+const ACCEPTED_UIDS = [EXPECTED_UID, 'neozyhs59ue0vooapsrocygo1ah3'];
+const ACCEPTED_EMAILS = [EXPECTED_EMAIL, 'patient-test-1@primecarevip.com'];
+
+const isAcceptedUid = (u) =>
+  ACCEPTED_UIDS.some((a) => a.toLowerCase() === String(u || '').toLowerCase());
+const isAcceptedEmail = (e) =>
+  ACCEPTED_EMAILS.some((a) => a.toLowerCase() === String(e || '').trim().toLowerCase());
 
 const APPLY = process.argv.includes('--apply');
 
@@ -75,14 +90,14 @@ async function main() {
   if (first !== EXPECTED_FIRST || last !== EXPECTED_LAST) {
     fail(`roster name is "${p.firstName} ${p.lastName}", expected "Test Kieffer". This is not the synthetic fixture.`);
   }
-  if (email !== EXPECTED_EMAIL) {
-    fail(`roster email is "${p.email}", expected "${EXPECTED_EMAIL}". This is not the synthetic fixture.`);
+  if (!isAcceptedEmail(email)) {
+    fail(`roster email is "${p.email}", expected one of ${ACCEPTED_EMAILS.join(', ')}. This is not the synthetic fixture.`);
   }
 
   // --- Guard 2: the bound uid is the one we expect -------------------------
   const boundUid = String(p.firebaseUid || '');
-  if (boundUid && boundUid.toLowerCase() !== EXPECTED_UID.toLowerCase()) {
-    fail(`roster firebaseUid is "${boundUid}", expected "${EXPECTED_UID}". Refusing to unbind an unknown account.`);
+  if (boundUid && !isAcceptedUid(boundUid)) {
+    fail(`roster firebaseUid is "${boundUid}", expected one of ${ACCEPTED_UIDS.join(', ')}. Refusing to unbind an unknown account.`);
   }
   if (!boundUid) {
     console.log('note: roster already has no firebaseUid — continuing to clean residue.\n');
@@ -132,7 +147,12 @@ async function main() {
   // it to directory/<uid> and removes that mirror when the users doc is deleted.
   // The directory delete is repeated explicitly in case the trigger lags.
   const uid = boundUid || EXPECTED_UID;
-  const uidVariants = Array.from(new Set([uid, uid.toLowerCase(), EXPECTED_UID, EXPECTED_UID.toLowerCase()]));
+  const uidVariants = Array.from(new Set([
+    uid,
+    uid.toLowerCase(),
+    ...ACCEPTED_UIDS,
+    ...ACCEPTED_UIDS.map((u) => u.toLowerCase()),
+  ]));
   console.log('3. uid-keyed docs');
   for (const u of uidVariants) {
     for (const path of [`users/${u}`, `directory/${u}`]) {
@@ -147,23 +167,30 @@ async function main() {
 
   // --- Step 4: the Auth user, last -----------------------------------------
   console.log('4. Firebase Auth user');
-  let authUser = null;
-  try {
-    authUser = await admin.auth().getUser(EXPECTED_UID);
-  } catch (e) {
-    if (e.code !== 'auth/user-not-found') throw e;
-  }
-  if (!authUser) {
-    console.log(`   auth uid ${EXPECTED_UID} not found — already deleted.`);
-  } else {
-    if (String(authUser.email || '').toLowerCase() !== EXPECTED_EMAIL) {
-      fail(`auth user ${EXPECTED_UID} has email "${authUser.email}", expected "${EXPECTED_EMAIL}".`);
+  // Any accepted uid may be present depending on which claim generation this
+  // fixture is currently in; each is verified by email before deletion.
+  const authTargets = Array.from(new Set([boundUid, ...ACCEPTED_UIDS].filter(Boolean)));
+  let found = 0;
+  for (const target of authTargets) {
+    let authUser = null;
+    try {
+      authUser = await admin.auth().getUser(target);
+    } catch (e) {
+      if (e.code !== 'auth/user-not-found') throw e;
     }
-    console.log(`   delete auth user ${EXPECTED_UID} <${authUser.email}>`);
+    if (!authUser) continue;
+    found += 1;
+    if (!isAcceptedEmail(authUser.email)) {
+      fail(`auth user ${target} has email "${authUser.email}", expected one of ${ACCEPTED_EMAILS.join(', ')}.`);
+    }
+    console.log(`   delete auth user ${target} <${authUser.email}>`);
     if (APPLY) {
-      await admin.auth().deleteUser(EXPECTED_UID);
+      await admin.auth().deleteUser(target);
       console.log('   done.');
     }
+  }
+  if (found === 0) {
+    console.log(`   no auth user found for ${authTargets.join(', ')} — already deleted.`);
   }
 
   // --- Verification --------------------------------------------------------
