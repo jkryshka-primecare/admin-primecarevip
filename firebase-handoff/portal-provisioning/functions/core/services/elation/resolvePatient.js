@@ -165,7 +165,7 @@ function dobOf(patient) {
  * @returns {Promise<{id:string|null, confident:boolean, reason:string, candidates:number}>}
  *
  * `confident: true` is returned ONLY when exactly one non-deleted chart matches
- * first name + last name + DOB (email may narrow further, never widen).
+ * first name + last name + DOB (email is never a tiebreak).
  * Two charts with identical first+last+DOB return AMBIGUOUS_MATCH. Everything
  * else — zero matches, several matches, an API failure — comes back
  * confident:false and the member stays unprovisioned.
@@ -174,7 +174,7 @@ async function resolvePatient(member) {
   const firstName = lower(member && member.firstName);
   const lastName = lower(member && member.lastName);
   const dob = norm(member && member.dob).slice(0, 10);
-  const email = lower(member && member.email);
+  // Email is intentionally unused: it is never a match key or tiebreak here.
 
   // First name is REQUIRED in the key. A single last-name + DOB hit is not
   // enough: a twin or same-DOB sibling who has no Elation chart yet would
