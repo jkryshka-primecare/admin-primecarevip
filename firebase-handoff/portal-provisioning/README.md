@@ -51,8 +51,9 @@ functions/core/services/elation/resolvePatient.js
 
 Rules that resolver must follow:
 
-- `confident: true` only for a **single** chart matching last name + date of
-  birth (email may narrow further). Two candidates means `confident: false`.
+- `confident: true` only for a **single** chart matching first name + last name
+  + date of birth (email may narrow further). Two candidates means
+  `confident: false`.
 - Never fuzzy-match on email alone — families in this practice share one.
 
 Until it exists, the function still runs and returns every member as
@@ -81,10 +82,12 @@ const { resolvePatient, resolveElationPatient } = require('./core/services/elati
 **Behaviour**
 
 - `GET /patients/?last_name=&dob=` only. Read-only; it never writes to Elation.
-- Every result is re-verified locally on last name + DOB — the API filter is
-  not trusted on its own.
-- Narrowing order when more than one chart matches: first name, then email.
-  Email never matches alone (families share one) and never widens the set.
+- Every result is re-verified locally on first name + last name + DOB — the API
+  filter is not trusted on its own, and a last name + DOB hit alone is never
+  accepted (that is how a twin or same-DOB sibling would land on the wrong
+  chart). Identical first+last+DOB on two charts is `AMBIGUOUS_MATCH`.
+- Email may only narrow an already-matched set. It never matches alone
+  (families share one) and never widens the set.
 - Returns `{ id, confident, reason, candidates }`. `confident: true` only for a
   single surviving chart. `NO_MATCH`, `AMBIGUOUS_MATCH`, `ELATION_AUTH_FAILED`
   and `ELATION_LOOKUP_FAILED` all return `confident: false`, which the caller

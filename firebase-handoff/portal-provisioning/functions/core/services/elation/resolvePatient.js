@@ -8,6 +8,9 @@
 //     ambiguity returns confident:false with the candidate count, and the
 //     caller leaves the member unresolved for a human. Guessing here would
 //     hand one member another person's chart.
+//   - The match key is first name + last name + DOB, all three required. A
+//     last name + DOB hit alone is NOT confident: a twin or same-DOB sibling
+//     with no chart of their own would resolve onto their sibling's chart.
 //   - Email is never a sole match key: families in this practice share one
 //     email across parent and children. DOB is always in the key.
 //
@@ -162,7 +165,8 @@ function dobOf(patient) {
  * @returns {Promise<{id:string|null, confident:boolean, reason:string, candidates:number}>}
  *
  * `confident: true` is returned ONLY when exactly one non-deleted chart matches
- * last name + DOB (optionally narrowed by first name, then email). Everything
+ * first name + last name + DOB (email may narrow further, never widen).
+ * Two charts with identical first+last+DOB return AMBIGUOUS_MATCH. Everything
  * else — zero matches, several matches, an API failure — comes back
  * confident:false and the member stays unprovisioned.
  */
@@ -172,7 +176,10 @@ async function resolvePatient(member) {
   const dob = norm(member && member.dob).slice(0, 10);
   const email = lower(member && member.email);
 
-  if (!lastName || !ISO_DATE.test(dob)) {
+  // First name is REQUIRED in the key. A single last-name + DOB hit is not
+  // enough: a twin or same-DOB sibling who has no Elation chart yet would
+  // otherwise resolve straight onto their sibling's chart.
+  if (!firstName || !lastName || !ISO_DATE.test(dob)) {
     return { id: null, confident: false, reason: 'INCOMPLETE_IDENTITY', candidates: 0 };
   }
 
@@ -195,21 +202,20 @@ async function resolvePatient(member) {
 
   // Re-verify locally. Elation's filters have been permissive before; never
   // trust the server to have applied the key we care about.
+  // The match key is first name + last name + DOB, all three enforced here.
+  // A chart that agrees on last name and DOB but not first name is NOT a
+  // match — it is a sibling/twin and is dropped, not narrowed to.
   let candidates = all.filter(
     (p) =>
       p &&
       !p.deleted_date &&
+      lower(p.first_name) === firstName &&
       lower(p.last_name) === lastName &&
       dobOf(p) === dob,
   );
 
   if (candidates.length === 0) {
     return { id: null, confident: false, reason: 'NO_MATCH', candidates: 0 };
-  }
-
-  if (candidates.length > 1 && firstName) {
-    const byFirst = candidates.filter((p) => lower(p.first_name) === firstName);
-    if (byFirst.length >= 1) candidates = byFirst;
   }
 
   // Email may only narrow an already name+DOB-matched set — never widen it,
