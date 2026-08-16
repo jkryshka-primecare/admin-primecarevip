@@ -8,6 +8,9 @@
 //     ambiguity returns confident:false with the candidate count, and the
 //     caller leaves the member unresolved for a human. Guessing here would
 //     hand one member another person's chart.
+//   - The match key is first name + last name + DOB, all three required. A
+//     last name + DOB hit alone is NOT confident: a twin or same-DOB sibling
+//     with no chart of their own would resolve onto their sibling's chart.
 //   - Email is never a sole match key: families in this practice share one
 //     email across parent and children. DOB is always in the key.
 //
