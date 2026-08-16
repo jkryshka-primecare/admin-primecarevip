@@ -256,3 +256,47 @@ export function usePortalMutations(elationPatientId: string | null) {
 
   return { issueInvite, revokeInvite, setAccess };
 }
+
+/** A member selected for portal-record provisioning. */
+export type ProvisionMember = {
+  hintId: string;
+  firstName: string;
+  lastName: string;
+  email: string | null;
+  dob: string;
+  phone: string | null;
+};
+
+export type ProvisionResult = {
+  created: { hintId: string; elationPatientId: string; name?: string }[];
+  unresolved: { hintId: string; name?: string; reason?: string }[];
+  skipped?: { hintId: string; reason?: string }[];
+};
+
+/**
+ * Creates portal roster records for members who have none.
+ *
+ * This is the only bulk write in the admin app. It creates a record and
+ * nothing else — no invite is sent, no email leaves the system, and no
+ * clinical data is written. Admin role and a written reason are enforced
+ * server-side, and every member in the batch gets its own audit row.
+ */
+export function useProvisionPortalRecords() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (vars: { members: ProvisionMember[]; reason: string }) => {
+      const res = await callPortalAdmin<ProvisionResult>({
+        action: "provision",
+        members: vars.members,
+        reason: vars.reason,
+      });
+      return (
+        res.data ?? { created: [], unresolved: [] as ProvisionResult["unresolved"] }
+      );
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["firestore"] });
+      qc.invalidateQueries({ queryKey: ["portal-admin"] });
+    },
+  });
+}
