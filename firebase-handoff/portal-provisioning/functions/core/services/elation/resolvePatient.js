@@ -198,21 +198,20 @@ async function resolvePatient(member) {
 
   // Re-verify locally. Elation's filters have been permissive before; never
   // trust the server to have applied the key we care about.
+  // The match key is first name + last name + DOB, all three enforced here.
+  // A chart that agrees on last name and DOB but not first name is NOT a
+  // match — it is a sibling/twin and is dropped, not narrowed to.
   let candidates = all.filter(
     (p) =>
       p &&
       !p.deleted_date &&
+      lower(p.first_name) === firstName &&
       lower(p.last_name) === lastName &&
       dobOf(p) === dob,
   );
 
   if (candidates.length === 0) {
     return { id: null, confident: false, reason: 'NO_MATCH', candidates: 0 };
-  }
-
-  if (candidates.length > 1 && firstName) {
-    const byFirst = candidates.filter((p) => lower(p.first_name) === firstName);
-    if (byFirst.length >= 1) candidates = byFirst;
   }
 
   // Email may only narrow an already name+DOB-matched set — never widen it,
