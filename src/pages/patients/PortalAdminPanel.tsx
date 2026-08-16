@@ -112,12 +112,13 @@ function normalizeHidden(raw: unknown): HiddenEntry[] {
   return [];
 }
 
-function fmt(iso?: string | null) {
-  if (!iso) return "—";
+function fmt(value?: unknown) {
+  const d = toDateSafe(value);
+  if (!d) return typeof value === "string" && value ? value : "—";
   try {
-    return format(parseISO(iso), "MMM d, yyyy p");
+    return format(d, "MMM d, yyyy p");
   } catch {
-    return iso;
+    return d.toLocaleString();
   }
 }
 
