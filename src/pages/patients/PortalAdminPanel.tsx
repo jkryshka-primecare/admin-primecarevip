@@ -35,7 +35,45 @@ import { Textarea } from "@/components/ui/textarea";
 import { toast } from "@/hooks/use-toast";
 
 
-type HiddenEntry = { collection: string; id: string; label?: string; hiddenAt?: string };
+type HiddenEntry = { collection: string; id: string; label?: string; hiddenAt?: unknown };
+
+/**
+ * Firestore hands back timestamps in several shapes depending on how the
+ * document travelled: a real Timestamp (has toDate), the serialized
+ * `{ _seconds, _nanoseconds }` / `{ seconds, nanoseconds }` form, an ISO
+ * string, or a millisecond number. Never hand any of these to JSX directly —
+ * an object child throws React #31 and blanks the panel.
+ */
+function toDateSafe(value: unknown): Date | null {
+  if (value == null) return null;
+  if (value instanceof Date) return isNaN(value.getTime()) ? null : value;
+  if (typeof value === "number") return new Date(value);
+  if (typeof value === "string") {
+    try {
+      const d = parseISO(value);
+      return isNaN(d.getTime()) ? null : d;
+    } catch {
+      return null;
+    }
+  }
+  if (typeof value === "object") {
+    const v = value as Record<string, unknown> & { toDate?: () => Date };
+    if (typeof v.toDate === "function") {
+      try {
+        const d = v.toDate();
+        return d instanceof Date && !isNaN(d.getTime()) ? d : null;
+      } catch {
+        return null;
+      }
+    }
+    const secs = (v._seconds ?? v.seconds) as number | undefined;
+    if (typeof secs === "number") {
+      const nanos = (v._nanoseconds ?? v.nanoseconds) as number | undefined;
+      return new Date(secs * 1000 + (typeof nanos === "number" ? Math.floor(nanos / 1e6) : 0));
+    }
+  }
+  return null;
+}
 
 /**
  * The control plane returns hiddenItems either as a flat array or as an object
@@ -52,7 +90,7 @@ function normalizeHidden(raw: unknown): HiddenEntry[] {
             collection: String(h.collection ?? h.module ?? "unknown"),
             id: String(h.id ?? ""),
             label: h.label ? String(h.label) : undefined,
-            hiddenAt: h.hiddenAt ? String(h.hiddenAt) : undefined,
+            hiddenAt: h.hiddenAt ?? undefined,
           },
     );
   }
@@ -66,7 +104,7 @@ function normalizeHidden(raw: unknown): HiddenEntry[] {
               collection: String(it.collection ?? collection),
               id: String(it.id ?? ""),
               label: it.label ? String(it.label) : undefined,
-              hiddenAt: it.hiddenAt ? String(it.hiddenAt) : undefined,
+              hiddenAt: it.hiddenAt ?? undefined,
             },
       );
     });
@@ -74,12 +112,13 @@ function normalizeHidden(raw: unknown): HiddenEntry[] {
   return [];
 }
 
-function fmt(iso?: string | null) {
-  if (!iso) return "—";
+function fmt(value?: unknown) {
+  const d = toDateSafe(value);
+  if (!d) return typeof value === "string" && value ? value : "—";
   try {
-    return format(parseISO(iso), "MMM d, yyyy p");
+    return format(d, "MMM d, yyyy p");
   } catch {
-    return iso;
+    return d.toLocaleString();
   }
 }
 
