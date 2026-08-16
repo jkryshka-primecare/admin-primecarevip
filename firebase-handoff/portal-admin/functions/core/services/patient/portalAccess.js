@@ -108,7 +108,9 @@ function filterHidden(access, moduleName, items, idOf) {
  * Merge a patch into the access doc. Admin plane only — never called from a
  * patient-facing endpoint.
  *
- * patch: { status?, modules?: {m: bool}, hiddenItems?: {m: [id]} }
+ * patch: { status?, modules?: {m: bool}, hiddenItems?: {m: [id]},
+ *          hideItem?: {collection, id}, unhideItem?: {collection, id} }
+ * hideItem/unhideItem are applied atomically inside the transaction.
  */
 async function setPortalAccess(elationPatientId, patch, actorEmail, reason) {
   const pid = String(elationPatientId || '').trim();
@@ -140,6 +142,24 @@ async function setPortalAccess(elationPatientId, patch, actorEmail, reason) {
           next.hiddenItems[m] = Array.from(new Set(list.map(String))).slice(0, 500);
         }
       }
+    }
+
+    // Atomic single-item hide/unhide. Doing it inside the transaction removes
+    // the client read-modify-write race: concurrent hides can no longer clobber
+    // each other's list.
+    const applyItemOp = (op, hide) => {
+      if (!op || typeof op !== 'object') return;
+      const m = String(op.collection || '');
+      const id = String(op.id || '').trim();
+      if (!MODULES.includes(m) || !id) return;
+      const list = Array.isArray(next.hiddenItems[m]) ? next.hiddenItems[m].map(String) : [];
+      next.hiddenItems[m] = hide
+        ? Array.from(new Set([...list, id])).slice(0, 500)
+        : list.filter((x) => x !== id);
+    };
+    if (patch) {
+      applyItemOp(patch.hideItem, true);
+      applyItemOp(patch.unhideItem, false);
     }
 
     tx.set(
