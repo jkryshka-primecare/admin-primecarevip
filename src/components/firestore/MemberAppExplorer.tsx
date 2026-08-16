@@ -202,52 +202,60 @@ export default function MemberAppExplorer() {
             <div className="flex items-center justify-center py-10 text-muted-foreground">
               <Loader2 className="h-5 w-5 animate-spin" />
             </div>
-          ) : docs.length === 0 ? (
+          ) : rows.length === 0 ? (
             <p className="py-8 text-center text-sm text-muted-foreground">
-              This collection has no documents in the live member apps yet.
+              {docs.length === 0
+                ? "This collection has no documents in the live member apps yet."
+                : "No records match the current filter or search."}
             </p>
           ) : (
-            <div className="overflow-x-auto">
-              <Table>
-                <TableHeader>
-                  <TableRow>
-                    {columns.map((c) => (
-                      <TableHead key={c} className="whitespace-nowrap">
-                        {c}
-                      </TableHead>
-                    ))}
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {docs.map((d) => (
-                    <Fragment key={String(d.id)}>
-                      <TableRow
-                        className="cursor-pointer hover:bg-muted/50"
-                        onClick={() =>
-                          setExpanded(expanded === String(d.id) ? null : String(d.id))
-                        }
-                      >
-                        {columns.map((c) => (
-                          <TableCell key={c} className="text-xs whitespace-nowrap">
-                            {cell((d as Record<string, unknown>)[c])}
-                          </TableCell>
-                        ))}
-                      </TableRow>
-                      {expanded === String(d.id) && (
-                        <TableRow>
-                          <TableCell colSpan={columns.length} className="bg-muted/40">
-                            <pre className="max-h-72 overflow-auto text-[11px] font-mono whitespace-pre-wrap">
-                              {JSON.stringify(d, null, 2)}
-                            </pre>
-                          </TableCell>
+            <>
+              <p className="pb-2 text-xs text-muted-foreground">
+                Showing {rows.length.toLocaleString()} of {docs.length.toLocaleString()}
+              </p>
+              <div className="overflow-x-auto">
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      {columns.map((c) => (
+                        <TableHead key={c} className="whitespace-nowrap">
+                          {c}
+                        </TableHead>
+                      ))}
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {rows.map((d) => (
+                      <Fragment key={String(d.id)}>
+                        <TableRow
+                          className="cursor-pointer hover:bg-muted/50"
+                          onClick={() =>
+                            setExpanded(expanded === String(d.id) ? null : String(d.id))
+                          }
+                        >
+                          {columns.map((c) => (
+                            <TableCell key={c} className="text-xs whitespace-nowrap">
+                              {cell((d as Record<string, unknown>)[c])}
+                            </TableCell>
+                          ))}
                         </TableRow>
-                      )}
-                    </Fragment>
-                  ))}
-                </TableBody>
-              </Table>
-            </div>
+                        {expanded === String(d.id) && (
+                          <TableRow>
+                            <TableCell colSpan={columns.length} className="bg-muted/40">
+                              <pre className="max-h-72 overflow-auto text-[11px] font-mono whitespace-pre-wrap">
+                                {JSON.stringify(d, null, 2)}
+                              </pre>
+                            </TableCell>
+                          </TableRow>
+                        )}
+                      </Fragment>
+                    ))}
+                  </TableBody>
+                </Table>
+              </div>
+            </>
           )}
+
         </CardContent>
       </Card>
     </div>
