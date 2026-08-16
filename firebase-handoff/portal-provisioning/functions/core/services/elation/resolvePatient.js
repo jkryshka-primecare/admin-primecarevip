@@ -172,7 +172,10 @@ async function resolvePatient(member) {
   const dob = norm(member && member.dob).slice(0, 10);
   const email = lower(member && member.email);
 
-  if (!lastName || !ISO_DATE.test(dob)) {
+  // First name is REQUIRED in the key. A single last-name + DOB hit is not
+  // enough: a twin or same-DOB sibling who has no Elation chart yet would
+  // otherwise resolve straight onto their sibling's chart.
+  if (!firstName || !lastName || !ISO_DATE.test(dob)) {
     return { id: null, confident: false, reason: 'INCOMPLETE_IDENTITY', candidates: 0 };
   }
 
