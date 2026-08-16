@@ -162,7 +162,8 @@ function dobOf(patient) {
  * @returns {Promise<{id:string|null, confident:boolean, reason:string, candidates:number}>}
  *
  * `confident: true` is returned ONLY when exactly one non-deleted chart matches
- * last name + DOB (optionally narrowed by first name, then email). Everything
+ * first name + last name + DOB (email may narrow further, never widen).
+ * Two charts with identical first+last+DOB return AMBIGUOUS_MATCH. Everything
  * else — zero matches, several matches, an API failure — comes back
  * confident:false and the member stays unprovisioned.
  */
