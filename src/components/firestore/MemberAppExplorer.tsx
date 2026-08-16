@@ -1,9 +1,10 @@
 import { Fragment, useMemo, useState } from "react";
-import { AlertCircle, Database, Loader2, RefreshCw } from "lucide-react";
+import { AlertCircle, Database, Loader2, RefreshCw, Search } from "lucide-react";
 import { useFirestoreList, type FirestoreCollection } from "@/hooks/useFirestore";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
+import { Input } from "@/components/ui/input";
 import {
   Table,
   TableBody,
@@ -41,10 +42,19 @@ const PREFERRED = [
   "createdAt",
 ];
 
+type StatusFilter = "all" | "active" | "invited" | "other";
+
 function cell(v: unknown): string {
   if (v == null) return "—";
   if (typeof v === "object") return Array.isArray(v) ? `${v.length} item(s)` : "{…}";
   return String(v);
+}
+
+function bucketOf(doc: Record<string, unknown>): Exclude<StatusFilter, "all"> {
+  const s = String(doc.status ?? "").toLowerCase();
+  if (s === "active") return "active";
+  if (s === "invited") return "invited";
+  return "other";
 }
 
 /**
@@ -54,8 +64,33 @@ function cell(v: unknown): string {
 export default function MemberAppExplorer() {
   const [active, setActive] = useState<FirestoreCollection>("patients");
   const [expanded, setExpanded] = useState<string | null>(null);
+  const [status, setStatus] = useState<StatusFilter>("all");
+  const [search, setSearch] = useState("");
 
-  const { docs, loading, error, refetch } = useFirestoreList(active, { limit: 100 });
+  const { docs, loading, fetching, error, refetch } = useFirestoreList(active, {
+    fetchAll: true,
+  });
+
+  const hasStatus = useMemo(() => docs.some((d) => "status" in d), [docs]);
+
+  const counts = useMemo(() => {
+    const c = { all: docs.length, active: 0, invited: 0, other: 0 };
+    for (const d of docs) c[bucketOf(d as Record<string, unknown>)] += 1;
+    return c;
+  }, [docs]);
+
+  const rows = useMemo(() => {
+    const q = search.trim().toLowerCase();
+    return docs.filter((d) => {
+      const rec = d as Record<string, unknown>;
+      if (hasStatus && status !== "all" && bucketOf(rec) !== status) return false;
+      if (!q) return true;
+      return Object.values(rec).some(
+        (v) => (typeof v === "string" || typeof v === "number") &&
+          String(v).toLowerCase().includes(q),
+      );
+    });
+  }, [docs, status, search, hasStatus]);
 
   const columns = useMemo(() => {
     const present = new Set<string>();
@@ -66,6 +101,7 @@ export default function MemberAppExplorer() {
     const rest = [...present].filter((k) => !PREFERRED.includes(k)).sort();
     return [...ordered, ...rest].slice(0, 7);
   }, [docs]);
+
 
   return (
     <div className="space-y-4">
