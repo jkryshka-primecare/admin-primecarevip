@@ -67,10 +67,15 @@ export default function MemberAppExplorer() {
   const [expanded, setExpanded] = useState<string | null>(null);
   const [status, setStatus] = useState<StatusFilter>("all");
   const [search, setSearch] = useState("");
+  const [patientsView, setPatientsView] = useState<"roster" | "raw">("roster");
 
-  const { docs, loading, fetching, error, refetch } = useFirestoreList(active, {
-    fetchAll: true,
-  });
+  const showRoster = active === "patients" && patientsView === "roster";
+
+  const { docs, loading, fetching, error, refetch } = useFirestoreList(
+    active,
+    { fetchAll: true },
+    !showRoster,
+  );
 
   const hasStatus = useMemo(() => docs.some((d) => "status" in d), [docs]);
 
