@@ -1,6 +1,7 @@
 import { useMemo } from "react";
 import { useHintRoster, type HintMember } from "@/hooks/useHintRoster";
 import { useFirestoreList, type FirestoreDoc } from "@/hooks/useFirestore";
+import { isTestFixture } from "@/lib/portal/fixtures";
 
 /**
  * READ-ONLY reconciliation between the Hint membership roster (source of truth
