@@ -22,13 +22,19 @@ members the Membership roster in Prime Care OS currently flags as
 
 1. Copy `functions/adminProvisionPatients.js` next to the existing `admin*.js`
    handlers.
-2. Export it from `functions/index.js`:
+2. Export it from `functions/index.js` **inside** the existing
+   `module.exports = { … }` object, alongside the four Step 1 admin
+   functions. A trailing `exports.adminProvisionPatients = …` appended after
+   `module.exports = { … }` exports nothing:
 
    ```js
-   exports.adminProvisionPatients = require('./adminProvisionPatients').adminProvisionPatients;
+   module.exports = {
+     // …existing Step 1 admin functions…
+     adminProvisionPatients: require('./adminProvisionPatients').adminProvisionPatients,
+   };
    ```
 
-3. Grant the existing caller service account invoke rights on it:
+3. Grant the existing caller service account invoke rights on it (human step):
 
    ```bash
    gcloud functions add-iam-policy-binding adminProvisionPatients \
@@ -37,7 +43,17 @@ members the Membership roster in Prime Care OS currently flags as
      --role="roles/cloudfunctions.invoker"
    ```
 
-4. Deploy: `firebase deploy --only functions:adminProvisionPatients`
+4. Deploy via **PR → merge → CI**, not `firebase deploy --only …`.
+   Like the other IAM-restricted admin functions, leave
+   `adminProvisionPatients` **out of both** `FUNCTIONS=( … )` arrays
+   (snapshot + health gate) — the gate's unauthenticated curl would 403.
+
+5. Secrets: the resolver reads `ELATION_CLIENT_ID`, `ELATION_CLIENT_SECRET`,
+   `ELATION_USERNAME`, `ELATION_PASSWORD` from Secret Manager at runtime.
+   Confirm all four exist and that the functions runtime SA holds
+   `secretmanager.secretAccessor` on each. If a grant is missing it fails
+   safe: every member comes back unresolved with `ELATION_CREDENTIALS_MISSING`.
+
 
 ## The one open dependency: Elation resolution
 
