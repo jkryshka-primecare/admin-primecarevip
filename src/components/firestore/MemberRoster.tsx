@@ -44,10 +44,12 @@ const BUCKET_TONE: Record<ReconBucket, string> = {
  * has a portal record. Read-only — nothing here writes to either system.
  */
 export default function MemberRoster() {
-  const { rows, counts, totals, loading, fetching, error, refetch } =
+  const { rows, counts, totals, missingMembers, loading, fetching, error, refetch } =
     useMemberReconciliation();
+  const { isAdmin } = useAuth();
   const [filter, setFilter] = useState<Filter>("all");
   const [search, setSearch] = useState("");
+  const [provisionOpen, setProvisionOpen] = useState(false);
 
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase();
