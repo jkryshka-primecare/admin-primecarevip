@@ -443,7 +443,30 @@ Deno.serve(async (req) => {
 
   const ok = status >= 200 && status < 300;
 
-  if (MUTATIONS.includes(action)) {
+  if (action === "provision") {
+    // One audit row per member, so every created record is individually
+    // attributable rather than hidden inside a batch summary.
+    const result = payload as
+      | { created?: { hintId?: string; elationPatientId?: string }[]; unresolved?: unknown[] }
+      | null;
+    const createdByHint = new Map<string, { hintId?: string; elationPatientId?: string }>();
+    for (const c of result?.created ?? []) {
+      if (c?.hintId) createdByHint.set(String(c.hintId), c);
+    }
+    for (const m of provisionMembers) {
+      const created = createdByHint.get(m.hintId);
+      await recordAction(ctx, {
+        elationPatientId: created?.elationPatientId ?? null,
+        action: "provision",
+        reason: reason || null,
+        before: null,
+        after: { hintId: m.hintId, name: `${m.firstName} ${m.lastName}`, created: Boolean(created) },
+        ok: ok && Boolean(created),
+        httpStatus: status,
+        errorMessage: ok && !created ? "Not created — no confident Elation match" : errorMessage,
+      });
+    }
+  } else if (MUTATIONS.includes(action)) {
     const result = payload as { before?: unknown; after?: unknown } | null;
     await recordAction(ctx, {
       elationPatientId,
@@ -461,9 +484,9 @@ Deno.serve(async (req) => {
     source: "portal.admin",
     resource: fnName,
     scope: action,
-    resource_id: elationPatientId,
+    resource_id: isBatch ? null : elationPatientId,
     http_status: status,
-    row_count: null,
+    row_count: isBatch ? provisionMembers.length : null,
   });
 
   return new Response(
