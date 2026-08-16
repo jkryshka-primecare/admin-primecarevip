@@ -140,6 +140,32 @@ export default function MemberAppExplorer() {
         ))}
       </div>
 
+      {active === "patients" && (
+        <div className="flex flex-wrap gap-1 bg-muted/50 border border-border rounded-full p-1 w-fit">
+          {([
+            { id: "roster", label: "Membership roster" },
+            { id: "raw", label: "Raw documents" },
+          ] as const).map((v) => (
+            <button
+              key={v.id}
+              onClick={() => setPatientsView(v.id)}
+              className={cn(
+                "px-3 py-1 rounded-full text-xs font-medium transition-colors",
+                patientsView === v.id
+                  ? "bg-accent text-accent-foreground"
+                  : "text-muted-foreground hover:text-foreground",
+              )}
+            >
+              {v.label}
+            </button>
+          ))}
+        </div>
+      )}
+
+      {showRoster ? (
+        <MemberRoster />
+      ) : (
+      <>
       <div className="flex flex-wrap items-center gap-3">
         {hasStatus && (
           <div className="flex flex-wrap gap-1 bg-muted/50 border border-border rounded-full p-1 w-fit">
