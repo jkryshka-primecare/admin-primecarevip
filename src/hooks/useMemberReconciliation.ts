@@ -22,6 +22,8 @@ export type ReconBucket =
 export type ReconRow = {
   key: string;
   name: string;
+  firstName: string;
+  lastName: string;
   email: string | null;
   phone: string | null;
   dob: string | null;
