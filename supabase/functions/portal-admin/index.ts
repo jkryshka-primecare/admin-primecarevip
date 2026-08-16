@@ -329,8 +329,9 @@ Deno.serve(async (req) => {
     return deny(400, `Unknown action "${action}"`);
   }
 
+  const isBatch = BATCH_ACTIONS.includes(action);
   const elationPatientId = String(body.elationPatientId ?? "").trim();
-  if (!elationPatientId) return deny(400, "elationPatientId is required");
+  if (!isBatch && !elationPatientId) return deny(400, "elationPatientId is required");
 
   const reason = typeof body.reason === "string" ? body.reason.trim().slice(0, 500) : "";
 
@@ -343,17 +344,34 @@ Deno.serve(async (req) => {
     }
   }
 
+  let provisionMembers: ProvisionMember[] = [];
+  if (action === "provision") {
+    const parsed = parseProvisionMembers(body.members);
+    if (typeof parsed === "string") return deny(400, parsed);
+    provisionMembers = parsed;
+  }
+
   // The acting person is taken from the verified session, never from the
   // client payload — the service account identifies the system, this
   // identifies the human.
   const actor = ctx.user.email ?? ctx.user.id;
 
-  const upstreamPayload: Record<string, unknown> = { elationPatientId, actor, reason };
+  const upstreamPayload: Record<string, unknown> = {
+    elationPatientId: isBatch ? null : elationPatientId,
+    actor,
+    reason,
+  };
   if (action === "invite") {
     upstreamPayload.reissue = body.reissue === true;
   }
   if (action === "setAccess") {
     upstreamPayload.patch = body.patch ?? {};
+  }
+  if (action === "provision") {
+    upstreamPayload.members = provisionMembers;
+    // Creating a roster record is not an invitation. The portal function
+    // refuses to send anything; this makes the intent explicit on the wire.
+    upstreamPayload.sendInvite = false;
   }
 
   const fnName = FUNCTION_BY_ACTION[action];
