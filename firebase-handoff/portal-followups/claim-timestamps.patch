@@ -1,0 +1,20 @@
+diff --git a/functions/claimAccount.js b/functions/claimAccount.js
+index 4be9d9a..33d4c0f 100644
+--- a/functions/claimAccount.js
++++ b/functions/claimAccount.js
+@@ -342,7 +342,14 @@ exports.claimAccount = functions.runWith({ timeoutSeconds: 180, secrets: [ELATIO
+   //     D-095) — recoverable, not corrupt: #304 backfill defensively re-asserts
+   //     status:active. Log loudly; do NOT fail the response (account is live).
+   try {
+-    await admin.firestore().collection('patients').doc(String(elationPatientId)).set({ status: 'active' }, { merge: true });
++    // Also stamp the claim lifecycle timestamps. This block runs ONLY after a
++    // genuinely-new bind (an idempotent rebind returned 409 above), so a plain
++    // merge preserves write-once semantics for a given claim.
++    await admin.firestore().collection('patients').doc(String(elationPatientId)).set({
++      status: 'active',
++      claimedAt: admin.firestore.FieldValue.serverTimestamp(),
++      webAccessVerifiedAt: admin.firestore.FieldValue.serverTimestamp(),
++    }, { merge: true });
+   } catch (err) {
+     logError('claimAccount', 'status-activate-failed', err, { elationPatientId, uid });
+     // non-fatal: patient is bound; status self-heals on #304 backfill.

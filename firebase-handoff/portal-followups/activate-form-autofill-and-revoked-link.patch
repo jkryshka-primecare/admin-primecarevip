@@ -1,0 +1,150 @@
+diff --git a/artifacts/web-member/src/auth/ClaimAccount.jsx b/artifacts/web-member/src/auth/ClaimAccount.jsx
+index 8cc216d..5f2fa0f 100644
+--- a/artifacts/web-member/src/auth/ClaimAccount.jsx
++++ b/artifacts/web-member/src/auth/ClaimAccount.jsx
+@@ -8,7 +8,7 @@
+ // POST. This is the sole DOB identity check — the post-login record-view DOB gate
+ // was removed per D-115 (#359).
+ 
+-import { useState, useEffect } from 'react';
++import { useState, useEffect, useRef, useCallback } from 'react';
+ import { IconAlertCircle } from '@tabler/icons-react';
+ import { COLORS, FONT, RADIUS } from '../theme.js';
+ import { PrimaryButton } from '../components/ui.jsx';
+@@ -74,6 +74,37 @@ export default function ClaimAccount() {
+   // null = not parsed yet (pending); '' = parsed, genuinely missing.
+   const [token, setToken] = useState(null);
+ 
++  // Browser autofill (and password managers) can populate these inputs without
++  // firing React's change event, which used to leave `canSubmit` false forever —
++  // the DOB looked correct on screen but the Activate button stayed disabled.
++  // We keep refs on the fields, pull their DOM values into state on mount / focus /
++  // blur / animationstart (Chrome's autofill animation hook), and read the DOM one
++  // last time at submit so validation can never disagree with what the user sees.
++  const dobRef = useRef(null);
++  const passwordRef = useRef(null);
++  const confirmRef = useRef(null);
++
++  const syncFromDom = useCallback(() => {
++    const d = dobRef.current?.value ?? '';
++    const p = passwordRef.current?.value ?? '';
++    const c = confirmRef.current?.value ?? '';
++    setDob((prev) => (prev === d ? prev : d));
++    setPassword((prev) => (prev === p ? prev : p));
++    setConfirm((prev) => (prev === c ? prev : c));
++    return { dob: d, password: p, confirm: c };
++  }, []);
++
++  // Autofill can land a beat after mount; poll briefly instead of guessing.
++  useEffect(() => {
++    if (token === null || token === '') return undefined;
++    const timers = [0, 120, 350, 800, 1500].map((ms) => setTimeout(syncFromDom, ms));
++    window.addEventListener('focus', syncFromDom);
++    return () => {
++      timers.forEach(clearTimeout);
++      window.removeEventListener('focus', syncFromDom);
++    };
++  }, [token, syncFromDom]);
++
+   useEffect(() => {
+     if (typeof window === 'undefined') return;
+     const params = new URLSearchParams(window.location.search);
+@@ -93,10 +124,19 @@ export default function ClaimAccount() {
+   const canSubmit = Boolean(token) && dobValid && pwValid && confirm.length > 0 && !mismatch && !submitting;
+ 
+   async function handleActivate() {
+-    if (!canSubmit) return;
++    // Read the DOM one final time so an autofilled value that never fired a
++    // change event still submits correctly.
++    const current = syncFromDom();
++    const dobOk = DOB_RE.test(current.dob);
++    const pwOk =
++      current.password.length >= PW_MIN &&
++      current.password.length <= PW_MAX &&
++      /[A-Za-z]/.test(current.password) &&
++      /[0-9]/.test(current.password);
++    if (!token || submitting || !dobOk || !pwOk || !current.confirm || current.password !== current.confirm) return;
+     setSubmitting(true);
+     setError(null);
+-    const result = await claimAccount(token, password, dob);
++    const result = await claimAccount(token, current.password, current.dob);
+     if (result.kind === 'ok') {
+       // Account created + bound; hydration kicked off server-side. Send to login to
+       // sign in with the just-set password. Full reload so AuthContext initializes clean.
+@@ -109,6 +149,11 @@ export default function ClaimAccount() {
+ 
+   const tokenPending = token === null;
+   const noToken = token === '';
++  // A revoked, expired, or already-used link comes back as the generic
++  // INVALID_TOKEN reason (anti-enumeration). Rather than leaving the patient on a
++  // form they can never submit, swap in an explicit "no longer valid" panel.
++  const deadLink = Boolean(error) && (error.reason === 'INVALID_TOKEN' || error.reason === 'ALREADY_CLAIMED');
++  const alreadyClaimed = Boolean(error) && error.reason === 'ALREADY_CLAIMED';
+ 
+   if (tokenPending) {
+     return (
+@@ -134,10 +179,16 @@ export default function ClaimAccount() {
+           </p>
+         </div>
+ 
+-        {noToken ? (
++        {noToken || deadLink ? (
+           <div role="alert" style={{ display: 'flex', gap: 8, alignItems: 'flex-start', background: COLORS.dangerBg, color: COLORS.danger, borderRadius: RADIUS.sm, padding: '9px 11px', fontSize: 12, lineHeight: 1.4 }}>
+             <IconAlertCircle size={15} stroke={1.8} style={{ flexShrink: 0, marginTop: 1 }} />
+-            <span>This activation link is missing its access code. Please use the link from your invitation email, or contact the practice.</span>
++            <span>
++              {noToken
++                ? 'This activation link is missing its access code. Please use the link from your invitation email, or contact the practice.'
++                : alreadyClaimed
++                  ? 'This account is already set up. Please sign in below.'
++                  : 'This invitation is no longer valid — it may have expired, already been used, or been withdrawn. Please contact the practice for a new invitation.'}
++            </span>
+           </div>
+         ) : (
+           <>
+@@ -145,11 +196,15 @@ export default function ClaimAccount() {
+             <label htmlFor="dob" style={labelStyle}>Date of birth</label>
+             <input
+               id="dob"
++              ref={dobRef}
+               type="date"
+               value={dob}
+               max="9999-12-31"
+               autoComplete="bday"
+               onChange={(e) => setDob(e.target.value)}
++              onInput={syncFromDom}
++              onBlur={syncFromDom}
++              onAnimationStart={syncFromDom}
+               style={inputStyle}
+             />
+             </div>
+@@ -158,10 +213,14 @@ export default function ClaimAccount() {
+             <label htmlFor="new-password" style={labelStyle}>Password</label>
+             <input
+               id="new-password"
++              ref={passwordRef}
+               type="password"
+               value={password}
+               autoComplete="new-password"
+               onChange={(e) => setPassword(e.target.value)}
++              onInput={syncFromDom}
++              onBlur={syncFromDom}
++              onAnimationStart={syncFromDom}
+               style={inputStyle}
+             />
+             </div>
+@@ -170,10 +229,14 @@ export default function ClaimAccount() {
+             <label htmlFor="confirm-password" style={labelStyle}>Confirm password</label>
+             <input
+               id="confirm-password"
++              ref={confirmRef}
+               type="password"
+               value={confirm}
+               autoComplete="new-password"
+               onChange={(e) => setConfirm(e.target.value)}
++              onInput={syncFromDom}
++              onBlur={syncFromDom}
++              onAnimationStart={syncFromDom}
+               onKeyDown={(e) => { if (e.key === 'Enter' && canSubmit) handleActivate(); }}
+               style={inputStyle}
+             />
