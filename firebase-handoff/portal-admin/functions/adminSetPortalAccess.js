@@ -49,8 +49,41 @@ exports.adminSetPortalAccess = functions
     if (!reason) return jsonError(res, 400, 'INVALID_ARGUMENT', 'REASON_REQUIRED');
     if (!patch) return jsonError(res, 400, 'INVALID_ARGUMENT', 'PATCH_REQUIRED');
 
+    // Reject unknown top-level patch keys. Silently ignoring them let a no-op
+    // masquerade as a successful, audited action on a PHI control plane.
+    const ALLOWED_PATCH_KEYS = ['status', 'modules', 'hiddenItems', 'hideItem', 'unhideItem'];
+    for (const key of Object.keys(patch)) {
+      if (!ALLOWED_PATCH_KEYS.includes(key)) {
+        log('adminSetPortalAccess', 'unknown-patch-key', { elationPatientId, key });
+        return jsonError(
+          res,
+          400,
+          'INVALID_ARGUMENT',
+          'UNKNOWN_PATCH_KEY',
+          `Unsupported patch key "${key}". Allowed: ${ALLOWED_PATCH_KEYS.join(', ')}.`,
+        );
+      }
+    }
+    if (Object.keys(patch).length === 0) {
+      return jsonError(res, 400, 'INVALID_ARGUMENT', 'EMPTY_PATCH');
+    }
+
     if (patch.status && patch.status !== 'active' && patch.status !== 'suspended') {
       return jsonError(res, 400, 'INVALID_ARGUMENT', 'INVALID_STATUS');
+    }
+    for (const key of ['hideItem', 'unhideItem']) {
+      const op = patch[key];
+      if (op === undefined) continue;
+      if (!op || typeof op !== 'object' || Array.isArray(op)) {
+        return jsonError(res, 400, 'INVALID_ARGUMENT', 'INVALID_ITEM_OP');
+      }
+      if (!MODULES.includes(String(op.collection || ''))) {
+        return jsonError(res, 400, 'INVALID_ARGUMENT', 'UNKNOWN_MODULE');
+      }
+      // Ids are matched case-sensitively, exactly as stored.
+      if (!String(op.id || '').trim()) {
+        return jsonError(res, 400, 'INVALID_ARGUMENT', 'ITEM_ID_REQUIRED');
+      }
     }
     for (const key of Object.keys(patch.modules || {})) {
       if (!MODULES.includes(key)) return jsonError(res, 400, 'INVALID_ARGUMENT', 'UNKNOWN_MODULE');

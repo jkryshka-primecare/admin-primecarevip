@@ -125,7 +125,45 @@ function normalizeSnapshot(raw: RawAccessResponse | null | undefined): PortalAcc
   };
 }
 
+/**
+ * Firestore stores hiddenItems as a module-keyed map of id arrays
+ * ({ labs: ["SMOKE-LAB-2"] }). Tolerate the older array-of-objects/strings
+ * shapes so a rollback can't corrupt the next write. Ids are case-sensitive.
+ */
+function toHiddenMap(raw: unknown): Record<string, string[]> {
+  const out: Record<string, string[]> = {};
+  if (!raw) return out;
+  const push = (collection: string, id: string) => {
+    if (!id) return;
+    out[collection] = Array.from(new Set([...(out[collection] ?? []), id]));
+  };
+  if (Array.isArray(raw)) {
+    raw.filter(Boolean).forEach((h: unknown) => {
+      if (typeof h === "string") push("unknown", h);
+      else if (typeof h === "object") {
+        const o = h as Record<string, unknown>;
+        push(String(o.collection ?? o.module ?? "unknown"), String(o.id ?? ""));
+      }
+    });
+    return out;
+  }
+  if (typeof raw === "object") {
+    Object.entries(raw as Record<string, unknown>).forEach(([collection, items]) => {
+      if (!Array.isArray(items)) return;
+      items.filter(Boolean).forEach((it: unknown) => {
+        if (typeof it === "string") push(collection, it);
+        else if (typeof it === "object") {
+          const o = it as Record<string, unknown>;
+          push(String(o.collection ?? collection), String(o.id ?? ""));
+        }
+      });
+    });
+  }
+  return out;
+}
+
 export function usePortalAccess(elationPatientId: string | null, enabled = true) {
+
   const result = useQuery({
     queryKey: ["portal-admin", "access", elationPatientId],
     queryFn: () =>
@@ -166,8 +204,20 @@ export function usePortalMutations(elationPatientId: string | null) {
     onSuccess: invalidate,
   });
 
+  /**
+   * The backend only recognizes `status`, `modules` and `hiddenItems` on a
+   * patch, and treats `hiddenItems` as a full replacement. The panel speaks in
+   * single-item `hideItem` / `unhideItem` intents, so translate here: read the
+   * current snapshot immediately before the call, compute the next
+   * module-keyed map of ids, and send that.
+   *
+   * KNOWN LIMITATION: this read-modify-write happens on the client, so two
+   * concurrent hides on the same member can clobber each other (last write
+   * wins). Acceptable for a single-operator control plane; the permanent fix is
+   * an atomic hide/unhide inside the backend's setPortalAccess transaction.
+   */
   const setAccess = useMutation({
-    mutationFn: (vars: {
+    mutationFn: async (vars: {
       reason: string;
       patch: {
         status?: "active" | "suspended";
@@ -175,15 +225,34 @@ export function usePortalMutations(elationPatientId: string | null) {
         hideItem?: { collection: string; id: string; label?: string };
         unhideItem?: { collection: string; id: string };
       };
-    }) =>
-      callPortalAdmin({
+    }) => {
+      const { hideItem, unhideItem, ...rest } = vars.patch;
+      const patch: Record<string, unknown> = { ...rest };
+
+      if (hideItem || unhideItem) {
+        const target = hideItem ?? unhideItem!;
+        const fresh = await callPortalAdmin<RawAccessResponse>({
+          action: "get",
+          elationPatientId,
+        });
+        const current = toHiddenMap(fresh.data?.access?.hiddenItems);
+        const list = current[target.collection] ?? [];
+        current[target.collection] = hideItem
+          ? Array.from(new Set([...list, target.id]))
+          : list.filter((id) => id !== target.id);
+        patch.hiddenItems = current;
+      }
+
+      return callPortalAdmin({
         action: "setAccess",
         elationPatientId,
         reason: vars.reason,
-        patch: vars.patch,
-      }),
+        patch,
+      });
+    },
     onSuccess: invalidate,
   });
+
 
   return { issueInvite, revokeInvite, setAccess };
 }

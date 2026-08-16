@@ -436,10 +436,12 @@ export default function PortalAdminPanel({ elationId }: { elationId: string | nu
               <EyeOff className="h-3.5 w-3.5 mr-1" /> Hide item
             </Button>
             <p className="text-xs text-muted-foreground">
-              Use the item's id exactly as it appears in the portal. The member sees the
-              rest of the section unchanged, and the item's document returns "not
-              available".
+              Use the item's id exactly as it appears in the portal — matching is
+              case-sensitive. The member sees the rest of the section unchanged, and the
+              item's document returns "not available". Only the id is stored, so labels
+              are not kept after the change is saved.
             </p>
+
           </div>
 
           {hidden.length === 0 ? (
