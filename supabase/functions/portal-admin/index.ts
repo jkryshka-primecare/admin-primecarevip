@@ -22,16 +22,82 @@ type ServiceAccount = {
   project_id: string;
 };
 
-type Action = "get" | "invite" | "revoke" | "setAccess";
+type Action = "get" | "invite" | "revoke" | "setAccess" | "provision";
 
 const FUNCTION_BY_ACTION: Record<Action, string> = {
   get: "adminGetPortalAccess",
   invite: "adminIssueInvite",
   revoke: "adminRevokeInvite",
   setAccess: "adminSetPortalAccess",
+  provision: "adminProvisionPatients",
 };
 
-const MUTATIONS: Action[] = ["invite", "revoke", "setAccess"];
+const MUTATIONS: Action[] = ["invite", "revoke", "setAccess", "provision"];
+
+/** Actions that act on a set of members rather than a single patient. */
+const BATCH_ACTIONS: Action[] = ["provision"];
+
+/**
+ * A provision run creates portal roster records. It never sends an invite and
+ * never touches Elation or Hint. The cap keeps a mistaken call small enough to
+ * review and undo by hand.
+ */
+const MAX_PROVISION_BATCH = 300;
+
+/** Non-patient documents that must never be created or acted on in bulk. */
+const FIXTURE_HINT_MARKERS = ["_testseed", "test kieffer"];
+
+type ProvisionMember = {
+  hintId: string;
+  firstName: string;
+  lastName: string;
+  email: string | null;
+  dob: string;
+  phone: string | null;
+};
+
+function parseProvisionMembers(raw: unknown): ProvisionMember[] | string {
+  if (!Array.isArray(raw) || raw.length === 0) {
+    return "Select at least one member to provision.";
+  }
+  if (raw.length > MAX_PROVISION_BATCH) {
+    return `Provision at most ${MAX_PROVISION_BATCH} members at a time (received ${raw.length}).`;
+  }
+  const out: ProvisionMember[] = [];
+  const seen = new Set<string>();
+  for (const item of raw) {
+    if (!item || typeof item !== "object") return "Malformed member in the selection.";
+    const m = item as Record<string, unknown>;
+    const hintId = String(m.hintId ?? "").trim();
+    const firstName = String(m.firstName ?? "").trim();
+    const lastName = String(m.lastName ?? "").trim();
+    const dob = String(m.dob ?? "").trim();
+    if (!hintId) return "Every member must carry a Hint id.";
+    if (!firstName || !lastName) return `Member ${hintId} is missing a name.`;
+    // Date of birth is the join key everywhere in this system; without it the
+    // downstream Elation match cannot be trusted, so refuse rather than guess.
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(dob)) {
+      return `Member ${hintId} has no usable date of birth.`;
+    }
+    if (seen.has(hintId)) return `Member ${hintId} appears twice in the selection.`;
+    seen.add(hintId);
+
+    const haystack = `${firstName} ${lastName}`.toLowerCase();
+    if (FIXTURE_HINT_MARKERS.some((marker) => haystack.includes(marker))) {
+      return `Refusing to provision the smoke-test fixture (${firstName} ${lastName}).`;
+    }
+
+    out.push({
+      hintId,
+      firstName,
+      lastName,
+      email: m.email ? String(m.email).trim().slice(0, 320) : null,
+      dob,
+      phone: m.phone ? String(m.phone).trim().slice(0, 40) : null,
+    });
+  }
+  return out;
+}
 
 const FUNCTIONS_BASE =
   Deno.env.get("FIREBASE_FUNCTIONS_BASE_URL") ??
@@ -263,8 +329,9 @@ Deno.serve(async (req) => {
     return deny(400, `Unknown action "${action}"`);
   }
 
+  const isBatch = BATCH_ACTIONS.includes(action);
   const elationPatientId = String(body.elationPatientId ?? "").trim();
-  if (!elationPatientId) return deny(400, "elationPatientId is required");
+  if (!isBatch && !elationPatientId) return deny(400, "elationPatientId is required");
 
   const reason = typeof body.reason === "string" ? body.reason.trim().slice(0, 500) : "";
 
@@ -277,17 +344,34 @@ Deno.serve(async (req) => {
     }
   }
 
+  let provisionMembers: ProvisionMember[] = [];
+  if (action === "provision") {
+    const parsed = parseProvisionMembers(body.members);
+    if (typeof parsed === "string") return deny(400, parsed);
+    provisionMembers = parsed;
+  }
+
   // The acting person is taken from the verified session, never from the
   // client payload — the service account identifies the system, this
   // identifies the human.
   const actor = ctx.user.email ?? ctx.user.id;
 
-  const upstreamPayload: Record<string, unknown> = { elationPatientId, actor, reason };
+  const upstreamPayload: Record<string, unknown> = {
+    elationPatientId: isBatch ? null : elationPatientId,
+    actor,
+    reason,
+  };
   if (action === "invite") {
     upstreamPayload.reissue = body.reissue === true;
   }
   if (action === "setAccess") {
     upstreamPayload.patch = body.patch ?? {};
+  }
+  if (action === "provision") {
+    upstreamPayload.members = provisionMembers;
+    // Creating a roster record is not an invitation. The portal function
+    // refuses to send anything; this makes the intent explicit on the wire.
+    upstreamPayload.sendInvite = false;
   }
 
   const fnName = FUNCTION_BY_ACTION[action];
@@ -359,7 +443,30 @@ Deno.serve(async (req) => {
 
   const ok = status >= 200 && status < 300;
 
-  if (MUTATIONS.includes(action)) {
+  if (action === "provision") {
+    // One audit row per member, so every created record is individually
+    // attributable rather than hidden inside a batch summary.
+    const result = payload as
+      | { created?: { hintId?: string; elationPatientId?: string }[]; unresolved?: unknown[] }
+      | null;
+    const createdByHint = new Map<string, { hintId?: string; elationPatientId?: string }>();
+    for (const c of result?.created ?? []) {
+      if (c?.hintId) createdByHint.set(String(c.hintId), c);
+    }
+    for (const m of provisionMembers) {
+      const created = createdByHint.get(m.hintId);
+      await recordAction(ctx, {
+        elationPatientId: created?.elationPatientId ?? null,
+        action: "provision",
+        reason: reason || null,
+        before: null,
+        after: { hintId: m.hintId, name: `${m.firstName} ${m.lastName}`, created: Boolean(created) },
+        ok: ok && Boolean(created),
+        httpStatus: status,
+        errorMessage: ok && !created ? "Not created — no confident Elation match" : errorMessage,
+      });
+    }
+  } else if (MUTATIONS.includes(action)) {
     const result = payload as { before?: unknown; after?: unknown } | null;
     await recordAction(ctx, {
       elationPatientId,
@@ -377,9 +484,9 @@ Deno.serve(async (req) => {
     source: "portal.admin",
     resource: fnName,
     scope: action,
-    resource_id: elationPatientId,
+    resource_id: isBatch ? null : elationPatientId,
     http_status: status,
-    row_count: null,
+    row_count: isBatch ? provisionMembers.length : null,
   });
 
   return new Response(

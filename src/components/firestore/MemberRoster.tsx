@@ -1,10 +1,12 @@
 import { useMemo, useState } from "react";
-import { AlertCircle, Loader2, RefreshCw, Search, Users } from "lucide-react";
+import { AlertCircle, Loader2, RefreshCw, Search, UserPlus, Users } from "lucide-react";
 import {
   useMemberReconciliation,
   BUCKET_LABELS,
   type ReconBucket,
 } from "@/hooks/useMemberReconciliation";
+import { useAuth } from "@/hooks/useAuth";
+import ProvisionMissingDialog from "@/components/firestore/ProvisionMissingDialog";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -42,10 +44,12 @@ const BUCKET_TONE: Record<ReconBucket, string> = {
  * has a portal record. Read-only — nothing here writes to either system.
  */
 export default function MemberRoster() {
-  const { rows, counts, totals, loading, fetching, error, refetch } =
+  const { rows, counts, totals, missingMembers, loading, fetching, error, refetch } =
     useMemberReconciliation();
+  const { isAdmin } = useAuth();
   const [filter, setFilter] = useState<Filter>("all");
   const [search, setSearch] = useState("");
+  const [provisionOpen, setProvisionOpen] = useState(false);
 
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase();
@@ -69,10 +73,25 @@ export default function MemberRoster() {
             Hint memberships reconciled against member-app portal records · read-only
           </p>
         </div>
-        <Button variant="outline" size="icon" onClick={() => refetch()} disabled={loading}>
-          <RefreshCw className={cn("h-4 w-4", loading && "animate-spin")} />
-        </Button>
+        <div className="flex items-center gap-2">
+          {isAdmin && missingMembers.length > 0 && (
+            <Button variant="outline" size="sm" onClick={() => setProvisionOpen(true)}>
+              <UserPlus className="mr-1 h-3.5 w-3.5" />
+              Provision {missingMembers.length} missing record
+              {missingMembers.length === 1 ? "" : "s"}
+            </Button>
+          )}
+          <Button variant="outline" size="icon" onClick={() => refetch()} disabled={loading}>
+            <RefreshCw className={cn("h-4 w-4", loading && "animate-spin")} />
+          </Button>
+        </div>
       </div>
+
+      <ProvisionMissingDialog
+        open={provisionOpen}
+        onOpenChange={setProvisionOpen}
+        missing={missingMembers}
+      />
 
       {!loading && !error && (
         <Card className="bg-muted/30">
