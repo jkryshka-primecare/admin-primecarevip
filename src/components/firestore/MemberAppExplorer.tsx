@@ -1,6 +1,7 @@
 import { Fragment, useMemo, useState } from "react";
 import { AlertCircle, Database, Loader2, RefreshCw, Search } from "lucide-react";
 import { useFirestoreList, type FirestoreCollection } from "@/hooks/useFirestore";
+import MemberRoster from "@/components/firestore/MemberRoster";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -66,10 +67,15 @@ export default function MemberAppExplorer() {
   const [expanded, setExpanded] = useState<string | null>(null);
   const [status, setStatus] = useState<StatusFilter>("all");
   const [search, setSearch] = useState("");
+  const [patientsView, setPatientsView] = useState<"roster" | "raw">("roster");
 
-  const { docs, loading, fetching, error, refetch } = useFirestoreList(active, {
-    fetchAll: true,
-  });
+  const showRoster = active === "patients" && patientsView === "roster";
+
+  const { docs, loading, fetching, error, refetch } = useFirestoreList(
+    active,
+    { fetchAll: true },
+    !showRoster,
+  );
 
   const hasStatus = useMemo(() => docs.some((d) => "status" in d), [docs]);
 
@@ -139,6 +145,32 @@ export default function MemberAppExplorer() {
         ))}
       </div>
 
+      {active === "patients" && (
+        <div className="flex flex-wrap gap-1 bg-muted/50 border border-border rounded-full p-1 w-fit">
+          {([
+            { id: "roster", label: "Membership roster" },
+            { id: "raw", label: "Raw documents" },
+          ] as const).map((v) => (
+            <button
+              key={v.id}
+              onClick={() => setPatientsView(v.id)}
+              className={cn(
+                "px-3 py-1 rounded-full text-xs font-medium transition-colors",
+                patientsView === v.id
+                  ? "bg-accent text-accent-foreground"
+                  : "text-muted-foreground hover:text-foreground",
+              )}
+            >
+              {v.label}
+            </button>
+          ))}
+        </div>
+      )}
+
+      {showRoster ? (
+        <MemberRoster />
+      ) : (
+      <>
       <div className="flex flex-wrap items-center gap-3">
         {hasStatus && (
           <div className="flex flex-wrap gap-1 bg-muted/50 border border-border rounded-full p-1 w-fit">
@@ -258,6 +290,8 @@ export default function MemberAppExplorer() {
 
         </CardContent>
       </Card>
+      </>
+      )}
     </div>
   );
 }
