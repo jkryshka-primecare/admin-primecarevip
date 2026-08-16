@@ -125,7 +125,45 @@ function normalizeSnapshot(raw: RawAccessResponse | null | undefined): PortalAcc
   };
 }
 
+/**
+ * Firestore stores hiddenItems as a module-keyed map of id arrays
+ * ({ labs: ["SMOKE-LAB-2"] }). Tolerate the older array-of-objects/strings
+ * shapes so a rollback can't corrupt the next write. Ids are case-sensitive.
+ */
+function toHiddenMap(raw: unknown): Record<string, string[]> {
+  const out: Record<string, string[]> = {};
+  if (!raw) return out;
+  const push = (collection: string, id: string) => {
+    if (!id) return;
+    out[collection] = Array.from(new Set([...(out[collection] ?? []), id]));
+  };
+  if (Array.isArray(raw)) {
+    raw.filter(Boolean).forEach((h: unknown) => {
+      if (typeof h === "string") push("unknown", h);
+      else if (typeof h === "object") {
+        const o = h as Record<string, unknown>;
+        push(String(o.collection ?? o.module ?? "unknown"), String(o.id ?? ""));
+      }
+    });
+    return out;
+  }
+  if (typeof raw === "object") {
+    Object.entries(raw as Record<string, unknown>).forEach(([collection, items]) => {
+      if (!Array.isArray(items)) return;
+      items.filter(Boolean).forEach((it: unknown) => {
+        if (typeof it === "string") push(collection, it);
+        else if (typeof it === "object") {
+          const o = it as Record<string, unknown>;
+          push(String(o.collection ?? collection), String(o.id ?? ""));
+        }
+      });
+    });
+  }
+  return out;
+}
+
 export function usePortalAccess(elationPatientId: string | null, enabled = true) {
+
   const result = useQuery({
     queryKey: ["portal-admin", "access", elationPatientId],
     queryFn: () =>
