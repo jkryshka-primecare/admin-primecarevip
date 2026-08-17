@@ -366,7 +366,8 @@ export default function ProvisionMissingDialog({
             {ineligible.length > 0 && (
               <p className="text-xs text-muted-foreground">
                 {ineligible.length} member{ineligible.length === 1 ? " is" : "s are"} not
-                eligible (missing date of birth, name or Hint id) and cannot be selected.
+                eligible (missing date of birth, name or Hint id
+                {adultsOnly ? ", or under 18" : ""}) and cannot be selected.
               </p>
             )}
 
@@ -374,8 +375,9 @@ export default function ProvisionMissingDialog({
               <table className="w-full text-xs">
                 <tbody>
                   {missing.map((r) => {
-                    const e = eligibility(r);
+                    const e = eligibility(r, adultsOnly);
                     const on = e.ok && selectedKeys.has(r.key);
+                    const age = ageFromDob(r.dob);
                     return (
                       <tr key={r.key} className="border-b last:border-0">
                         <td className="w-8 p-2">
@@ -390,9 +392,13 @@ export default function ProvisionMissingDialog({
                         </td>
                         <td className="p-2 text-muted-foreground">{r.email ?? "—"}</td>
                         <td className="p-2 font-mono text-muted-foreground">{r.dob ?? "—"}</td>
+                        <td className="p-2 font-mono text-muted-foreground">
+                          {age === null ? "—" : `${age}y`}
+                        </td>
                         <td className="p-2 text-right text-[10px] uppercase tracking-wide text-muted-foreground">
                           {e.ok ? (r.memberType ?? "") : e.why}
                         </td>
+
                       </tr>
                     );
                   })}
