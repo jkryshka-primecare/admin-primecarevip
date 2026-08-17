@@ -1,0 +1,83 @@
+# Post-deploy IAM hardening step for .github/workflows/deploy-production.yml
+#
+# Paste this job step AFTER the deploy step and BEFORE (or alongside) the
+# health gate, inside the same job that already ran `firebase deploy`, so it
+# reuses the authenticated deploy service account.
+#
+# Why: 1st-gen HTTP functions get a public `allUsers` invoker binding on first
+# deploy. The patient read CFs need that (they are gated by
+# verifyPatientToken), so a blanket org policy is wrong. The admin plane must
+# never be publicly invocable — requireAdminCaller is the inner gate, IAM is
+# the outer one.
+
+      - name: Lock admin function invokers (no allUsers)
+        run: |
+          set -uo pipefail
+          REGION=us-central1
+          ADMIN_SA=portal-admin@prive-care-vip.iam.gserviceaccount.com
+          ADMIN_FUNCTIONS=(
+            adminIssueInvite
+            adminRevokeInvite
+            adminSetPortalAccess
+            adminGetPortalAccess
+            adminProvisionPatients
+          )
+
+          gcloud config set project prive-care-vip --quiet
+
+          fail=0
+          for FN in "${ADMIN_FUNCTIONS[@]}"; do
+            echo "::group::$FN"
+
+            # 1. Strip the public binding. Idempotent: gcloud exits non-zero
+            #    with NOT_FOUND when the binding is already absent, which is
+            #    the desired steady state, so tolerate exactly that.
+            out=$(gcloud functions remove-iam-policy-binding "$FN" \
+              --region="$REGION" \
+              --member=allUsers \
+              --role=roles/cloudfunctions.invoker 2>&1) || true
+            if echo "$out" | grep -qiE 'NOT_FOUND|not found|does not have|Policy binding.*not found'; then
+              echo "allUsers binding already absent"
+            elif echo "$out" | grep -qiE '^ERROR'; then
+              echo "$out"
+              echo "FAILED to remove allUsers from $FN"
+              fail=1
+              echo "::endgroup::"
+              continue
+            else
+              echo "removed allUsers binding"
+            fi
+
+            # 2. Re-assert the only caller that may invoke the admin plane.
+            if ! gcloud functions add-iam-policy-binding "$FN" \
+              --region="$REGION" \
+              --member="serviceAccount:${ADMIN_SA}" \
+              --role=roles/cloudfunctions.invoker >/dev/null; then
+              echo "FAILED to bind $ADMIN_SA as invoker on $FN"
+              fail=1
+              echo "::endgroup::"
+              continue
+            fi
+
+            # 3. Verify the resulting policy: allUsers/allAuthenticatedUsers
+            #    absent, portal-admin present.
+            policy=$(gcloud functions get-iam-policy "$FN" --region="$REGION" --format=json)
+            if echo "$policy" | grep -qE '"(allUsers|allAuthenticatedUsers)"'; then
+              echo "$policy"
+              echo "STILL PUBLIC after remediation: $FN"
+              fail=1
+            elif ! echo "$policy" | grep -q "$ADMIN_SA"; then
+              echo "$policy"
+              echo "MISSING portal-admin invoker binding: $FN"
+              fail=1
+            else
+              echo "$FN OK — private, portal-admin invoker only"
+            fi
+
+            echo "::endgroup::"
+          done
+
+          if [ "$fail" -ne 0 ]; then
+            echo "Admin IAM hardening failed — admin endpoints may be publicly invocable."
+            exit 1
+          fi
