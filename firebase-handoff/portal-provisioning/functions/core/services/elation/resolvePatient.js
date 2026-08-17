@@ -15,7 +15,7 @@
 //     email across parent and children. DOB is always in the key.
 //
 // Credentials (Secret Manager, or process.env in the emulator):
-//   ELATION_CLIENT_ID, ELATION_CLIENT_SECRET, ELATION_USERNAME, ELATION_PASSWORD
+//   ELATION_CLIENT_ID, ELATION_CLIENT_SECRET, ELATION_API_USERNAME, ELATION_API_PASSWORD
 // Base URL defaults to production; override with ELATION_BASE_URL for sandbox.
 
 const BASE_URL = (process.env.ELATION_BASE_URL || 'https://app.elationemr.com/api/2.0').replace(
@@ -40,8 +40,8 @@ async function loadCredentials() {
     const names = [
       'ELATION_CLIENT_ID',
       'ELATION_CLIENT_SECRET',
-      'ELATION_USERNAME',
-      'ELATION_PASSWORD',
+      'ELATION_API_USERNAME',
+      'ELATION_API_PASSWORD',
     ];
     const out = {};
     const missing = [];
@@ -99,8 +99,8 @@ async function getAccessToken(forceRefresh = false) {
     grant_type: 'password',
     client_id: creds.ELATION_CLIENT_ID,
     client_secret: creds.ELATION_CLIENT_SECRET,
-    username: creds.ELATION_USERNAME,
-    password: creds.ELATION_PASSWORD,
+    username: creds.ELATION_API_USERNAME,
+    password: creds.ELATION_API_PASSWORD,
   });
 
   const res = await fetch(`${BASE_URL}/oauth2/token/`, {
