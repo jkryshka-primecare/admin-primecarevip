@@ -95,7 +95,15 @@ async function findExisting(db, member) {
 
 
 exports.adminProvisionPatients = functions
-  .runWith({ timeoutSeconds: 540, memory: '512MB' })
+  // ELATION_CLIENT_ID / ELATION_CLIENT_SECRET are bound here so the shared
+  // Elation client (core/services/elation/client.js) can read them from
+  // process.env, exactly as the read CFs do. No username/password secrets and
+  // no manual secretAccessor grant are needed.
+  .runWith({
+    timeoutSeconds: 540,
+    memory: '512MB',
+    secrets: ['ELATION_CLIENT_ID', 'ELATION_CLIENT_SECRET'],
+  })
   .https.onRequest(async (req, res) => {
     res.set('Cache-Control', 'no-store');
 
