@@ -99,30 +99,29 @@ const { resolvePatient, resolveElationPatient } = require('./core/services/elati
 
 **Behaviour**
 
-- `GET /patients/?last_name=&dob=` only. Read-only; it never writes to Elation.
+- `GET /patients/?last_name=&dob=` only, through the shared
+  `core/services/elation/client.js`. Read-only; it never writes to Elation.
 - Every result is re-verified locally on first name + last name + DOB — the API
   filter is not trusted on its own, and a last name + DOB hit alone is never
   accepted (that is how a twin or same-DOB sibling would land on the wrong
   chart). Identical first+last+DOB on two charts is `AMBIGUOUS_MATCH`.
-- Email may only narrow an already-matched set. It never matches alone
-  (families share one) and never widens the set.
+- Email is not read at all — never a match key, never a tiebreak.
 - Returns `{ id, confident, reason, candidates }`. `confident: true` only for a
-  single surviving chart. `NO_MATCH`, `AMBIGUOUS_MATCH`, `ELATION_AUTH_FAILED`
-  and `ELATION_LOOKUP_FAILED` all return `confident: false`, which the caller
-  reports as `unresolved` — nothing is written.
+  single surviving chart. `NO_MATCH`, `AMBIGUOUS_MATCH`, and any typed client
+  error (`ELATION_AUTH_FAILED`, `ELATION_RATE_LIMITED`, …, falling back to
+  `ELATION_LOOKUP_FAILED`) return `confident: false`, which the caller reports
+  as `unresolved` — nothing is written.
 - Deleted charts (`deleted_date`) are excluded.
 
-**Credentials** — Secret Manager secrets in `prive-care-vip`, falling back to
-`process.env` under the emulator:
+**Credentials** — inherited from the shared client; the function binds:
 
 ```
-ELATION_CLIENT_ID   ELATION_CLIENT_SECRET   ELATION_API_USERNAME   ELATION_API_PASSWORD
-ELATION_BASE_URL    # optional, defaults to https://app.elationemr.com/api/2.0
+ELATION_CLIENT_ID   ELATION_CLIENT_SECRET
 ```
 
-Grant the function's runtime service account `roles/secretmanager.secretAccessor`
-on those four secrets. One OAuth token is minted per batch and cached (refreshed
-a minute early, re-minted once on a 401), so a 300-member run is one auth call.
+Token minting, caching and base URL are all owned by `client.js` — this module
+adds none of its own.
+
 
 **Sanity check before the dry run** — confirm a known member resolves and a
 known family email does not over-match:
