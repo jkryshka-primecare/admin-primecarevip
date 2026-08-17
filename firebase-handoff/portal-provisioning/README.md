@@ -49,7 +49,7 @@ members the Membership roster in Prime Care OS currently flags as
    (snapshot + health gate) — the gate's unauthenticated curl would 403.
 
 5. Secrets: the resolver reads `ELATION_CLIENT_ID`, `ELATION_CLIENT_SECRET`,
-   `ELATION_USERNAME`, `ELATION_PASSWORD` from Secret Manager at runtime.
+   `ELATION_API_USERNAME`, `ELATION_API_PASSWORD` from Secret Manager at runtime.
    Confirm all four exist and that the functions runtime SA holds
    `secretmanager.secretAccessor` on each. If a grant is missing it fails
    safe: every member comes back unresolved with `ELATION_CREDENTIALS_MISSING`.
@@ -114,7 +114,7 @@ const { resolvePatient, resolveElationPatient } = require('./core/services/elati
 `process.env` under the emulator:
 
 ```
-ELATION_CLIENT_ID   ELATION_CLIENT_SECRET   ELATION_USERNAME   ELATION_PASSWORD
+ELATION_CLIENT_ID   ELATION_CLIENT_SECRET   ELATION_API_USERNAME   ELATION_API_PASSWORD
 ELATION_BASE_URL    # optional, defaults to https://app.elationemr.com/api/2.0
 ```
 
