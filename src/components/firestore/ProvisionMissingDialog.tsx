@@ -20,6 +20,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
+import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
 import { toast } from "@/hooks/use-toast";
 import { cn } from "@/lib/utils";
@@ -32,27 +33,54 @@ const VALIDATION_BATCH = 5;
 
 const ISO_DATE = /^\d{4}-\d{2}-\d{2}$/;
 
+/** Minimum age provisioned while minors wait on Release 2b guardian linking. */
+const ADULT_AGE = 18;
+
+/**
+ * Age in whole years as of today, computed from the date of birth. Hint's
+ * member type ("Child"/"Spouse") is not trustworthy for this — adult
+ * dependents appear as "Child" and we have seen a "Spouse" born in 2015.
+ */
+function ageFromDob(dob: string | null): number | null {
+  if (!dob || !ISO_DATE.test(dob)) return null;
+  const [y, m, d] = dob.split("-").map(Number);
+  const today = new Date();
+  let age = today.getFullYear() - y;
+  const beforeBirthday =
+    today.getMonth() + 1 < m || (today.getMonth() + 1 === m && today.getDate() < d);
+  if (beforeBirthday) age -= 1;
+  return age;
+}
+
 /**
  * Date of birth is the join key this whole system relies on. Without one, a
  * downstream Elation match can't be trusted, so the row is shown but locked.
  */
-function eligibility(row: ReconRow): { ok: boolean; why?: string } {
+function eligibility(row: ReconRow, adultsOnly = false): { ok: boolean; why?: string } {
   if (isTestFixture(row.elationId)) return { ok: false, why: "Smoke-test fixture" };
   if (!row.hintId) return { ok: false, why: "No Hint id" };
   if (!row.dob || !ISO_DATE.test(row.dob)) return { ok: false, why: "No date of birth" };
   if (!row.firstName || !row.lastName) return { ok: false, why: "Incomplete name" };
+  if (adultsOnly) {
+    const age = ageFromDob(row.dob);
+    if (age === null || age < ADULT_AGE) return { ok: false, why: "Minor — holds for 2b" };
+  }
   return { ok: true };
 }
 
-function toCsv(rows: ReconRow[]): string {
-  const head = ["name", "email", "dob", "phone", "hint_id", "member_type", "eligible", "reason"];
+
+function toCsv(rows: ReconRow[], adultsOnly: boolean): string {
+  const head = [
+    "name", "email", "dob", "age", "phone", "hint_id", "member_type", "eligible", "reason",
+  ];
   const esc = (v: unknown) => `"${String(v ?? "").replace(/"/g, '""')}"`;
   const lines = rows.map((r) => {
-    const e = eligibility(r);
-    return [r.name, r.email, r.dob, r.phone, r.hintId, r.memberType, e.ok, e.why ?? ""]
+    const e = eligibility(r, adultsOnly);
+    return [r.name, r.email, r.dob, ageFromDob(r.dob) ?? "", r.phone, r.hintId, r.memberType, e.ok, e.why ?? ""]
       .map(esc)
       .join(",");
   });
+
   return [head.join(","), ...lines].join("\n");
 }
 
@@ -84,12 +112,24 @@ export default function ProvisionMissingDialog({
   const { isAdmin } = useAuth();
   const provision = useProvisionPortalRecords();
   const [reason, setReason] = useState("");
+  const [adultsOnly, setAdultsOnly] = useState(true);
   const [selectedKeys, setSelectedKeys] = useState<Set<string>>(new Set());
   const [result, setResult] = useState<ProvisionResult | null>(null);
   const [submitted, setSubmitted] = useState<ReconRow[]>([]);
 
-  const eligible = useMemo(() => missing.filter((r) => eligibility(r).ok), [missing]);
-  const ineligible = useMemo(() => missing.filter((r) => !eligibility(r).ok), [missing]);
+  const eligible = useMemo(
+    () => missing.filter((r) => eligibility(r, adultsOnly).ok),
+    [missing, adultsOnly],
+  );
+  const ineligible = useMemo(
+    () => missing.filter((r) => !eligibility(r, adultsOnly).ok),
+    [missing, adultsOnly],
+  );
+  const minors = useMemo(
+    () => missing.filter((r) => eligibility(r, false).ok && !eligibility(r, true).ok),
+    [missing],
+  );
+
   const selected = useMemo(
     () => eligible.filter((r) => selectedKeys.has(r.key)),
     [eligible, selectedKeys],
@@ -148,7 +188,7 @@ export default function ProvisionMissingDialog({
   }
 
   function downloadCsv() {
-    const blob = new Blob([toCsv(missing)], { type: "text/csv;charset=utf-8" });
+    const blob = new Blob([toCsv(missing, adultsOnly)], { type: "text/csv;charset=utf-8" });
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
     a.href = url;
@@ -307,6 +347,27 @@ export default function ProvisionMissingDialog({
               </div>
             </div>
 
+            <div className="flex flex-wrap items-center gap-3 rounded-md border bg-muted/40 p-3">
+              <Switch
+                id="adults-only"
+                checked={adultsOnly}
+                onCheckedChange={(v) => {
+                  setAdultsOnly(v);
+                  setSelectedKeys(new Set());
+                }}
+                disabled={provision.isPending}
+              />
+              <label htmlFor="adults-only" className="text-sm font-medium">
+                Adults only ({ADULT_AGE}+)
+              </label>
+              <span className="text-xs text-muted-foreground">
+                Age is computed from date of birth as of today — Hint member type is not used.
+                {minors.length > 0 &&
+                  ` ${minors.length} minor${minors.length === 1 ? "" : "s"} held for Release 2b.`}
+              </span>
+            </div>
+
+
             {selected.length === 0 && (
               <p className="text-xs text-muted-foreground">
                 Nothing is selected. Start with a {VALIDATION_BATCH}-member validation batch,
@@ -327,7 +388,8 @@ export default function ProvisionMissingDialog({
             {ineligible.length > 0 && (
               <p className="text-xs text-muted-foreground">
                 {ineligible.length} member{ineligible.length === 1 ? " is" : "s are"} not
-                eligible (missing date of birth, name or Hint id) and cannot be selected.
+                eligible (missing date of birth, name or Hint id
+                {adultsOnly ? ", or under 18" : ""}) and cannot be selected.
               </p>
             )}
 
@@ -335,8 +397,9 @@ export default function ProvisionMissingDialog({
               <table className="w-full text-xs">
                 <tbody>
                   {missing.map((r) => {
-                    const e = eligibility(r);
+                    const e = eligibility(r, adultsOnly);
                     const on = e.ok && selectedKeys.has(r.key);
+                    const age = ageFromDob(r.dob);
                     return (
                       <tr key={r.key} className="border-b last:border-0">
                         <td className="w-8 p-2">
@@ -351,9 +414,13 @@ export default function ProvisionMissingDialog({
                         </td>
                         <td className="p-2 text-muted-foreground">{r.email ?? "—"}</td>
                         <td className="p-2 font-mono text-muted-foreground">{r.dob ?? "—"}</td>
+                        <td className="p-2 font-mono text-muted-foreground">
+                          {age === null ? "—" : `${age}y`}
+                        </td>
                         <td className="p-2 text-right text-[10px] uppercase tracking-wide text-muted-foreground">
                           {e.ok ? (r.memberType ?? "") : e.why}
                         </td>
+
                       </tr>
                     );
                   })}
