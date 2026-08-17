@@ -111,12 +111,24 @@ export default function ProvisionMissingDialog({
   const { isAdmin } = useAuth();
   const provision = useProvisionPortalRecords();
   const [reason, setReason] = useState("");
+  const [adultsOnly, setAdultsOnly] = useState(true);
   const [selectedKeys, setSelectedKeys] = useState<Set<string>>(new Set());
   const [result, setResult] = useState<ProvisionResult | null>(null);
   const [submitted, setSubmitted] = useState<ReconRow[]>([]);
 
-  const eligible = useMemo(() => missing.filter((r) => eligibility(r).ok), [missing]);
-  const ineligible = useMemo(() => missing.filter((r) => !eligibility(r).ok), [missing]);
+  const eligible = useMemo(
+    () => missing.filter((r) => eligibility(r, adultsOnly).ok),
+    [missing, adultsOnly],
+  );
+  const ineligible = useMemo(
+    () => missing.filter((r) => !eligibility(r, adultsOnly).ok),
+    [missing, adultsOnly],
+  );
+  const minors = useMemo(
+    () => missing.filter((r) => eligibility(r, false).ok && !eligibility(r, true).ok),
+    [missing],
+  );
+
   const selected = useMemo(
     () => eligible.filter((r) => selectedKeys.has(r.key)),
     [eligible, selectedKeys],
