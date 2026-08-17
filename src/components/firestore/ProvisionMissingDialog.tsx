@@ -346,6 +346,27 @@ export default function ProvisionMissingDialog({
               </div>
             </div>
 
+            <div className="flex flex-wrap items-center gap-3 rounded-md border bg-muted/40 p-3">
+              <Switch
+                id="adults-only"
+                checked={adultsOnly}
+                onCheckedChange={(v) => {
+                  setAdultsOnly(v);
+                  setSelectedKeys(new Set());
+                }}
+                disabled={provision.isPending}
+              />
+              <label htmlFor="adults-only" className="text-sm font-medium">
+                Adults only ({ADULT_AGE}+)
+              </label>
+              <span className="text-xs text-muted-foreground">
+                Age is computed from date of birth as of today — Hint member type is not used.
+                {minors.length > 0 &&
+                  ` ${minors.length} minor${minors.length === 1 ? "" : "s"} held for Release 2b.`}
+              </span>
+            </div>
+
+
             {selected.length === 0 && (
               <p className="text-xs text-muted-foreground">
                 Nothing is selected. Start with a {VALIDATION_BATCH}-member validation batch,
