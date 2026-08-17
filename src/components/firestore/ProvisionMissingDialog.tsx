@@ -68,15 +68,18 @@ function eligibility(row: ReconRow, adultsOnly = false): { ok: boolean; why?: st
 }
 
 
-function toCsv(rows: ReconRow[]): string {
-  const head = ["name", "email", "dob", "phone", "hint_id", "member_type", "eligible", "reason"];
+function toCsv(rows: ReconRow[], adultsOnly: boolean): string {
+  const head = [
+    "name", "email", "dob", "age", "phone", "hint_id", "member_type", "eligible", "reason",
+  ];
   const esc = (v: unknown) => `"${String(v ?? "").replace(/"/g, '""')}"`;
   const lines = rows.map((r) => {
-    const e = eligibility(r);
-    return [r.name, r.email, r.dob, r.phone, r.hintId, r.memberType, e.ok, e.why ?? ""]
+    const e = eligibility(r, adultsOnly);
+    return [r.name, r.email, r.dob, ageFromDob(r.dob) ?? "", r.phone, r.hintId, r.memberType, e.ok, e.why ?? ""]
       .map(esc)
       .join(",");
   });
+
   return [head.join(","), ...lines].join("\n");
 }
 
