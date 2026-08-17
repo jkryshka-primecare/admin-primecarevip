@@ -32,17 +32,41 @@ const VALIDATION_BATCH = 5;
 
 const ISO_DATE = /^\d{4}-\d{2}-\d{2}$/;
 
+/** Minimum age provisioned while minors wait on Release 2b guardian linking. */
+const ADULT_AGE = 18;
+
+/**
+ * Age in whole years as of today, computed from the date of birth. Hint's
+ * member type ("Child"/"Spouse") is not trustworthy for this — adult
+ * dependents appear as "Child" and we have seen a "Spouse" born in 2015.
+ */
+function ageFromDob(dob: string | null): number | null {
+  if (!dob || !ISO_DATE.test(dob)) return null;
+  const [y, m, d] = dob.split("-").map(Number);
+  const today = new Date();
+  let age = today.getFullYear() - y;
+  const beforeBirthday =
+    today.getMonth() + 1 < m || (today.getMonth() + 1 === m && today.getDate() < d);
+  if (beforeBirthday) age -= 1;
+  return age;
+}
+
 /**
  * Date of birth is the join key this whole system relies on. Without one, a
  * downstream Elation match can't be trusted, so the row is shown but locked.
  */
-function eligibility(row: ReconRow): { ok: boolean; why?: string } {
+function eligibility(row: ReconRow, adultsOnly = false): { ok: boolean; why?: string } {
   if (isTestFixture(row.elationId)) return { ok: false, why: "Smoke-test fixture" };
   if (!row.hintId) return { ok: false, why: "No Hint id" };
   if (!row.dob || !ISO_DATE.test(row.dob)) return { ok: false, why: "No date of birth" };
   if (!row.firstName || !row.lastName) return { ok: false, why: "Incomplete name" };
+  if (adultsOnly) {
+    const age = ageFromDob(row.dob);
+    if (age === null || age < ADULT_AGE) return { ok: false, why: "Minor — holds for 2b" };
+  }
   return { ok: true };
 }
+
 
 function toCsv(rows: ReconRow[]): string {
   const head = ["name", "email", "dob", "phone", "hint_id", "member_type", "eligible", "reason"];
