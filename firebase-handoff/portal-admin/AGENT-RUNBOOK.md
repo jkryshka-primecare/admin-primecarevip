@@ -268,6 +268,10 @@ email and reason. **No bulk invite waves until 6a–6h pass.**
 - CI proposes deleting or updating a function outside the intended set.
 - `SENDGRID_API_KEY` is missing from Secret Manager.
 - A curl to a new function returns `200` unauthenticated.
+- An `admin*` function still shows an `allUsers` invoker binding after a deploy
+  (see `firebase-handoff/portal-iam-hardening/` — the pipeline step should
+  strip it and fail the deploy if it cannot).
+
 - An existing function's "Last deployed" timestamp changes unexpectedly.
 - Any step needs a permission broader than those listed.
 
