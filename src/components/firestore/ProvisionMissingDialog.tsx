@@ -187,7 +187,7 @@ export default function ProvisionMissingDialog({
   }
 
   function downloadCsv() {
-    const blob = new Blob([toCsv(missing)], { type: "text/csv;charset=utf-8" });
+    const blob = new Blob([toCsv(missing, adultsOnly)], { type: "text/csv;charset=utf-8" });
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
     a.href = url;
