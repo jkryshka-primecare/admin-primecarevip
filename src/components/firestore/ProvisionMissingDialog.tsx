@@ -27,6 +27,9 @@ import { cn } from "@/lib/utils";
 /** Matches MAX_PROVISION_BATCH in the portal-admin edge function. */
 const MAX_BATCH = 300;
 
+/** Size of the recommended first validation run against production. */
+const VALIDATION_BATCH = 5;
+
 const ISO_DATE = /^\d{4}-\d{2}-\d{2}$/;
 
 /**
@@ -53,11 +56,21 @@ function toCsv(rows: ReconRow[]): string {
   return [head.join(","), ...lines].join("\n");
 }
 
+type Outcome = {
+  key: string;
+  name: string;
+  hintId: string;
+  status: "created" | "unresolved" | "skipped";
+  detail: string;
+};
+
 /**
  * Bulk provisioning of portal roster records for active members who have none.
  *
- * Creating a record does NOT invite anyone. No email is sent, nothing is
- * written to Elation or Hint, and each member creates its own audit row.
+ * Selection is opt-in: nothing is selected until staff choose rows, so the
+ * first production run can be a small validation batch. Creating a record does
+ * NOT invite anyone. No email is sent, nothing is written to Elation or Hint,
+ * and each member creates its own audit row.
  */
 export default function ProvisionMissingDialog({
   open,
@@ -71,24 +84,67 @@ export default function ProvisionMissingDialog({
   const { isAdmin } = useAuth();
   const provision = useProvisionPortalRecords();
   const [reason, setReason] = useState("");
-  const [excluded, setExcluded] = useState<Set<string>>(new Set());
+  const [selectedKeys, setSelectedKeys] = useState<Set<string>>(new Set());
   const [result, setResult] = useState<ProvisionResult | null>(null);
+  const [submitted, setSubmitted] = useState<ReconRow[]>([]);
 
   const eligible = useMemo(() => missing.filter((r) => eligibility(r).ok), [missing]);
   const ineligible = useMemo(() => missing.filter((r) => !eligibility(r).ok), [missing]);
   const selected = useMemo(
-    () => eligible.filter((r) => !excluded.has(r.key)),
-    [eligible, excluded],
+    () => eligible.filter((r) => selectedKeys.has(r.key)),
+    [eligible, selectedKeys],
   );
   const overCap = selected.length > MAX_BATCH;
 
+  const outcomes: Outcome[] = useMemo(() => {
+    if (!result) return [];
+    const createdBy = new Map(result.created.map((c) => [c.hintId, c]));
+    const unresolvedBy = new Map(result.unresolved.map((u) => [u.hintId, u]));
+    const skippedBy = new Map((result.skipped ?? []).map((s) => [s.hintId, s]));
+    return submitted.map((r) => {
+      const hintId = r.hintId as string;
+      const created = createdBy.get(hintId);
+      if (created) {
+        return {
+          key: r.key,
+          name: r.name,
+          hintId,
+          status: "created" as const,
+          detail: created.elationPatientId ? `Elation ${created.elationPatientId}` : "created",
+        };
+      }
+      const unresolved = unresolvedBy.get(hintId);
+      if (unresolved) {
+        return {
+          key: r.key,
+          name: r.name,
+          hintId,
+          status: "unresolved" as const,
+          detail: unresolved.reason ?? "no confident Elation match",
+        };
+      }
+      const skipped = skippedBy.get(hintId);
+      return {
+        key: r.key,
+        name: r.name,
+        hintId,
+        status: "skipped" as const,
+        detail: skipped?.reason ?? "already had a portal record",
+      };
+    });
+  }, [result, submitted]);
+
   function toggle(key: string) {
-    setExcluded((prev) => {
+    setSelectedKeys((prev) => {
       const next = new Set(prev);
       if (next.has(key)) next.delete(key);
       else next.add(key);
       return next;
     });
+  }
+
+  function selectFirst(n: number) {
+    setSelectedKeys(new Set(eligible.slice(0, n).map((r) => r.key)));
   }
 
   function downloadCsv() {
@@ -111,7 +167,8 @@ export default function ProvisionMissingDialog({
       });
       return;
     }
-    const members: ProvisionMember[] = selected.map((r) => ({
+    const batch = selected;
+    const members: ProvisionMember[] = batch.map((r) => ({
       hintId: r.hintId as string,
       firstName: r.firstName,
       lastName: r.lastName,
@@ -123,6 +180,7 @@ export default function ProvisionMissingDialog({
     provision
       .mutateAsync({ members, reason: reason.trim() })
       .then((res) => {
+        setSubmitted(batch);
         setResult(res);
         toast({
           title: `${res.created.length} portal record${res.created.length === 1 ? "" : "s"} created`,
@@ -147,7 +205,9 @@ export default function ProvisionMissingDialog({
       onOpenChange={(next) => {
         if (!next) {
           setResult(null);
+          setSubmitted([]);
           setReason("");
+          setSelectedKeys(new Set());
         }
         onOpenChange(next);
       }}
@@ -156,53 +216,103 @@ export default function ProvisionMissingDialog({
         <DialogHeader>
           <DialogTitle className="font-serif">Provision missing portal records</DialogTitle>
           <DialogDescription>
-            Creates a portal roster record for active members who have none. No invitation is
-            sent and nothing is written to Elation or Hint — inviting stays a separate,
-            deliberate action.
+            Creates a portal roster record for the members you select. No invitation is sent and
+            nothing is written to Elation or Hint — inviting stays a separate, deliberate action.
           </DialogDescription>
         </DialogHeader>
 
         {result ? (
           <div className="space-y-3 text-sm">
-            <p>
-              <span className="font-mono text-lg text-success">{result.created.length}</span>{" "}
-              records created.{" "}
-              {result.unresolved.length > 0 && (
-                <>
-                  <span className="font-mono text-lg text-destructive">
-                    {result.unresolved.length}
-                  </span>{" "}
-                  skipped.
-                </>
-              )}
+            <p className="flex flex-wrap items-baseline gap-x-4 gap-y-1">
+              <span>
+                <span className="font-mono text-lg text-success">{result.created.length}</span>{" "}
+                created
+              </span>
+              <span>
+                <span className="font-mono text-lg text-destructive">
+                  {outcomes.filter((o) => o.status === "unresolved").length}
+                </span>{" "}
+                unresolved
+              </span>
+              <span>
+                <span className="font-mono text-lg text-muted-foreground">
+                  {outcomes.filter((o) => o.status === "skipped").length}
+                </span>{" "}
+                skipped
+              </span>
             </p>
-            {result.unresolved.length > 0 && (
-              <div className="max-h-64 overflow-y-auto rounded-md border p-3">
-                <p className="mb-2 text-xs text-muted-foreground">
-                  Skipped — no confident Elation chart match. These need a manual look before
-                  they can be provisioned.
-                </p>
-                <ul className="space-y-1 text-xs">
-                  {result.unresolved.map((u) => (
-                    <li key={u.hintId} className="font-mono">
-                      {u.name ?? u.hintId} · {u.reason ?? "no match"}
-                    </li>
+            <div className="max-h-72 overflow-y-auto rounded-md border">
+              <table className="w-full text-xs">
+                <tbody>
+                  {outcomes.map((o) => (
+                    <tr key={o.key} className="border-b last:border-0">
+                      <td className="p-2 font-medium">{o.name}</td>
+                      <td className="p-2 font-mono text-[10px] text-muted-foreground">
+                        {o.hintId}
+                      </td>
+                      <td className="p-2">
+                        <span
+                          className={cn(
+                            "rounded-full border px-2 py-0.5 text-[10px] font-medium capitalize",
+                            o.status === "created"
+                              ? "border-success/30 bg-success/15 text-success"
+                              : o.status === "unresolved"
+                                ? "border-destructive/30 bg-destructive/10 text-destructive"
+                                : "border-border bg-muted text-muted-foreground",
+                          )}
+                        >
+                          {o.status}
+                        </span>
+                      </td>
+                      <td className="p-2 text-right text-muted-foreground">{o.detail}</td>
+                    </tr>
                   ))}
-                </ul>
-              </div>
-            )}
+                </tbody>
+              </table>
+            </div>
+            <p className="text-xs text-muted-foreground">
+              Review these before running another batch. Unresolved members stay in the list and
+              can be re-selected once their Elation chart is sorted out.
+            </p>
           </div>
         ) : (
           <div className="space-y-4">
-            <div className="flex flex-wrap items-center gap-3 text-sm">
+            <div className="flex flex-wrap items-center gap-2 text-sm">
               <span>
-                <span className="font-mono text-lg">{selected.length}</span> of{" "}
-                {eligible.length} eligible members selected
+                <span className="font-mono text-lg">{selected.length}</span> of {eligible.length}{" "}
+                eligible members selected
               </span>
-              <Button variant="outline" size="sm" onClick={downloadCsv}>
-                <Download className="mr-1 h-3.5 w-3.5" /> Export the exact list
-              </Button>
+              <div className="ml-auto flex flex-wrap gap-2">
+                <Button variant="outline" size="sm" onClick={() => selectFirst(VALIDATION_BATCH)}>
+                  First {VALIDATION_BATCH}
+                </Button>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => setSelectedKeys(new Set(eligible.map((r) => r.key)))}
+                >
+                  Select all
+                </Button>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => setSelectedKeys(new Set())}
+                  disabled={selected.length === 0}
+                >
+                  Clear
+                </Button>
+                <Button variant="outline" size="sm" onClick={downloadCsv}>
+                  <Download className="mr-1 h-3.5 w-3.5" /> Export list
+                </Button>
+              </div>
             </div>
+
+            {selected.length === 0 && (
+              <p className="text-xs text-muted-foreground">
+                Nothing is selected. Start with a {VALIDATION_BATCH}-member validation batch,
+                review the per-member outcome, then provision the rest in batches.
+              </p>
+            )}
 
             {overCap && (
               <div className="flex items-start gap-2 rounded-md border border-destructive/40 bg-destructive/10 p-3 text-xs text-destructive">
@@ -226,7 +336,7 @@ export default function ProvisionMissingDialog({
                 <tbody>
                   {missing.map((r) => {
                     const e = eligibility(r);
-                    const on = e.ok && !excluded.has(r.key);
+                    const on = e.ok && selectedKeys.has(r.key);
                     return (
                       <tr key={r.key} className="border-b last:border-0">
                         <td className="w-8 p-2">
@@ -259,7 +369,7 @@ export default function ProvisionMissingDialog({
                 rows={2}
                 value={reason}
                 onChange={(ev) => setReason(ev.target.value)}
-                placeholder="e.g. Backfilling portal records for active members ahead of Step 2"
+                placeholder="e.g. 5-member validation batch before bulk provisioning"
                 disabled={!isAdmin || provision.isPending}
               />
               {!isAdmin && (
@@ -273,7 +383,19 @@ export default function ProvisionMissingDialog({
 
         <DialogFooter>
           {result ? (
-            <Button onClick={() => onOpenChange(false)}>Done</Button>
+            <>
+              <Button
+                variant="outline"
+                onClick={() => {
+                  setResult(null);
+                  setSubmitted([]);
+                  setSelectedKeys(new Set());
+                }}
+              >
+                Provision another batch
+              </Button>
+              <Button onClick={() => onOpenChange(false)}>Done</Button>
+            </>
           ) : (
             <>
               <Button variant="outline" onClick={() => onOpenChange(false)}>
@@ -290,7 +412,7 @@ export default function ProvisionMissingDialog({
                 ) : (
                   <UserPlus className="mr-1 h-3.5 w-3.5" />
                 )}
-                Create {selected.length} record{selected.length === 1 ? "" : "s"}
+                Provision selected ({selected.length})
               </Button>
             </>
           )}
