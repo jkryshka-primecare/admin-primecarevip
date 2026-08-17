@@ -48,11 +48,13 @@ members the Membership roster in Prime Care OS currently flags as
    `adminProvisionPatients` **out of both** `FUNCTIONS=( … )` arrays
    (snapshot + health gate) — the gate's unauthenticated curl would 403.
 
-5. Secrets: the resolver reads `ELATION_CLIENT_ID`, `ELATION_CLIENT_SECRET`,
-   `ELATION_API_USERNAME`, `ELATION_API_PASSWORD` from Secret Manager at runtime.
-   Confirm all four exist and that the functions runtime SA holds
-   `secretmanager.secretAccessor` on each. If a grant is missing it fails
-   safe: every member comes back unresolved with `ELATION_CREDENTIALS_MISSING`.
+5. Secrets: the resolver has **no auth of its own** — it calls the shared
+   `core/services/elation/client.js`, which uses `grant_type: 'client_credentials'`
+   with `ELATION_CLIENT_ID` / `ELATION_CLIENT_SECRET` (scope `apiv2`).
+   `adminProvisionPatients` binds those two via
+   `.runWith({ secrets: ['ELATION_CLIENT_ID', 'ELATION_CLIENT_SECRET'] })`, so
+   Functions injects them into `process.env` — no username/password secrets and
+   no manual `secretAccessor` grant are required.
 
 
 ## The one open dependency: Elation resolution
