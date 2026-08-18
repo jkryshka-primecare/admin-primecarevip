@@ -196,6 +196,8 @@ export default function MemberRoster() {
                     <TableHead>Membership</TableHead>
                     <TableHead>Portal</TableHead>
                     <TableHead>Found in</TableHead>
+                    {isAdmin && <TableHead className="text-right">Action</TableHead>}
+
                   </TableRow>
                 </TableHeader>
                 <TableBody>
