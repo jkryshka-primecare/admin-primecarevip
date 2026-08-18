@@ -51,7 +51,11 @@ Note it never touches any function outside the five names, so the patient read
 CFs keep their public binding.
 
 
-## Deploy service account permissions — confirm before merge (blocking)
+## Deploy service account permissions — resolved
+
+The production deploy SA is `firebase-adminsdk-fbsvc@`, which holds
+`roles/cloudfunctions.admin` and therefore `getIamPolicy` / `setIamPolicy`. No
+new grant was needed.
 
 **`roles/cloudfunctions.developer` does NOT include
 `cloudfunctions.functions.getIamPolicy` / `setIamPolicy`.** Only
@@ -59,13 +63,14 @@ CFs keep their public binding.
 `roles/editor` / `roles/owner` carry them (Google Cloud — Cloud Functions IAM
 roles reference).
 
-This matters because the step runs *as the deploy service account*: the remove,
-the add, and the step-3 read-back all need those permissions. If the deploy SA
-only holds `developer`, all three return `PERMISSION_DENIED`, the step exits 1,
-and every production deploy fails from then on. It fails safe (nothing goes out
-public) but it wedges the pipeline.
+This matters because the step runs *as the activated deploy service account*:
+the remove, the add, and the step-3 read-back all need those permissions. If the
+SA only holds `developer`, all three return `PERMISSION_DENIED`, the step exits
+1, and every production deploy fails from then on. It fails safe (nothing goes
+out public) but it wedges the pipeline.
 
-Confirm once before merging, using the workflow's SA email:
+If the deploy SA ever changes, re-confirm with:
+
 
 ```bash
 gcloud projects get-iam-policy prive-care-vip \
