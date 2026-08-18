@@ -13,7 +13,9 @@ export type FirestoreCollection =
   | "directory"
   | "locations"
   | "family"
-  | "onboard_fees";
+  | "onboard_fees"
+  | "artifact_coverage_reports";
+
 
 export type FirestoreDoc = Record<string, unknown> & { id: string | null };
 
