@@ -57,6 +57,13 @@ const MODULE_KEYS = Object.freeze({
   records: 'records',
 });
 
+/** Stored `category` (set by ingestElationReports) -> portalAccess module. */
+const CATEGORY_TO_MODULE = Object.freeze({
+  lab: 'labs',
+  imaging: 'imaging',
+  medical_records: 'records',
+});
+
 function fail(status, code, reason, message, extra) {
   const err = new Error(message || reason);
   err.status = status;
@@ -197,7 +204,7 @@ async function handleArtifactRead(req, params = {}) {
     // Server-scoped repair: the queue entry is derived from the resolved
     // patient, never from the request. The member is not blocked on Elation.
     try {
-      await enqueueRepair({ patientId: elationPatientId, uid }, { documentId: reportId, path, module: moduleKey });
+      await enqueueRepair({ patientId: elationPatientId, uid }, { documentId: reportId, path, module: effectiveModule });
     } catch (err) {
       // A repair-queue failure must never leak or change the member answer.
     }
@@ -224,6 +231,7 @@ async function handleArtifactRead(req, params = {}) {
 module.exports = {
   handleArtifactRead,
   MODULE_KEYS,
+  CATEGORY_TO_MODULE,
   ARTIFACT_BUCKET,
   DEFAULT_TTL_SECONDS,
   MAX_TTL_SECONDS,
