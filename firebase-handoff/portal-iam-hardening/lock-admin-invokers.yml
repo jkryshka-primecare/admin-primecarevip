@@ -1,8 +1,12 @@
 # Post-deploy IAM hardening step for .github/workflows/deploy-production.yml
 #
 # Paste this job step AFTER the deploy step and BEFORE (or alongside) the
-# health gate, inside the same job that already ran `firebase deploy`, so it
-# reuses the authenticated deploy service account.
+# health gate, inside the same job that already ran `firebase deploy`.
+#
+# NOTE: GitHub Actions does NOT carry auth or env across steps. The deploy
+# step's GOOGLE_APPLICATION_CREDENTIALS export is gone here, so this step
+# activates the service account itself — without it every gcloud call fails
+# with "no active account" and wedges the pipeline.
 #
 # Why: 1st-gen HTTP functions get a public `allUsers` invoker binding on first
 # deploy. The patient read CFs need that (they are gated by
@@ -11,6 +15,8 @@
 # the outer one.
 
       - name: Lock admin function invokers (no allUsers)
+        env:
+          GOOGLE_APPLICATION_CREDENTIALS_JSON: ${{ secrets.GOOGLE_APPLICATION_CREDENTIALS_JSON_PRODUCTION }}
         run: |
           set -uo pipefail
           REGION=us-central1
@@ -23,7 +29,10 @@
             adminProvisionPatients
           )
 
+          printf '%s' "$GOOGLE_APPLICATION_CREDENTIALS_JSON" > /tmp/production-sa.json
+          gcloud auth activate-service-account --key-file=/tmp/production-sa.json
           gcloud config set project prive-care-vip --quiet
+
 
           fail=0
           for FN in "${ADMIN_FUNCTIONS[@]}"; do
