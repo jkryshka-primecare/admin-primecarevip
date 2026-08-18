@@ -25,6 +25,22 @@ function resolveProjectId() {
   );
 }
 
+/**
+ * `firebase emulators:exec` exports FIREBASE_STORAGE_EMULATOR_HOST (host:port),
+ * while the Admin SDK / GCS client reads STORAGE_EMULATOR_HOST (a full URL).
+ * Reconcile the two so the harness works under emulators:exec with no extra
+ * wiring in CI. Never invents an emulator that is not running.
+ */
+function normalizeEmulatorEnv() {
+  const fb = process.env.FIREBASE_STORAGE_EMULATOR_HOST;
+  if (fb && !process.env.STORAGE_EMULATOR_HOST) {
+    process.env.STORAGE_EMULATOR_HOST = /^https?:\/\//.test(fb) ? fb : `http://${fb}`;
+  }
+  return process.env.STORAGE_EMULATOR_HOST || null;
+}
+
+normalizeEmulatorEnv();
+
 function usingEmulator() {
   return Boolean(process.env.FIRESTORE_EMULATOR_HOST);
 }
@@ -44,9 +60,9 @@ function assertStatefulTargetAllowed() {
   // Storage emulator, object writes land in real GCS — so the emulator branch
   // enforces the same production-bucket guard and demands STORAGE_EMULATOR_HOST.
   if (usingEmulator()) {
-    if (!process.env.STORAGE_EMULATOR_HOST) {
+    if (!normalizeEmulatorEnv()) {
       throw new Error(
-        'red-team: FIRESTORE_EMULATOR_HOST is set but STORAGE_EMULATOR_HOST is not — object writes would hit real GCS',
+        'red-team: FIRESTORE_EMULATOR_HOST is set but neither STORAGE_EMULATOR_HOST nor FIREBASE_STORAGE_EMULATOR_HOST is — object writes would hit real GCS',
       );
     }
     if (PROD_PROJECT_IDS.some((p) => bucket.startsWith(p))) {
@@ -86,6 +102,7 @@ function assertReadOnlyTargetConfigured() {
 }
 
 module.exports = {
+  normalizeEmulatorEnv,
   assertStatefulTargetAllowed,
   assertReadOnlyTargetConfigured,
   resolveProjectId,
