@@ -1,37 +1,30 @@
 /**
- * Release 2a · D — artifact ownership red-team suite.
+ * Release 2a · D — artifact ownership red-team suite. STATEFUL.
  *
  * A STANDING CI GATE, run on every PR — not a one-off pass. Physical ownership
  * (files under the caller's uid) is being replaced by a read-time check, so
  * paths become guessable and this suite is the only thing that keeps the
  * ownership resolver honest.
  *
+ * TARGET: emulator or a dedicated test project ONLY. Every helper here writes,
+ * and helpers/env.js aborts the run if the target resolves to production.
+ * Read-only bucket privacy lives in bucket-privacy.test.js, which may point at
+ * the production bucket.
+ *
  * Wire into CI: `npm run test:redteam` in deploy-production.yml, before deploy.
+ *
+ * MUTATION CHECK (run before trusting this gate): make the bucket public, or
+ * short-circuit the ownership check in readArtifact.js, and confirm the suite
+ * goes RED. A gate nobody has watched fail is not yet a gate.
  */
 
-const { getBucketMetadata, getIamPolicy, listObjectAcls } = require('./helpers/storage');
 const { readArtifact, mintSignedUrl } = require('./helpers/portalRead');
-const { seedPatient, seedDocument, healArtifact } = require('./helpers/seed');
+const { seedPatient, seedDocument, healArtifact, cleanup } = require('./helpers/seed');
 
 jest.setTimeout(120000);
 
-describe('bucket privacy is asserted, never assumed', () => {
-  test('no allUsers / allAuthenticatedUsers binding on the artifact bucket', async () => {
-    const policy = await getIamPolicy();
-    const members = policy.bindings.flatMap((b) => b.members);
-    expect(members).not.toContain('allUsers');
-    expect(members).not.toContain('allAuthenticatedUsers');
-  });
-
-  test('uniform bucket-level access is enabled', async () => {
-    const meta = await getBucketMetadata();
-    expect(meta.iamConfiguration.uniformBucketLevelAccess.enabled).toBe(true);
-  });
-
-  test('no public object ACLs exist', async () => {
-    const acls = await listObjectAcls({ sample: 200 });
-    expect(acls.filter((a) => a.entity === 'allUsers')).toHaveLength(0);
-  });
+afterAll(async () => {
+  await cleanup();
 });
 
 describe('cross-patient access', () => {
@@ -74,7 +67,7 @@ describe('suppression survives healing — healing is not a side channel', () =>
   test('a hidden item stays hidden immediately after a heal', async () => {
     const p = await seedPatient();
     const doc = await seedDocument(p, { missingObject: true });
-    await p.hideItem({ collection: 'labs', id: doc.documentId });
+    await p.hideItem({ collection: 'documents', id: doc.documentId });
     await healArtifact(doc); // sweep stores the object
     const res = await readArtifact({ as: p, documentId: doc.documentId });
     expect(res.status).toBe(404); // hidden items read as absent, never as content

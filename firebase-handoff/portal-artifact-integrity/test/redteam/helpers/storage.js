@@ -1,21 +1,41 @@
 /**
  * Red-team helpers — Storage. REAL bucket only, never mocked.
  *
- * A green suite over stubbed helpers is theater: these functions must hit the
- * actual bucket the portal serves from, so bucket privacy is asserted rather
- * than assumed. If credentials are absent the helpers throw — the suite fails
- * loudly instead of passing vacuously.
+ * A green suite over stubbed helpers is theater: these functions hit the actual
+ * bucket named by REDTEAM_STORAGE_BUCKET, so bucket privacy is asserted rather
+ * than assumed. If credentials or the bucket name are absent the helpers throw —
+ * the suite fails loudly instead of passing vacuously.
+ *
+ * Read-only inspection (metadata / IAM / ACLs) may point at the production
+ * serving bucket. Object writes go through `assertStatefulTargetAllowed`, which
+ * refuses production. See helpers/env.js.
  */
 
 const admin = require('firebase-admin');
+const { assertReadOnlyTargetConfigured, assertStatefulTargetAllowed, resolveProjectId } = require('./env');
 
-function bucket() {
+function initOnce() {
   if (!admin.apps.length) {
-    admin.initializeApp({ storageBucket: process.env.REDTEAM_STORAGE_BUCKET });
+    admin.initializeApp({
+      projectId: resolveProjectId() || undefined,
+      storageBucket: process.env.REDTEAM_STORAGE_BUCKET,
+    });
   }
-  const b = admin.storage().bucket();
+  return admin;
+}
+
+/** Read-only bucket handle (inspection only). */
+function bucket() {
+  assertReadOnlyTargetConfigured();
+  const b = initOnce().storage().bucket();
   if (!b || !b.name) throw new Error('red-team: no real Storage bucket resolved — refusing to run');
   return b;
+}
+
+/** Write-capable bucket handle. Refuses production targets. */
+function writableBucket() {
+  assertStatefulTargetAllowed();
+  return bucket();
 }
 
 /** Raw bucket metadata, including uniformBucketLevelAccess. */
@@ -31,17 +51,28 @@ async function getIamPolicy() {
 }
 
 /**
- * Object-level ACLs for a prefix. Under uniform bucket-level access this call
- * is rejected by GCS, which is itself the pass condition — the helper reports
- * that explicitly rather than swallowing it.
+ * FLATTENED object ACL entries across a sample of objects.
+ *
+ * Review round 2: the old shape (`{ name, acl }`) made the test's
+ * `filter(a => a.entity === 'allUsers')` always empty — the assertion passed
+ * even if a public ACL existed. Each returned element is now a single ACL
+ * entry: `{ name, entity, role }`.
+ *
+ * Under uniform bucket-level access GCS rejects `acl.get()` entirely; that is
+ * the pass condition, surfaced as `{ name, aclDenied: true }` entries which
+ * carry no `entity`, so they can never look like a public grant.
  */
-async function listObjectAcls(prefix) {
-  const [files] = await bucket().getFiles({ prefix, maxResults: 25 });
+async function listObjectAcls({ prefix = '', sample = 100 } = {}) {
+  const [files] = await bucket().getFiles({ prefix, maxResults: sample });
   const out = [];
   for (const f of files) {
     try {
       const [acl] = await f.acl.get();
-      out.push({ name: f.name, acl });
+      const entries = Array.isArray(acl) ? acl : [acl];
+      for (const e of entries) {
+        if (!e) continue;
+        out.push({ name: f.name, entity: e.entity, role: e.role });
+      }
     } catch (err) {
       out.push({ name: f.name, aclDenied: true, reason: String(err && err.message) });
     }
@@ -49,4 +80,4 @@ async function listObjectAcls(prefix) {
   return out;
 }
 
-module.exports = { getBucketMetadata, getIamPolicy, listObjectAcls, bucket };
+module.exports = { getBucketMetadata, getIamPolicy, listObjectAcls, bucket, writableBucket, initOnce };

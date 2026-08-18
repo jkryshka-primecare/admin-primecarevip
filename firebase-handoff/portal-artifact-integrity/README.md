@@ -104,7 +104,19 @@ Rare backstop for a miss the sweep has not reached yet.
 
 ## D — Red-team suite
 
-Standing CI gate, run on every PR, not a one-off pass. Cases:
+Standing CI gate, run on every PR, not a one-off pass. **Split into two files by
+blast radius** (review round 2, item 3):
+
+```text
+test/redteam/bucket-privacy.test.js        READ-ONLY  — may target the production bucket
+test/redteam/artifact-ownership.test.js    STATEFUL   — emulator / test project ONLY
+test/redteam/helpers/env.js                target guard, refuses production writes
+test/redteam/helpers/storage.js            real bucket, flattened object ACL entries
+test/redteam/helpers/seed.js               patient handles with suspend/hideItem/queue rows
+test/redteam/helpers/portalRead.js         production read handler, real patient tokens
+```
+
+Cases:
 
 1. **Bucket privacy is asserted, not assumed** — no `allUsers` binding, uniform
    bucket-level access on, no public object ACLs. If a guessed path is ever
@@ -118,6 +130,45 @@ Standing CI gate, run on every PR, not a one-off pass. Cases:
 Grant/guardian cases (revoked grant, guardian-expanded allowed-id sets) are
 present as **`test.skip` forward scaffolding for 2b**. They must not report green
 and must not gate 2a.
+
+### Helper API — reconciled with the suite
+
+Round 1 shipped helpers whose signatures did not match the test, so the suite
+could not have run green. The API is now exactly what the tests call:
+
+| Helper | Shape |
+| --- | --- |
+| `seedPatient()` | returns a handle: `{ patientId, firebaseUid, token, suspend(), hideItem({collection,id}), repairQueueRows() }` |
+| `seedDocument(patient, { missingObject, hidden })` | accepts the handle; `missingObject: true` deletes the object so the miss is real; returns `{ patientId, documentId, path, bucket }` |
+| `readArtifact({ as, documentId, body })` | real token on `as`; returns `{ status, body, signedUrl, elapsedMs }` |
+| `mintSignedUrl({ as, documentId, ttlSeconds })` | mints through the production read path |
+| `healArtifact(doc)` | takes the `seedDocument` result, which now carries `patientId` |
+| `listObjectAcls({ sample })` | returns **flattened** `{ name, entity, role }` entries (or `{ aclDenied: true }` under UBLA) so the public-ACL filter is no longer vacuous |
+
+### Running it
+
+```bash
+# read-only privacy gate — safe against the production bucket
+REDTEAM_STORAGE_BUCKET=<serving-bucket> npm run test:redteam:readonly
+
+# stateful gate — emulator (preferred) or a dedicated test project
+FIRESTORE_EMULATOR_HOST=localhost:8080 \
+FIREBASE_AUTH_EMULATOR_HOST=localhost:9099 \
+REDTEAM_ALLOW_WRITES=1 REDTEAM_PROJECT_ID=<test-project> \
+REDTEAM_STORAGE_BUCKET=<test-bucket> REDTEAM_WEB_API_KEY=<test-web-key> \
+npm run test:redteam
+```
+
+`helpers/env.js` hard-fails if the stateful target resolves to `prive-care-vip`
+or to a bucket whose name starts with it, and if neither the emulator nor
+`REDTEAM_TARGET=test-project` is declared. Nothing is inferred; a missing
+declaration aborts rather than defaulting to prod.
+
+**Mutation check before this counts as a gate.** Make the bucket public, or
+short-circuit the ownership check in `readArtifact.js`, run the suite, and
+confirm it goes **red**; then revert and confirm green. A gate nobody has
+watched fail is not yet a gate.
+
 
 ## 2a exit criteria
 
