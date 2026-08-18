@@ -31,6 +31,10 @@ export type CoverageReport = {
   presentCount: number;
   missingCount: number;
   parkedCount: number;
+  /** Referenced docs with no artifactPath and no firebaseUid — cannot be keyed yet. */
+  unpathedCount: number;
+  /** True when the walk hit its per-run cap: the number is partial, not complete. */
+  truncatedWalk: boolean;
   coveragePct: number | null;
   misses: CoverageMiss[];
 };
@@ -64,7 +68,16 @@ function toReport(doc: FirestoreDoc): CoverageReport {
     presentCount: present,
     missingCount: doc.missingCount !== undefined ? num(doc.missingCount) : misses.length,
     parkedCount: misses.filter((m) => m.parked).length,
-    coveragePct: total > 0 ? (present / total) * 100 : null,
+    unpathedCount: num(doc.unpathedCount),
+    truncatedWalk: doc.truncatedWalk === true,
+    // The job reports coveragePct over the checked (pathed) set; fall back to
+    // the same denominator rather than silently counting unpathed docs.
+    coveragePct:
+      doc.coveragePct !== undefined && doc.coveragePct !== null
+        ? num(doc.coveragePct)
+        : total > 0
+          ? (present / total) * 100
+          : null,
     misses,
   };
 }

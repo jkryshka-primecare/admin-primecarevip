@@ -18,12 +18,23 @@
 
 const functions = require('firebase-functions');
 const admin = require('firebase-admin');
+// Shared repo client. Its verified exports are elationGet, elationGetAll,
+// getBinary, elationPost, ELATION_BASE — there is NO `fetchDocumentPdf`, so the
+// sweep uses `getBinary` against the report endpoint directly (review item 3).
 const elation = require('./core/services/elation/client');
 
 const REGION = 'us-central1';
 const BATCH_LIMIT = 100;
 const MAX_FAILURES = 5;
 const LEASE_MS = 10 * 60 * 1000;
+/** Transient upstream statuses: back off the run, never park the document. */
+const TRANSIENT = new Set([429, 500, 502, 503, 504]);
+
+/** Binary fetch for a document's PDF via the shared client. */
+function fetchDocumentPdf(documentId) {
+  return elation.getBinary(`/reports/${documentId}/pdf/`);
+}
+
 
 const stateRef = () => admin.firestore().collection('artifact_repair_state');
 
@@ -72,10 +83,10 @@ function bucket() {
   return admin.storage().bucket();
 }
 
-/** Repair one queue row. Returns 'healed' | 'failed' | 'blocked'. */
+/** Repair one queue row. Returns 'healed' | 'failed' | 'deferred' | 'blocked'. */
 async function repairOne(row, ref) {
   try {
-    const pdf = await elation.fetchDocumentPdf(row.documentId);
+    const pdf = await fetchDocumentPdf(row.documentId);
     await bucket().file(row.path).save(pdf, {
       contentType: 'application/pdf',
       resumable: false,
@@ -99,6 +110,20 @@ async function repairOne(row, ref) {
     if (status === 402 || status === 403) {
       await pause(`Elation/upstream returned ${status}: ${err.message}`, status === 402 ? 'top_up' : 'admin_action');
       return 'blocked';
+    }
+    // Review item 5: a throttling or flapping upstream must back the whole run
+    // off, not fire the rest of the batch at it and permanently park documents
+    // that were only transiently unavailable. No failure count is incremented.
+    if (TRANSIENT.has(status)) {
+      await ref.set(
+        { lastError: `transient ${status}: ${err && err.message}`, updatedAt: new Date().toISOString() },
+        { merge: true },
+      );
+      functions.logger.warn('artifact sweep: transient upstream, deferring run', {
+        status,
+        documentId: row.documentId,
+      });
+      return 'deferred';
     }
     const failures = (row.failures || 0) + 1;
     const parked = failures >= MAX_FAILURES;
@@ -125,6 +150,7 @@ async function repairOne(row, ref) {
   }
 }
 
+
 async function sweep() {
   const status = await readStatus();
   // Paused-state guard: the scheduler keeps firing regardless of job state.
@@ -147,10 +173,17 @@ async function sweep() {
 
     let healed = 0;
     let failed = 0;
+    let deferred = 0;
 
     for (const doc of snap.docs) {
       const outcome = await repairOne(doc.data(), doc.ref);
       if (outcome === 'blocked') break; // circuit breaker: stop the whole run
+      if (outcome === 'deferred') {
+        // Transient upstream: end the run here and retry on the next schedule
+        // rather than hammering a throttling Elation with the rest of the batch.
+        deferred += 1;
+        break;
+      }
       if (outcome === 'healed') healed += 1;
       else failed += 1;
     }
@@ -158,7 +191,8 @@ async function sweep() {
     // A successful probe while paused clears the pause; a denied probe keeps it.
     if (probeOnly && healed > 0) await resume();
 
-    return { probeOnly, considered: snap.size, healed, failed };
+    return { probeOnly, considered: snap.size, healed, failed, deferred };
+
   } finally {
     await releaseLease();
   }

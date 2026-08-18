@@ -114,6 +114,24 @@ export default function ArtifactCoveragePanel() {
             <Stat label="Parked (alerting)" value={report.parkedCount.toLocaleString()} tone={report.parkedCount ? "bad" : "good"} />
           </div>
 
+          {(report.unpathedCount > 0 || report.truncatedWalk) && (
+            <div className="mt-3 space-y-1.5">
+              {report.truncatedWalk && (
+                <p className="flex items-center gap-2 rounded-lg bg-warning/10 px-3 py-2 text-xs text-warning">
+                  <AlertTriangle className="h-3.5 w-3.5" /> Partial walk — this run hit its
+                  per-run cap, so the percentage is not complete coverage.
+                </p>
+              )}
+              {report.unpathedCount > 0 && (
+                <p className="flex items-center gap-2 rounded-lg bg-muted px-3 py-2 text-xs text-muted-foreground">
+                  <FileWarning className="h-3.5 w-3.5" /> {report.unpathedCount.toLocaleString()}{" "}
+                  referenced documents have no storage key yet (no artifactPath, unclaimed record).
+                  They are excluded from the percentage and never queued for repair.
+                </p>
+              )}
+            </div>
+          )}
+
           <p className="mt-3 text-xs text-muted-foreground">
             Run <span className="font-mono">{report.runId}</span>
             {report.generatedAt ? ` · ${new Date(report.generatedAt).toLocaleString()}` : ""}

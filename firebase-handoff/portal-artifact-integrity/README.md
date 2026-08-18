@@ -25,6 +25,32 @@ Writes one report per run to `artifact_coverage_reports/{runId}`:
 }
 ```
 
+**Deploy registration (review item 1).** `adminRunArtifactAudit` is an HTTP
+admin function, so it must be wired into the guards we already built:
+
+- add it to `ADMIN_FUNCTIONS` in `portal-iam-hardening/lock-admin-invokers.yml`
+  (done in this handoff);
+- exclude it from **both** health-gate `FUNCTIONS=( … )` arrays in
+  `deploy-production.yml` — it is IAM-restricted, so an anonymous probe gets a
+  403 and would fail the gate;
+- export it **inside** `module.exports` in `index.js` (the Step-1 export trap).
+
+The two scheduled functions are pub/sub, have no URL, and need none of this.
+
+**Timeout and batching (review item 2).** Both entry points run with
+`timeoutSeconds: 540`. Existence checks run in `Promise.all` chunks of 50 rather
+than one awaited HEAD per document, and the report carries `truncatedWalk: true`
+when the walk hits `MAX_DOCS`, so a partial walk can never read as complete
+coverage. The on-demand path (review item 6) claims the run, returns `202`
+immediately, and the admin UI polls the report instead of holding the request
+open for a full corpus walk.
+
+**Unpathed documents (review item 4).** A `hasArtifact: true` doc with neither
+`artifactPath` nor `firebaseUid` used to resolve to a literal
+`elation-artifacts/null/…` path — a false miss the sweep would "heal" by writing
+junk under `null/`. Such docs are now classified `unpathed`: counted and listed
+separately, excluded from the coverage denominator, and never queued for repair.
+
 **Scope is deliberately narrow.** This proves "no dangling 404s among referenced
 documents". It does NOT prove "we hold everything Elation has" — that is the
 Elation-exit bar and a 2b question. The admin UI labels the number accordingly.
@@ -47,8 +73,15 @@ anything.
   skips finished work.
 - Circuit breaker: `402/403` from upstream pauses the whole job in
   `artifact_repair_state/status`; every entry point reads that row first and
-  exits while paused, processing at most one probe item per run. Repeated
-  `429/5xx` parks until the next scheduled run.
+  exits while paused, processing at most one probe item per run.
+- Transient upstream (`429`, `5xx`) **ends the run immediately** and does not
+  increment the failure count (review item 5), so a throttling Elation is backed
+  off rather than hammered, and documents that were only temporarily
+  unavailable are never permanently parked or alerted on.
+- Binary fetch goes through the shared client's verified `getBinary` export
+  (review item 3). The client exposes no `fetchDocumentPdf`; the sweep defines a
+  thin local helper over `getBinary` so a method-name mismatch cannot park the
+  whole queue.
 - After `MAX_FAILURES`, a document is parked and raises an integration-health
   alert instead of retrying forever.
 
