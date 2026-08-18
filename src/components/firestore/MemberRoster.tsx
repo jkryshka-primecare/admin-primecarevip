@@ -7,6 +7,8 @@ import {
 } from "@/hooks/useMemberReconciliation";
 import { useAuth } from "@/hooks/useAuth";
 import ProvisionMissingDialog from "@/components/firestore/ProvisionMissingDialog";
+import SendInviteButton from "@/components/firestore/SendInviteButton";
+
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -196,6 +198,8 @@ export default function MemberRoster() {
                     <TableHead>Membership</TableHead>
                     <TableHead>Portal</TableHead>
                     <TableHead>Found in</TableHead>
+                    {isAdmin && <TableHead className="text-right">Action</TableHead>}
+
                   </TableRow>
                 </TableHeader>
                 <TableBody>
@@ -231,8 +235,21 @@ export default function MemberRoster() {
                           .filter(Boolean)
                           .join(" + ") || "—"}
                       </TableCell>
+                      {isAdmin && (
+                        <TableCell className="text-right whitespace-nowrap">
+                          {r.elationId && r.bucket !== "member_active" ? (
+                            <SendInviteButton
+                              elationPatientId={r.elationId}
+                              name={r.name}
+                              email={r.email}
+                              onDone={() => refetch()}
+                            />
+                          ) : null}
+                        </TableCell>
+                      )}
                     </TableRow>
                   ))}
+
                 </TableBody>
               </Table>
             </div>
