@@ -83,10 +83,10 @@ function bucket() {
   return admin.storage().bucket();
 }
 
-/** Repair one queue row. Returns 'healed' | 'failed' | 'blocked'. */
+/** Repair one queue row. Returns 'healed' | 'failed' | 'deferred' | 'blocked'. */
 async function repairOne(row, ref) {
   try {
-    const pdf = await elation.fetchDocumentPdf(row.documentId);
+    const pdf = await fetchDocumentPdf(row.documentId);
     await bucket().file(row.path).save(pdf, {
       contentType: 'application/pdf',
       resumable: false,
@@ -110,6 +110,20 @@ async function repairOne(row, ref) {
     if (status === 402 || status === 403) {
       await pause(`Elation/upstream returned ${status}: ${err.message}`, status === 402 ? 'top_up' : 'admin_action');
       return 'blocked';
+    }
+    // Review item 5: a throttling or flapping upstream must back the whole run
+    // off, not fire the rest of the batch at it and permanently park documents
+    // that were only transiently unavailable. No failure count is incremented.
+    if (TRANSIENT.has(status)) {
+      await ref.set(
+        { lastError: `transient ${status}: ${err && err.message}`, updatedAt: new Date().toISOString() },
+        { merge: true },
+      );
+      functions.logger.warn('artifact sweep: transient upstream, deferring run', {
+        status,
+        documentId: row.documentId,
+      });
+      return 'deferred';
     }
     const failures = (row.failures || 0) + 1;
     const parked = failures >= MAX_FAILURES;
@@ -135,6 +149,7 @@ async function repairOne(row, ref) {
     return 'failed';
   }
 }
+
 
 async function sweep() {
   const status = await readStatus();
