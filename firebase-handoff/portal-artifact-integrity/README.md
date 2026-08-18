@@ -1,14 +1,21 @@
 # Release 2a — artifact integrity handoff
 
-Four pieces for the Firebase repo. Everything here is storage-and-audit only: no
+Five pieces for the Firebase repo. Everything here is storage-and-audit only: no
 `portalAccess` writes, no identity changes, no re-keying (that is 2b).
 
 ```text
 functions/auditArtifactCoverage.js                 A — nightly coverage audit (read-only)
 functions/sweepArtifactRepairs.js                  B — nightly bounded self-heal
 functions/core/services/artifacts/repairQueue.js   C — server-derived on-miss enqueue
+functions/core/services/artifacts/readArtifact.js  E — THE shared read path (Option A)
 test/redteam/artifact-ownership.test.js            D — permanent CI gate
 ```
+
+**Read-path decision (Option A).** The suite imports one shared
+`handleArtifactRead`; it now exists in this bundle, and the nine patient read
+functions must be refactored to call it. Scope, per-handler mapping, and the
+mandatory mutation check are in `REFACTOR-READ-PATH.md` — read that first.
+
 
 ## A — `auditArtifactCoverage`
 
