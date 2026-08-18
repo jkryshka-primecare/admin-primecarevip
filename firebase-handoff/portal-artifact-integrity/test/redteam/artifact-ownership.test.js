@@ -31,15 +31,15 @@ describe('cross-patient access', () => {
   test('patient A cannot read patient B artifact by guessing the path', async () => {
     const a = await seedPatient();
     const b = await seedPatient();
-    const docB = await seedDocument(b);
-    const res = await readArtifact({ as: a, documentId: docB.documentId });
+    const docB = await seedDocument(b, { collection: 'labs' });
+    const res = await readArtifact({ as: a, doc: docB });
     expect(res.status).toBe(403);
     expect(res.signedUrl).toBeUndefined();
   });
 
   test('a guessed storage path is not directly fetchable without a signed URL', async () => {
     const b = await seedPatient();
-    const docB = await seedDocument(b);
+    const docB = await seedDocument(b, { collection: 'imaging' });
     const direct = await fetch(`https://storage.googleapis.com/${docB.bucket}/${docB.path}`);
     expect(direct.status).toBeGreaterThanOrEqual(400);
   });
@@ -49,7 +49,7 @@ describe('signed URLs', () => {
   test('an expired signed URL is rejected', async () => {
     const p = await seedPatient();
     const doc = await seedDocument(p);
-    const url = await mintSignedUrl({ as: p, documentId: doc.documentId, ttlSeconds: 1 });
+    const url = await mintSignedUrl({ as: p, doc, ttlSeconds: 1 });
     await new Promise((r) => setTimeout(r, 2500));
     expect((await fetch(url)).status).toBeGreaterThanOrEqual(400);
   });
@@ -58,7 +58,7 @@ describe('signed URLs', () => {
     const p = await seedPatient();
     const doc = await seedDocument(p);
     await p.suspend();
-    const res = await readArtifact({ as: p, documentId: doc.documentId });
+    const res = await readArtifact({ as: p, doc });
     expect(res.status).toBe(403);
   });
 });
@@ -66,10 +66,10 @@ describe('signed URLs', () => {
 describe('suppression survives healing — healing is not a side channel', () => {
   test('a hidden item stays hidden immediately after a heal', async () => {
     const p = await seedPatient();
-    const doc = await seedDocument(p, { missingObject: true });
-    await p.hideItem({ collection: 'documents', id: doc.documentId });
+    const doc = await seedDocument(p, { missingObject: true, collection: 'labs' });
+    await p.hideItem({ collection: doc.collection, id: doc.documentId });
     await healArtifact(doc); // sweep stores the object
-    const res = await readArtifact({ as: p, documentId: doc.documentId });
+    const res = await readArtifact({ as: p, doc });
     expect(res.status).toBe(404); // hidden items read as absent, never as content
     expect(res.signedUrl).toBeUndefined();
   });
@@ -79,8 +79,34 @@ describe('suppression survives healing — healing is not a side channel', () =>
     const doc = await seedDocument(p, { missingObject: true });
     await p.suspend();
     await healArtifact(doc);
-    const res = await readArtifact({ as: p, documentId: doc.documentId });
+    const res = await readArtifact({ as: p, doc });
     expect(res.status).toBe(403);
+  });
+});
+
+describe('per-collection suppression matches the wrapper that serves it', () => {
+  test.each([
+    ['getLabs', 'labs'],
+    ['getImaging', 'imaging'],
+    ['getMedicalRecords', 'documents'],
+  ])('%s: hiding under %s makes the item read as absent', async (wrapper, collection) => {
+    const p = await seedPatient();
+    const doc = await seedDocument(p, { collection });
+    const ok = await readArtifact({ as: p, doc, wrapper });
+    expect(ok.status).toBe(200);
+    await p.hideItem({ collection, id: doc.documentId });
+    const res = await readArtifact({ as: p, doc, wrapper });
+    expect(res.status).toBe(404);
+    expect(res.signedUrl).toBeUndefined();
+  });
+
+  test('hiding under one collection does not suppress another patient collection', async () => {
+    const p = await seedPatient();
+    const lab = await seedDocument(p, { collection: 'labs' });
+    const img = await seedDocument(p, { collection: 'imaging' });
+    await p.hideItem({ collection: 'labs', id: lab.documentId });
+    expect((await readArtifact({ as: p, doc: lab })).status).toBe(404);
+    expect((await readArtifact({ as: p, doc: img })).status).toBe(200);
   });
 });
 
@@ -92,8 +118,8 @@ describe('repair queue cannot be steered', () => {
     // A asks to "repair document B", explicitly naming B as owner.
     const res = await readArtifact({
       as: a,
-      documentId: docB.documentId,
-      body: { patientId: b.patientId },
+      doc: docB,
+      body: { patientId: b.patientId, collection: 'labs' },
     });
     expect(res.status).toBe(403);
     const rows = await b.repairQueueRows();
@@ -103,8 +129,8 @@ describe('repair queue cannot be steered', () => {
   test('repeated on-miss reads dedup on (patientId, documentId)', async () => {
     const p = await seedPatient();
     const doc = await seedDocument(p, { missingObject: true });
-    await readArtifact({ as: p, documentId: doc.documentId });
-    await readArtifact({ as: p, documentId: doc.documentId });
+    await readArtifact({ as: p, doc });
+    await readArtifact({ as: p, doc });
     const rows = await p.repairQueueRows();
     expect(rows).toHaveLength(1);
     expect(rows[0].id).toBe(`${p.patientId}:${doc.documentId}`);
@@ -113,7 +139,7 @@ describe('repair queue cannot be steered', () => {
   test('an on-miss read returns the preparing state, not an Elation round-trip', async () => {
     const p = await seedPatient();
     const doc = await seedDocument(p, { missingObject: true });
-    const res = await readArtifact({ as: p, documentId: doc.documentId });
+    const res = await readArtifact({ as: p, doc });
     expect(res.body.state).toBe('preparing');
     expect(res.elapsedMs).toBeLessThan(1500);
   });
