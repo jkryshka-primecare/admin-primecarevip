@@ -77,6 +77,28 @@ Rules while refactoring:
 - `getMyPatientRecord` keeps its documented exception; it returns a payload, not
   `{ items }`.
 
+## The gate drives the handler the way production does
+
+Round 3 review caught a shape gap: the helper called `handleArtifactRead` with
+no `collection`, so every case defaulted to `documents` while the tests hid
+items under other collections — the suite could pass while a real
+per-collection suppression bug survived in one handler.
+
+`test/redteam/helpers/portalRead.js` now models the nine wrappers explicitly:
+
+```js
+const WRAPPERS = { getLabs: 'labs', getImaging: 'imaging', getMedications: 'medications',
+  getLetters: 'letters', getMedicalRecords: 'documents', getAppointments: 'appointments',
+  getProblems: 'problems', getAllergies: 'allergies' };
+```
+
+`readArtifact({ as, doc })` resolves the wrapper from the seeded document's
+collection and calls through `callWrapper`, which pins `collection` and the
+300s default TTL exactly as the deployed function does. `seedDocument` takes a
+`collection` (default `labs`), writes the reference and any hidden flag under
+that collection, and returns it. The suite adds a per-collection suppression
+matrix (`labs`, `imaging`, `documents`) plus a cross-collection isolation case.
+
 ## Before this is a real gate
 
 1. Land `readArtifact.js` plus the nine-handler refactor in one reviewed PR.
@@ -85,8 +107,14 @@ Rules while refactoring:
    bucket public) → confirm the suite goes RED → revert → confirm green. Paste
    both runs into the PR.
 4. Confirm `adminRunArtifactAudit` is required **and** exported inside
-   `module.exports` in `index.js`, and is in `ADMIN_FUNCTIONS` in
-   `lock-admin-invokers.yml`.
+   `module.exports` in `index.js`, is in `ADMIN_FUNCTIONS` in
+   `lock-admin-invokers.yml`, and is spliced into the live
+   `deploy-production.yml` `ADMIN_FUNCTIONS` array on `main` (which still lists
+   only five) while staying out of both health-gate `FUNCTIONS=( … )` arrays.
+5. **Post-merge live smoke test** on the test fixture: open a real lab PDF
+   (200 + signed URL), confirm a hidden item 404s, confirm a suspended patient
+   gets 403. Unit-green proves the gate; this proves the refactor did not break
+   how members actually read records.
 
 ## Helper guard fix included this round
 

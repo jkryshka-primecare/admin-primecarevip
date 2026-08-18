@@ -104,8 +104,16 @@ async function seedPatient({ id, suspended = false } = {}) {
  * Seed a document reference for a patient handle.
  * `missingObject: true` seeds a DELIBERATE MISS — the reference exists, the
  * object does not. That is what the on-miss and heal cases require.
+ *
+ * `collection` mirrors the production wrapper that would serve this artifact
+ * (`labs`, `imaging`, `documents`, …). Suppression is per-collection, so the
+ * seeded collection must be the one the read is driven with — otherwise the
+ * gate exercises a different suppression path than the nine handlers do.
  */
-async function seedDocument(patient, { documentId, hidden = false, missingObject = false } = {}) {
+async function seedDocument(
+  patient,
+  { documentId, hidden = false, missingObject = false, collection = 'labs' } = {},
+) {
   const patientId = typeof patient === 'string' ? patient : patient.patientId;
   const docId = documentId ? `${PREFIX}${documentId}` : uniqueId('doc');
   const path = `elation-artifacts/${patientId}/${docId}/report.pdf`;
@@ -114,7 +122,7 @@ async function seedDocument(patient, { documentId, hidden = false, missingObject
   await db()
     .collection('patients')
     .doc(patientId)
-    .collection('documents')
+    .collection(collection)
     .doc(docId)
     .set({ redteam: true, hasArtifact: true, artifactPath: path, updatedAt: new Date().toISOString() });
 
@@ -122,7 +130,7 @@ async function seedDocument(patient, { documentId, hidden = false, missingObject
     await db()
       .collection('patients')
       .doc(patientId)
-      .set({ portalAccess: { hidden: { documents: { [docId]: true } } } }, { merge: true });
+      .set({ portalAccess: { hidden: { [collection]: { [docId]: true } } } }, { merge: true });
   }
 
   if (missingObject) {
@@ -134,7 +142,7 @@ async function seedDocument(patient, { documentId, hidden = false, missingObject
     });
   }
 
-  return { patientId, documentId: docId, path, bucket: b.name };
+  return { patientId, documentId: docId, path, bucket: b.name, collection };
 }
 
 /** Run the REAL sweep against a seeded miss (never a fake write). */
@@ -161,13 +169,18 @@ async function healArtifact({ patientId, documentId, path }) {
   return _sweep();
 }
 
+/** Every subcollection a seeded artifact can live in (mirrors the nine wrappers). */
+const SEEDED_COLLECTIONS = ['labs', 'imaging', 'medications', 'letters', 'documents', 'appointments', 'problems', 'allergies'];
+
 /** Remove everything this suite created. Safe to call repeatedly. */
 async function cleanup() {
   const firestore = db();
   const snap = await firestore.collection('patients').where('redteam', '==', true).get();
   for (const doc of snap.docs) {
-    const docs = await doc.ref.collection('documents').get();
-    await Promise.all(docs.docs.map((d) => d.ref.delete()));
+    for (const col of SEEDED_COLLECTIONS) {
+      const docs = await doc.ref.collection(col).get();
+      await Promise.all(docs.docs.map((d) => d.ref.delete()));
+    }
     await doc.ref.delete();
   }
   const queue = await firestore.collection('artifact_repair_queue').where('source', '==', 'redteam').get();
@@ -175,4 +188,4 @@ async function cleanup() {
   await writableBucket().deleteFiles({ prefix: 'elation-artifacts/redteam-', force: true });
 }
 
-module.exports = { seedPatient, seedDocument, healArtifact, cleanup, PREFIX };
+module.exports = { seedPatient, seedDocument, healArtifact, cleanup, PREFIX, SEEDED_COLLECTIONS };

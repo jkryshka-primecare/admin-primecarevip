@@ -133,6 +133,11 @@ Cases:
 4. Suspended patient gets 403 and hidden items stay hidden **immediately after a
    heal** — healing is never a side channel that un-hides or un-suspends.
 5. The repair queue cannot be pointed at another patient's document.
+6. **Per-collection suppression matrix** — hiding under `labs`, `imaging` and
+   `documents` each read as 404 through the wrapper that serves that
+   collection, and hiding one collection does not suppress another. The gate is
+   driven through the wrapper shape production uses, not a default `documents`
+   call (review round 3).
 
 Grant/guardian cases (revoked grant, guardian-expanded allowed-id sets) are
 present as **`test.skip` forward scaffolding for 2b**. They must not report green
@@ -146,8 +151,8 @@ could not have run green. The API is now exactly what the tests call:
 | Helper | Shape |
 | --- | --- |
 | `seedPatient()` | returns a handle: `{ patientId, firebaseUid, token, suspend(), hideItem({collection,id}), repairQueueRows() }` |
-| `seedDocument(patient, { missingObject, hidden })` | accepts the handle; `missingObject: true` deletes the object so the miss is real; returns `{ patientId, documentId, path, bucket }` |
-| `readArtifact({ as, documentId, body })` | real token on `as`; returns `{ status, body, signedUrl, elapsedMs }` |
+| `seedDocument(patient, { missingObject, hidden, collection })` | accepts the handle; `collection` defaults to `labs` and governs both the reference and the hidden flag; `missingObject: true` deletes the object so the miss is real; returns `{ patientId, documentId, path, bucket, collection }` |
+| `readArtifact({ as, doc \| documentId, collection?, wrapper?, body })` | drives the matching production wrapper (collection pinned, 300s TTL); returns `{ status, wrapper, collection, body, signedUrl, elapsedMs }` |
 | `mintSignedUrl({ as, documentId, ttlSeconds })` | mints through the production read path |
 | `healArtifact(doc)` | takes the `seedDocument` result, which now carries `patientId` |
 | `listObjectAcls({ sample })` | returns **flattened** `{ name, entity, role }` entries (or `{ aclDenied: true }` under UBLA) so the public-ACL filter is no longer vacuous |
