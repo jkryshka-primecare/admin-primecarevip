@@ -1,19 +1,35 @@
 # Release 2a — artifact red-team gate.
 #
-# Runs on every pull request (the stated intent), NOT at deploy time: a
-# red-team failure must never wedge an unrelated production deploy.
+# Two jobs, two trust levels:
 #
-#   stateful  -> emulator only (auth + firestore + storage), guarded by
-#                helpers/env.js which refuses production targets.
-#   read-only -> the REAL production bucket (privacy assertions write nothing).
+#   stateful (PR gate)  -> emulator only (auth + firestore + storage), guarded
+#                          by helpers/env.js which refuses production targets.
+#                          NO production credentials are exposed to this job,
+#                          so it is safe to run on pull_request (incl. forks).
+#   bucket-privacy      -> reads the REAL production bucket. It needs the
+#                          production service account, so it must NEVER run on
+#                          the pull_request trigger: a PR can change workflow
+#                          steps and exfiltrate the SA. It runs on push to
+#                          main, on a schedule, and on manual dispatch.
+#
+# Neither job runs at deploy time: a red-team failure must never wedge an
+# unrelated production deploy.
 name: Red-team (artifact ownership + bucket privacy)
 
 on:
   pull_request:
+  push:
+    branches: [main]
+  schedule:
+    - cron: '17 7 * * *'
   workflow_dispatch:
 
+permissions:
+  contents: read
+
 jobs:
-  redteam:
+  # PR gate. Emulator only, no production secrets.
+  stateful:
     runs-on: ubuntu-latest   # ships a JDK, required by the Firestore emulator
     steps:
       - uses: actions/checkout@v4
@@ -34,10 +50,27 @@ jobs:
           REDTEAM_TARGET: emulator
           REDTEAM_PROJECT_ID: prive-care-vip-test
           GCLOUD_PROJECT: prive-care-vip-test
-          # Emulated bucket name — must NOT start with a production project id.
-          REDTEAM_STORAGE_BUCKET: prive-care-vip-test.appspot.com
+          # Emulated bucket. helpers/env.js aborts on any bucket whose name
+          # STARTS WITH a production project id, and "prive-care-vip-test.*"
+          # does exactly that — so the test bucket is prefixed instead, and the
+          # guard still catches a real production bucket name.
+          REDTEAM_STORAGE_BUCKET: test-prive-care-vip.appspot.com
           REDTEAM_WEB_API_KEY: ${{ secrets.REDTEAM_WEB_API_KEY }}
         run: npm run test:redteam
+
+  # Real production bucket. Read-only, but holds the production SA — hence
+  # never on pull_request.
+  bucket-privacy:
+    if: github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - name: Install
+        run: pnpm install --no-frozen-lockfile
 
       - name: Read-only bucket privacy (real production bucket)
         env:
