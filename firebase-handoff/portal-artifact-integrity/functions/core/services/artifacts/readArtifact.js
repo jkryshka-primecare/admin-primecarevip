@@ -156,10 +156,26 @@ async function handleArtifactRead(req, params = {}) {
     throw notSynced();
   }
 
-  // 6. Ownership is the uid-keyed path: a guessed reportId belonging to another
-  //    member simply does not exist under this caller's prefix.
+  // 6a. Reference ownership: the report must be one of THIS patient's stored
+  //     documents (all artifact-bearing docs live in the patient's `labs`
+  //     subcollection, discriminated by `category`). A guessed id belonging to
+  //     another member resolves to nothing here — 404, and crucially NO repair
+  //     is queued, so the healer can never be steered at someone else's PHI.
+  let refSnap;
+  try {
+    refSnap = await admin.firestore()
+      .collection('patients').doc(String(elationPatientId))
+      .collection('labs').doc(reportId)
+      .get();
+  } catch (err) {
+    throw fail(503, 'UNAVAILABLE', 'ACCESS_CHECK_FAILED', 'Please try again in a moment.');
+  }
+  if (!refSnap.exists || refSnap.get('deleted') === true) throw notSynced();
+
+  // 6b. The object itself lives under the caller's own uid prefix.
   const path = objectPathFor(uid, reportId);
   const file = admin.storage().bucket(ARTIFACT_BUCKET).file(path);
+
 
   let exists = false;
   try {
