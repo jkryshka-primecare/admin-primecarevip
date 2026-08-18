@@ -27,6 +27,7 @@
             adminSetPortalAccess
             adminGetPortalAccess
             adminProvisionPatients
+            adminRunArtifactAudit
           )
 
           printf '%s' "$GOOGLE_APPLICATION_CREDENTIALS_JSON" > /tmp/production-sa.json
