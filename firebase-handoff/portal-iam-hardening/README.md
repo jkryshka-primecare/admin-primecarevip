@@ -109,6 +109,19 @@ gcloud functions get-iam-policy getLabs --region=us-central1 | grep allUsers
 
 That one **must** still show `allUsers`.
 
+## Known limitations (accepted, non-blocking)
+
+- **Third hardcoded admin list.** This array is a third place to keep in sync
+  with the two health-gate `FUNCTIONS=( … )` arrays and the `index.js` exports.
+  A new admin function forgotten here deploys public and is not covered. Worth
+  collapsing to one shared source of truth for the admin-function names.
+- **1st-gen only.** The `gcloud functions …` calls (no `--gen2`) are correct
+  today. Migrating any admin function to 2nd-gen moves IAM onto the backing
+  Cloud Run service and requires updating this step.
+- **Brief public window on first deploy** of a newly added admin function,
+  between `firebase deploy` finishing and this step running. `requireAdminCaller`
+  covers it, so no data path is exposed — inherent to a post-deploy strip.
+
 ## Rollback
 
 Remove the step from the workflow. Nothing else changes — the step only edits
