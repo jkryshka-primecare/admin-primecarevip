@@ -33,7 +33,9 @@ describe('cross-patient access', () => {
     const b = await seedPatient();
     const docB = await seedDocument(b, { module: 'labs' });
     const res = await readArtifact({ as: a, doc: docB });
-    expect(res.status).toBe(403);
+    // Absence, not "forbidden": A's own record has no such report, and the
+    // object lives under B's uid prefix. Either way A learns nothing.
+    expect(res.status).toBe(404);
     expect(res.signedUrl).toBeUndefined();
   });
 
@@ -84,12 +86,12 @@ describe('suppression survives healing — healing is not a side channel', () =>
   });
 });
 
-describe('per-collection suppression matches the wrapper that serves it', () => {
+describe('per-module suppression matches the wrapper that serves it', () => {
   test.each([
     ['getLabs', 'labs'],
     ['getImaging', 'imaging'],
-    ['getMedicalRecords', 'documents'],
-  ])('%s: hiding under %s makes the item read as absent', async (wrapper, collection) => {
+    ['getMedicalRecords', 'records'],
+  ])('%s: hiding under %s makes the item read as absent', async (wrapper, moduleKey) => {
     const p = await seedPatient();
     const doc = await seedDocument(p, { module: moduleKey });
     const ok = await readArtifact({ as: p, doc, wrapper });
@@ -100,7 +102,7 @@ describe('per-collection suppression matches the wrapper that serves it', () => 
     expect(res.signedUrl).toBeUndefined();
   });
 
-  test('hiding under one collection does not suppress another patient collection', async () => {
+  test('hiding under one module does not suppress another module', async () => {
     const p = await seedPatient();
     const lab = await seedDocument(p, { module: 'labs' });
     const img = await seedDocument(p, { module: 'imaging' });
@@ -121,7 +123,7 @@ describe('repair queue cannot be steered', () => {
       doc: docB,
       body: { patientId: b.patientId, module: 'labs' },
     });
-    expect(res.status).toBe(403);
+    expect(res.status).toBe(404);
     const rows = await b.repairQueueRows();
     expect(rows).toHaveLength(0); // nothing was queued on A's behalf for B
   });
