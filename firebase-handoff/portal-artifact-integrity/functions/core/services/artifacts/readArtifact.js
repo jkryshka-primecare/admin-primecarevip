@@ -17,10 +17,12 @@
  *   2. resolvePatientForCaller(uid)                   -> elationPatientId (server-derived)
  *   3. D-068 allowlist gate                           -> 403 NOT_IN_ALLOWLIST
  *   4. assertNotSuspended(elationPatientId)           -> fails CLOSED (403 / 503)
- *   5. suppression: module off OR item hidden         -> 404 ARTIFACT_NOT_SYNCED
- *   6. object present? -> v4 signed URL | missing? -> enqueueRepair + preparing
+ *   5. reference ownership: patients/<id>/labs/<reportId> exists & not deleted
+ *   5b. effective module from stored `category` must match the wrapper
+ *   6. suppression: module off OR item hidden         -> 404 ARTIFACT_NOT_SYNCED
+ *   6b. object present? -> v4 signed URL | missing? -> enqueueRepair + preparing
  *
- * Suppression is checked BEFORE any Storage access, and answers exactly like
+ * Ownership and suppression are both checked BEFORE any Storage access, and answers exactly like
  * "not synced yet", so a member learns nothing about what was hidden.
  * Healing writes bytes only; it never grants access.
  *

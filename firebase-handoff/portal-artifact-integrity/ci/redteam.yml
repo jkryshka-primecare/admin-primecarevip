@@ -1,0 +1,51 @@
+# Release 2a — artifact red-team gate.
+#
+# Runs on every pull request (the stated intent), NOT at deploy time: a
+# red-team failure must never wedge an unrelated production deploy.
+#
+#   stateful  -> emulator only (auth + firestore + storage), guarded by
+#                helpers/env.js which refuses production targets.
+#   read-only -> the REAL production bucket (privacy assertions write nothing).
+name: Red-team (artifact ownership + bucket privacy)
+
+on:
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  redteam:
+    runs-on: ubuntu-latest   # ships a JDK, required by the Firestore emulator
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - name: Install
+        run: pnpm install --no-frozen-lockfile
+
+      - name: Stateful red-team (emulator)
+        env:
+          REDTEAM_ALLOW_WRITES: '1'
+          REDTEAM_TARGET: emulator
+          REDTEAM_PROJECT_ID: prive-care-vip-test
+          GCLOUD_PROJECT: prive-care-vip-test
+          # Emulated bucket name — must NOT start with a production project id.
+          REDTEAM_STORAGE_BUCKET: prive-care-vip-test.appspot.com
+          REDTEAM_WEB_API_KEY: ${{ secrets.REDTEAM_WEB_API_KEY }}
+        run: npm run test:redteam
+
+      - name: Read-only bucket privacy (real production bucket)
+        env:
+          GOOGLE_APPLICATION_CREDENTIALS_JSON: ${{ secrets.GOOGLE_APPLICATION_CREDENTIALS_JSON_PRODUCTION }}
+          REDTEAM_STORAGE_BUCKET: prive-care-vip.firebasestorage.app
+          REDTEAM_PROJECT_ID: prive-care-vip
+        run: |
+          set -euo pipefail
+          printf '%s' "$GOOGLE_APPLICATION_CREDENTIALS_JSON" > /tmp/redteam-sa.json
+          export GOOGLE_APPLICATION_CREDENTIALS=/tmp/redteam-sa.json
+          npm run test:redteam:readonly
