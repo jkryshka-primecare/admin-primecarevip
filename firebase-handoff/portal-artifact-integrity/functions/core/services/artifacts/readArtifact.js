@@ -1,76 +1,74 @@
 /**
  * Release 2a · Option A — THE shared artifact read path.
  *
- * Every member-facing artifact read (labs, imaging, medications, letters,
- * medical records, appointments, problems, allergies, my-record) routes through
- * `handleArtifactRead`. One ownership resolver, one suppression check, one
- * signer. This is the module the red-team suite imports, so the gate guards the
- * code that actually serves members.
+ * REWRITTEN against the real repo (primecarevip/prime-care-vip-app-v2,
+ * functions/). The earlier draft assumed a Firestore-doc-keyed artifact path;
+ * production actually serves artifacts from a uid-keyed Storage prefix:
  *
- * ORDER OF OPERATIONS (do not reorder — each step depends on the one above):
- *   1. verifyPatientToken(req)                 -> firebase uid, never trusted input
- *   2. resolvePatientForCaller(uid)            -> elationPatientId, SERVER-DERIVED
- *   3. assertNotSuspended(elationPatientId)    -> fails CLOSED (403)
- *   4. ownership: the document must live under THAT patient        (else 403)
- *   5. suppression: module off or item hidden reads as ABSENT      (404)
- *   6. object present? -> signed URL   |   missing? -> enqueueRepair + preparing
+ *     elation-artifacts/<firebaseUid>/<reportId>/report.pdf
  *
- * The request body is NEVER a source of identity. A caller may supply
- * `patientId`; it is ignored. Steering the repair queue at someone else's PHI
- * is therefore impossible from this entry point (see repairQueue.js).
+ * Ownership is therefore proven by the *path*, and the uid comes from the
+ * verified token — never from the request body. Only three handlers have an
+ * artifact mode (getLabs, getImaging, getMedicalRecords); the other five are
+ * list-only and have nothing to delegate.
  *
- * Errors carry `.status` so the HTTP wrappers can map them directly, and
- * `.state` for the non-error "preparing" case.
+ * ORDER OF OPERATIONS (do not reorder):
+ *   1. verifyPatientToken(req.headers.authorization)  -> uid (+ Guard B)
+ *   2. resolvePatientForCaller(uid)                   -> elationPatientId (server-derived)
+ *   3. D-068 allowlist gate                           -> 403 NOT_IN_ALLOWLIST
+ *   4. assertNotSuspended(elationPatientId)           -> fails CLOSED (403 / 503)
+ *   5. suppression: module off OR item hidden         -> 404 ARTIFACT_NOT_SYNCED
+ *   6. object present? -> v4 signed URL | missing? -> enqueueRepair + preparing
+ *
+ * Suppression is checked BEFORE any Storage access, and answers exactly like
+ * "not synced yet", so a member learns nothing about what was hidden.
+ * Healing writes bytes only; it never grants access.
+ *
+ * Errors carry `.status`, `.code` and `.reason` so each wrapper can map them
+ * straight into its existing `jsonError(res, status, code, reason, message)`
+ * envelope.
  */
 
 const admin = require('firebase-admin');
 
 // eslint-disable-next-line import/no-unresolved
-const { verifyPatientToken } = require('../../../middleware/verifyPatientToken');
+const { verifyPatientToken } = require('../../../middleware/verifyAuth');
 // eslint-disable-next-line import/no-unresolved
 const { resolvePatientForCaller } = require('../elation/resolvePatientForCaller');
 const {
   getPortalAccess,
   assertNotSuspended,
   isModuleVisible,
+  filterHidden,
 } = require('../patient/portalAccess');
 const { enqueueRepair, PREPARING } = require('./repairQueue');
 
-/** Default TTL for a minted URL, and the hard cap a caller cannot exceed. */
+/** Signed-URL TTL: default, and the hard cap a caller can never exceed. */
 const DEFAULT_TTL_SECONDS = 300;
 const MAX_TTL_SECONDS = 900;
 
-/**
- * Subcollection -> portalAccess module key. Mirrors ENFORCEMENT.md so a single
- * "Records" toggle governs both letters and medical records.
- */
-const COLLECTION_MODULE = Object.freeze({
+/** The one bucket artifacts live in. Pinned, never caller-supplied. */
+const ARTIFACT_BUCKET = 'prive-care-vip.firebasestorage.app';
+
+/** Wrapper -> portalAccess module key. One "Records" toggle governs records. */
+const MODULE_KEYS = Object.freeze({
   labs: 'labs',
   imaging: 'imaging',
-  medications: 'medications',
-  letters: 'records',
-  documents: 'records',
   records: 'records',
-  appointments: 'appointments',
-  problems: 'conditions',
-  allergies: 'allergies',
 });
 
-function fail(status, message, extra) {
-  const err = new Error(message);
+function fail(status, code, reason, message, extra) {
+  const err = new Error(message || reason);
   err.status = status;
+  err.code = code;
+  err.reason = reason;
   Object.assign(err, extra || {});
   return err;
 }
 
-/** Hidden / module-off / unknown all read as ABSENT — never as "forbidden". */
-function notFound() {
-  return fail(404, 'Not found');
-}
-
-function bearer(req) {
-  const header = (req && req.headers && req.headers.authorization) || '';
-  return header.startsWith('Bearer ') ? header.slice('Bearer '.length).trim() : '';
+/** Hidden / module-off / missing all read as ABSENT — never as "forbidden". */
+function notSynced() {
+  return fail(404, 'NOT_FOUND', 'ARTIFACT_NOT_SYNCED', 'This report is not available yet.');
 }
 
 function clampTtl(value) {
@@ -79,103 +77,129 @@ function clampTtl(value) {
   return Math.min(Math.floor(n), MAX_TTL_SECONDS);
 }
 
-/** Per-patient item suppression, tolerant of both list and map shapes. */
-function isItemHidden(access, patientDoc, moduleKey, collection, documentId) {
-  const fromAccess = (access && access.hiddenItems && access.hiddenItems[moduleKey]) || [];
-  if (Array.isArray(fromAccess) && fromAccess.map(String).includes(String(documentId))) return true;
-  const local = patientDoc && patientDoc.portalAccess && patientDoc.portalAccess.hidden;
-  const bucketed = local && (local[collection] || local[moduleKey]);
-  if (!bucketed) return false;
-  if (Array.isArray(bucketed)) return bucketed.map(String).includes(String(documentId));
-  return bucketed[documentId] === true;
+// D-068 pre-G9 read gate, mirrored from the handlers so the shared path keeps
+// the same fail-closed behavior when it is called directly.
+function isReadAllowed(elationPatientId) {
+  if (process.env.ELATION_FULL_SYNC_ENABLED === 'true') return true;
+  const allow = (process.env.ELATION_READ_ALLOWLIST || '')
+    .split(',').map((s) => s.trim()).filter(Boolean);
+  return allow.includes(String(elationPatientId));
+}
+
+function objectPathFor(uid, reportId) {
+  return `elation-artifacts/${uid}/${reportId}/report.pdf`;
 }
 
 /**
  * Serve one artifact.
  *
- * @param {{ headers: object, body?: object }} req  raw request (token source)
- * @param {{ documentId: string, collection?: string, ttlSeconds?: number }} params
- * @returns {Promise<{ url?: string, expiresAt?: string, state?: string, message?: string }>}
+ * @param {{ headers: object, body?: object }} req  raw request — token source only
+ * @param {{ reportId: string, module: 'labs'|'imaging'|'records', ttlSeconds?: number }} params
+ * @returns {Promise<{ signedUrl?: string, expiresAt?: string, contentType?: string, state?: string }>}
  */
 async function handleArtifactRead(req, params = {}) {
-  const documentId = String((params && params.documentId) || '').trim();
-  if (!documentId) throw fail(400, 'documentId is required');
+  const reportId = String((params && params.reportId) || '').trim();
+  if (!reportId) throw fail(400, 'INVALID_ARGUMENT', 'MISSING_REPORT_ID', 'reportId is required.');
 
-  const collection = COLLECTION_MODULE[String(params.collection || 'documents')]
-    ? String(params.collection || 'documents')
-    : 'documents';
-  const moduleKey = COLLECTION_MODULE[collection];
+  const moduleKey = MODULE_KEYS[String(params.module || '')];
+  if (!moduleKey) throw fail(400, 'INVALID_ARGUMENT', 'UNKNOWN_MODULE', 'Unknown module.');
 
-  // 1. Authenticate. No token, no read — and the uid is the only identity used.
-  const token = bearer(req);
-  if (!token) throw fail(401, 'Missing bearer token');
-  let decoded;
+  // 1. Authenticate. The uid on the verified token is the only identity used;
+  //    anything in req.body (including a patientId) is deliberately ignored.
+  let user;
   try {
-    decoded = await verifyPatientToken(token);
+    user = await verifyPatientToken(req && req.headers && req.headers.authorization);
   } catch (err) {
-    throw fail(401, 'Invalid token');
+    throw fail(err.httpErrorCode?.status || 401, 'UNAUTHENTICATED',
+      err.details?.reason || 'NO_TOKEN', err.message);
   }
-  const uid = decoded && (decoded.uid || decoded.user_id);
-  if (!uid || decoded.unauthenticated) throw fail(401, 'Invalid token');
+  if (!user || !user.uid || user.uid === 'unauthenticated') {
+    throw fail(401, 'UNAUTHENTICATED', 'NO_TOKEN', 'Authentication required.');
+  }
+  const uid = String(user.uid).toLowerCase();
 
-  // 2. Server-derived ownership. Anything in req.body is deliberately ignored.
-  const patient = await resolvePatientForCaller(uid);
-  const patientId = patient && (patient.id || patient.patientId);
-  if (!patientId) throw fail(403, 'No patient record for caller');
-
-  // 3. Suspension fails CLOSED.
+  // 2. Server-derived patient. Ownership never comes from the caller.
+  let doc;
   try {
-    await assertNotSuspended(patientId);
+    doc = await resolvePatientForCaller(uid);
   } catch (err) {
-    if (err && err.portalReason === 'ACCESS_SUSPENDED') throw fail(403, 'Portal access suspended');
-    throw fail(503, 'Access check failed');
+    const status = err.httpErrorCode?.status || 500;
+    throw fail(status, status === 404 ? 'NOT_FOUND' : status === 401 ? 'UNAUTHENTICATED' : 'INTERNAL',
+      err.details?.reason || 'INTERNAL', err.message);
+  }
+  const elationPatientId = doc && doc.id;
+  if (!elationPatientId) {
+    throw fail(403, 'PERMISSION_DENIED', 'NO_PATIENT_BOUND', 'No patient record for this account.');
   }
 
-  const db = admin.firestore();
-  const patientRef = db.collection('patients').doc(String(patientId));
+  // 3. Pre-G9 allowlist gate — fail closed.
+  if (!isReadAllowed(elationPatientId)) {
+    throw fail(403, 'PERMISSION_DENIED', 'NOT_IN_ALLOWLIST',
+      'Records access is not enabled for this account yet.');
+  }
 
-  // 4. Ownership: the reference must live under THIS patient. A guessed path
-  //    for someone else's document resolves to nothing here, so the read is
-  //    denied before any Storage lookup happens.
-  const docSnap = await patientRef.collection(collection).doc(documentId).get();
-  if (!docSnap.exists) throw fail(403, 'Not permitted');
-  const docData = docSnap.data() || {};
+  // 4. Suspension fails CLOSED.
+  try {
+    await assertNotSuspended(elationPatientId);
+  } catch (err) {
+    if (err && err.portalReason === 'ACCESS_SUSPENDED') {
+      throw fail(403, 'PERMISSION_DENIED', 'ACCESS_SUSPENDED',
+        'Portal access for this account is currently paused. Please contact our office.');
+    }
+    throw fail(503, 'UNAVAILABLE', 'ACCESS_CHECK_FAILED', 'Please try again in a moment.');
+  }
 
-  // 5. Suppression reads as absence, and it is evaluated AFTER healing has had
-  //    its say elsewhere — healing only writes bytes, it never grants access.
-  const access = await getPortalAccess(patientId);
-  if (!isModuleVisible(access, moduleKey)) throw notFound();
-  const patientSnap = await patientRef.get();
-  const patientData = patientSnap.exists ? patientSnap.data() : {};
-  if (isItemHidden(access, patientData, moduleKey, collection, documentId)) throw notFound();
+  // 5. Suppression reads as absence — evaluated BEFORE any Storage access.
+  const portalAccess = await getPortalAccess(elationPatientId);
+  if (!isModuleVisible(portalAccess, moduleKey)) throw notSynced();
+  if (filterHidden(portalAccess, moduleKey, [{ id: reportId }], (it) => it.id).length === 0) {
+    throw notSynced();
+  }
 
-  const path = docData.artifactPath || docData.path;
-  if (!path) throw notFound();
+  // 6. Ownership is the uid-keyed path: a guessed reportId belonging to another
+  //    member simply does not exist under this caller's prefix.
+  const path = objectPathFor(uid, reportId);
+  const file = admin.storage().bucket(ARTIFACT_BUCKET).file(path);
 
-  // 6. Object present? Sign it. Missing? Enqueue a server-scoped repair and
-  //    return immediately — the member is never blocked on Elation.
-  const file = admin.storage().bucket().file(path);
-  const [exists] = await file.exists();
+  let exists = false;
+  try {
+    [exists] = await file.exists();
+  } catch (err) {
+    throw fail(500, 'INTERNAL', 'STORAGE_ERROR', 'Storage unavailable.');
+  }
+
   if (!exists) {
-    await enqueueRepair({ patientId }, { documentId, path });
+    // Server-scoped repair: the queue entry is derived from the resolved
+    // patient, never from the request. The member is not blocked on Elation.
+    try {
+      await enqueueRepair({ patientId: elationPatientId, uid }, { documentId: reportId, path, module: moduleKey });
+    } catch (err) {
+      // A repair-queue failure must never leak or change the member answer.
+    }
     return { ...PREPARING };
   }
 
   const ttlSeconds = clampTtl(params.ttlSeconds);
-  const expires = Date.now() + ttlSeconds * 1000;
-  const [url] = await file.getSignedUrl({ action: 'read', expires });
+  const expiresMs = Date.now() + ttlSeconds * 1000;
+  let signedUrl;
+  try {
+    const [url] = await file.getSignedUrl({ version: 'v4', action: 'read', expires: expiresMs });
+    signedUrl = url;
+  } catch (err) {
+    throw fail(500, 'INTERNAL', 'SIGN_ERROR', 'Could not prepare the report link.');
+  }
 
   return {
-    url,
-    expiresAt: new Date(expires).toISOString(),
-    documentId,
-    collection,
+    signedUrl,
+    expiresAt: new Date(expiresMs).toISOString(),
+    contentType: 'application/pdf',
   };
 }
 
 module.exports = {
   handleArtifactRead,
-  COLLECTION_MODULE,
+  MODULE_KEYS,
+  ARTIFACT_BUCKET,
   DEFAULT_TTL_SECONDS,
   MAX_TTL_SECONDS,
 };
