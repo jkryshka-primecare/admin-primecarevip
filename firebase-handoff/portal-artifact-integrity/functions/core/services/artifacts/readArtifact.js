@@ -149,18 +149,12 @@ async function handleArtifactRead(req, params = {}) {
     throw fail(503, 'UNAVAILABLE', 'ACCESS_CHECK_FAILED', 'Please try again in a moment.');
   }
 
-  // 5. Suppression reads as absence — evaluated BEFORE any Storage access.
-  const portalAccess = await getPortalAccess(elationPatientId);
-  if (!isModuleVisible(portalAccess, moduleKey)) throw notSynced();
-  if (filterHidden(portalAccess, moduleKey, [{ id: reportId }], (it) => it.id).length === 0) {
-    throw notSynced();
-  }
-
-  // 6a. Reference ownership: the report must be one of THIS patient's stored
-  //     documents (all artifact-bearing docs live in the patient's `labs`
-  //     subcollection, discriminated by `category`). A guessed id belonging to
-  //     another member resolves to nothing here — 404, and crucially NO repair
-  //     is queued, so the healer can never be steered at someone else's PHI.
+  // 5. Reference ownership FIRST, so suppression can be evaluated under the
+  //    report's TRUE module. All artifact-bearing docs live in the patient's
+  //    `labs` subcollection, discriminated by `category`. A guessed id
+  //    belonging to another member resolves to nothing here — 404, and
+  //    crucially NO repair is queued, so the healer can never be steered at
+  //    someone else's PHI. Firestore only; no Storage access yet.
   let refSnap;
   try {
     refSnap = await admin.firestore()
@@ -171,6 +165,21 @@ async function handleArtifactRead(req, params = {}) {
     throw fail(503, 'UNAVAILABLE', 'ACCESS_CHECK_FAILED', 'Please try again in a moment.');
   }
   if (!refSnap.exists || refSnap.get('deleted') === true) throw notSynced();
+
+  // 5b. Module cross-calling is a suppression bypass: a report hidden under
+  //     `labs` must not be retrievable through the imaging or records wrapper.
+  //     The effective module comes from the STORED category, never the caller,
+  //     and a mismatch reads as absence.
+  const effectiveModule = CATEGORY_TO_MODULE[String(refSnap.get('category') || '')];
+  if (!effectiveModule || effectiveModule !== moduleKey) throw notSynced();
+
+  // 6. Suppression reads as absence — evaluated BEFORE any Storage access.
+  const portalAccess = await getPortalAccess(elationPatientId);
+  if (!isModuleVisible(portalAccess, effectiveModule)) throw notSynced();
+  if (filterHidden(portalAccess, effectiveModule, [{ id: reportId }], (it) => it.id).length === 0) {
+    throw notSynced();
+  }
+
 
   // 6b. The object itself lives under the caller's own uid prefix.
   const path = objectPathFor(uid, reportId);
