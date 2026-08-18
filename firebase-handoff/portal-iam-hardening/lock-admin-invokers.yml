@@ -36,7 +36,10 @@
               --region="$REGION" \
               --member=allUsers \
               --role=roles/cloudfunctions.invoker 2>&1) || true
-            if echo "$out" | grep -qiE 'NOT_FOUND|not found|does not have|Policy binding.*not found'; then
+            # Match only genuine not-found phrasing. Do NOT match "does not
+            # have" — that string also appears in PERMISSION_DENIED messages
+            # and would mask a real setIamPolicy denial as "already absent".
+            if echo "$out" | grep -qE 'NOT_FOUND|Policy binding.*not found'; then
               echo "allUsers binding already absent"
             elif echo "$out" | grep -qiE '^ERROR'; then
               echo "$out"

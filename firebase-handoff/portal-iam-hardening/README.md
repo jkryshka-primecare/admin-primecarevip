@@ -45,12 +45,19 @@ green.
 Note it never touches any function outside the five names, so the patient read
 CFs keep their public binding.
 
-## Deploy service account permissions
+## Deploy service account permissions — confirm before merge (blocking)
 
-The workflow's service account already deploys these functions, which requires
-`roles/cloudfunctions.developer` (or `admin`). `cloudfunctions.developer`
-includes `cloudfunctions.functions.getIamPolicy` and
-`cloudfunctions.functions.setIamPolicy`, so no new grant should be needed.
+**`roles/cloudfunctions.developer` does NOT include
+`cloudfunctions.functions.getIamPolicy` / `setIamPolicy`.** Only
+`roles/cloudfunctions.admin`, `roles/cloudfunctions.editor`, or project
+`roles/editor` / `roles/owner` carry them (Google Cloud — Cloud Functions IAM
+roles reference).
+
+This matters because the step runs *as the deploy service account*: the remove,
+the add, and the step-3 read-back all need those permissions. If the deploy SA
+only holds `developer`, all three return `PERMISSION_DENIED`, the step exits 1,
+and every production deploy fails from then on. It fails safe (nothing goes out
+public) but it wedges the pipeline.
 
 Confirm once before merging, using the workflow's SA email:
 
