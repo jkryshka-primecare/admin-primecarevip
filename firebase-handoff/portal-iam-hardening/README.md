@@ -45,12 +45,19 @@ green.
 Note it never touches any function outside the five names, so the patient read
 CFs keep their public binding.
 
-## Deploy service account permissions
+## Deploy service account permissions — confirm before merge (blocking)
 
-The workflow's service account already deploys these functions, which requires
-`roles/cloudfunctions.developer` (or `admin`). `cloudfunctions.developer`
-includes `cloudfunctions.functions.getIamPolicy` and
-`cloudfunctions.functions.setIamPolicy`, so no new grant should be needed.
+**`roles/cloudfunctions.developer` does NOT include
+`cloudfunctions.functions.getIamPolicy` / `setIamPolicy`.** Only
+`roles/cloudfunctions.admin`, `roles/cloudfunctions.editor`, or project
+`roles/editor` / `roles/owner` carry them (Google Cloud — Cloud Functions IAM
+roles reference).
+
+This matters because the step runs *as the deploy service account*: the remove,
+the add, and the step-3 read-back all need those permissions. If the deploy SA
+only holds `developer`, all three return `PERMISSION_DENIED`, the step exits 1,
+and every production deploy fails from then on. It fails safe (nothing goes out
+public) but it wedges the pipeline.
 
 Confirm once before merging, using the workflow's SA email:
 
@@ -61,13 +68,17 @@ gcloud projects get-iam-policy prive-care-vip \
   --format="table(bindings.role)"
 ```
 
-If it only holds `roles/cloudfunctions.invoker`/`viewer`-level roles, grant the
-narrowest sufficient role:
+- Holds `roles/cloudfunctions.admin`, `roles/cloudfunctions.editor`, or project
+  `roles/editor` / `roles/owner` → nothing to do, merge.
+- Holds only `roles/cloudfunctions.developer` (or less) → grant
+  **`roles/cloudfunctions.admin`**, the narrowest predefined role that includes
+  `setIamPolicy` (a custom role with `cloudfunctions.functions.getIamPolicy` +
+  `cloudfunctions.functions.setIamPolicy` also works):
 
 ```bash
 gcloud projects add-iam-policy-binding prive-care-vip \
   --member="serviceAccount:<deploy-sa-email>" \
-  --role="roles/cloudfunctions.developer"
+  --role="roles/cloudfunctions.admin"
 ```
 
 Also ensure the deploy SA has `roles/iam.serviceAccountUser` on
@@ -97,6 +108,19 @@ gcloud functions get-iam-policy getLabs --region=us-central1 | grep allUsers
 ```
 
 That one **must** still show `allUsers`.
+
+## Known limitations (accepted, non-blocking)
+
+- **Third hardcoded admin list.** This array is a third place to keep in sync
+  with the two health-gate `FUNCTIONS=( … )` arrays and the `index.js` exports.
+  A new admin function forgotten here deploys public and is not covered. Worth
+  collapsing to one shared source of truth for the admin-function names.
+- **1st-gen only.** The `gcloud functions …` calls (no `--gen2`) are correct
+  today. Migrating any admin function to 2nd-gen moves IAM onto the backing
+  Cloud Run service and requires updating this step.
+- **Brief public window on first deploy** of a newly added admin function,
+  between `firebase deploy` finishing and this step running. `requireAdminCaller`
+  covers it, so no data path is exposed — inherent to a post-deploy strip.
 
 ## Rollback
 
