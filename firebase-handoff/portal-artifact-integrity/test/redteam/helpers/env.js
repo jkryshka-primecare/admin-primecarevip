@@ -38,7 +38,26 @@ function assertStatefulTargetAllowed() {
     throw new Error('red-team: REDTEAM_ALLOW_WRITES not set — refusing to write');
   }
   const projectId = resolveProjectId();
-  if (usingEmulator()) return { target: 'emulator', projectId };
+  const bucket = process.env.REDTEAM_STORAGE_BUCKET || '';
+
+  // The Firestore emulator does NOT emulate Storage. Without an explicit
+  // Storage emulator, object writes land in real GCS — so the emulator branch
+  // enforces the same production-bucket guard and demands STORAGE_EMULATOR_HOST.
+  if (usingEmulator()) {
+    if (!process.env.STORAGE_EMULATOR_HOST) {
+      throw new Error(
+        'red-team: FIRESTORE_EMULATOR_HOST is set but STORAGE_EMULATOR_HOST is not — object writes would hit real GCS',
+      );
+    }
+    if (PROD_PROJECT_IDS.some((p) => bucket.startsWith(p))) {
+      throw new Error(`red-team: refusing to write objects to production bucket "${bucket}"`);
+    }
+    if (projectId && PROD_PROJECT_IDS.includes(projectId)) {
+      throw new Error(`red-team: refusing to seed production project "${projectId}"`);
+    }
+    return { target: 'emulator', projectId };
+  }
+
 
   if (process.env.REDTEAM_TARGET !== 'test-project') {
     throw new Error(
@@ -51,10 +70,10 @@ function assertStatefulTargetAllowed() {
   if (PROD_PROJECT_IDS.includes(projectId)) {
     throw new Error(`red-team: refusing to seed production project "${projectId}"`);
   }
-  const bucketName = process.env.REDTEAM_STORAGE_BUCKET || '';
-  if (PROD_PROJECT_IDS.some((p) => bucketName.startsWith(p))) {
-    throw new Error(`red-team: refusing to write objects to production bucket "${bucketName}"`);
+  if (PROD_PROJECT_IDS.some((p) => bucket.startsWith(p))) {
+    throw new Error(`red-team: refusing to write objects to production bucket "${bucket}"`);
   }
+
   return { target: 'test-project', projectId };
 }
 
