@@ -20,7 +20,8 @@ const functions = require('firebase-functions');
 const admin = require('firebase-admin');
 // Shared repo client. Its verified exports are elationGet, elationGetAll,
 // getBinary, elationPost, ELATION_BASE — there is NO `fetchDocumentPdf`, so the
-// sweep uses `getBinary` against the report endpoint directly (review item 3).
+// sweep uses `getBinary` against `/reports/<id>/printable` — the exact endpoint
+// `backfillElationReports.js` uses to fetch report PDFs (verified in repo).
 const elation = require('./core/services/elation/client');
 
 const REGION = 'us-central1';
@@ -32,7 +33,7 @@ const TRANSIENT = new Set([429, 500, 502, 503, 504]);
 
 /** Binary fetch for a document's PDF via the shared client. */
 function fetchDocumentPdf(documentId) {
-  return elation.getBinary(`/reports/${documentId}/pdf/`);
+  return elation.getBinary(`/reports/${documentId}/printable`);
 }
 
 
