@@ -1,0 +1,231 @@
+--- a/functions/getLabs.js
++++ b/functions/getLabs.js
+@@ -35,6 +35,7 @@
+ const {
+   getPortalAccess, assertNotSuspended, isModuleVisible, filterHidden,
+ } = require('./core/services/patient/portalAccess');
++const { handleArtifactRead } = require('./core/services/artifacts/readArtifact');
+ 
+ const ALLOWED_ORIGINS = ['https://care.primecarevip.com', 'http://localhost:5173'];
+ 
+@@ -157,7 +158,7 @@
+ 
+     // getPortalAccess never throws — it returns the all-visible default on error.
+     const portalAccess = await getPortalAccess(elationPatientId);
+-    if (!isModuleVisible(portalAccess, 'labs')) {
++    if (!wantArtifact && !isModuleVisible(portalAccess, 'labs')) {
+       log('getLabs', 'module-hidden', { uid });
+       return res.status(200).json({ moduleUnavailable: true });
+     }
+@@ -166,47 +167,22 @@
+     // The patient path NEVER calls Elation. Ownership is proven by the
+     // uid-keyed storage path — only this caller's synced files live under
+     // their firebaseUid. Not synced yet -> 404, never a live fetch.
++    // --- Artifact mode (Release 2a, Option A): delegated to THE shared read
++    // path. Ownership (uid-keyed storage prefix), suppression (module off or
++    // item hidden -> 404 ARTIFACT_NOT_SYNCED), the missing-object repair
++    // enqueue and signing all live in one module now. Identity is derived
++    // server-side from the bearer token; req.body is never an identity source.
++    // The audit-first phi_access_log write above still runs before this call,
++    // so denials remain audited.
+     if (wantArtifact) {
+-      const objectPath = 'elation-artifacts/' + uid + '/' + reportId + '/report.pdf';
+-      const file = admin.storage().bucket('prive-care-vip.firebasestorage.app').file(objectPath);
+-
+-      // Item-level suppression also covers the artifact fetch: a hidden
+-      // report must not be retrievable by id. Checked BEFORE the storage
+-      // stat so a suppressed report triggers no storage access at all, and
+-      // answers exactly like not-synced so the member learns nothing about
+-      // what was hidden.
+-      if (filterHidden(portalAccess, 'labs', [{ id: reportId }], (it) => it.id).length === 0) {
+-        log('getLabs', 'artifact-hidden', { uid, reportId });
+-        return jsonError(res, 404, 'NOT_FOUND', 'ARTIFACT_NOT_SYNCED', 'This report is not available yet.');
+-      }
+-
+-      let exists = false;
+-      try {
+-        [exists] = await file.exists();
+-      } catch (err) {
+-        logError('getLabs', 'artifact-stat-failed', err, { uid, reportId });
+-        return jsonError(res, 500, 'INTERNAL', 'STORAGE_ERROR', 'Storage unavailable.');
+-      }
+-
+-      if (!exists) {
+-        log('getLabs', 'artifact-not-synced', { uid, reportId });
+-        return jsonError(res, 404, 'NOT_FOUND', 'ARTIFACT_NOT_SYNCED', 'This report is not available yet.');
+-      }
+-
+-      let signedUrl;
+-      let expiresAt;
+       try {
+-        const expiresMs = Date.now() + 30 * 60 * 1000; // 30-minute TTL
+-        const [url] = await file.getSignedUrl({ version: 'v4', action: 'read', expires: expiresMs });
+-        signedUrl = url;
+-        expiresAt = new Date(expiresMs).toISOString();
++        const out = await handleArtifactRead(req, { reportId, module: 'labs', ttlSeconds: 300 });
++        log('getLabs', out.state ? 'artifact-preparing' : 'artifact-ok', { uid, reportId });
++        return res.status(200).json(out);
+       } catch (err) {
+-        logError('getLabs', 'artifact-sign-failed', err, { uid, reportId });
+-        return jsonError(res, 500, 'INTERNAL', 'SIGN_ERROR', 'Could not prepare the report link.');
++        if ((err.status || 500) >= 500) logError('getLabs', 'artifact-failed', err, { uid, reportId });
++        return jsonError(res, err.status || 500, err.code || 'INTERNAL', err.reason || 'INTERNAL', err.message);
+       }
+-
+-      log('getLabs', 'artifact-ok', { uid, reportId });
+-      return res.status(200).json({ signedUrl, expiresAt, contentType: 'application/pdf' });
+     }
+ 
+     // 4) Read-from-store (D-079 / #233): list mode reads the poller's stored lab
+--- a/functions/getImaging.js
++++ b/functions/getImaging.js
+@@ -20,6 +20,7 @@
+ const {
+   getPortalAccess, assertNotSuspended, isModuleVisible, filterHidden,
+ } = require('./core/services/patient/portalAccess');
++const { handleArtifactRead } = require('./core/services/artifacts/readArtifact');
+ 
+ const ALLOWED_ORIGINS = ['https://care.primecarevip.com', 'http://localhost:5173'];
+ 
+@@ -141,7 +142,7 @@
+ 
+     // getPortalAccess never throws — it returns the all-visible default on error.
+     const portalAccess = await getPortalAccess(elationPatientId);
+-    if (!isModuleVisible(portalAccess, 'imaging')) {
++    if (!wantArtifact && !isModuleVisible(portalAccess, 'imaging')) {
+       log('getImaging', 'module-hidden', { uid });
+       return res.status(200).json({ moduleUnavailable: true });
+     }
+@@ -150,44 +151,22 @@
+     // The patient path NEVER calls Elation. Ownership is proven by the
+     // uid-keyed storage path — only this caller's synced files live under
+     // their firebaseUid. Not synced yet -> 404, never a live fetch.
++    // --- Artifact mode (Release 2a, Option A): delegated to THE shared read
++    // path. Ownership (uid-keyed storage prefix), suppression (module off or
++    // item hidden -> 404 ARTIFACT_NOT_SYNCED), the missing-object repair
++    // enqueue and signing all live in one module now. Identity is derived
++    // server-side from the bearer token; req.body is never an identity source.
++    // The audit-first phi_access_log write above still runs before this call,
++    // so denials remain audited.
+     if (wantArtifact) {
+-      const objectPath = 'elation-artifacts/' + uid + '/' + reportId + '/report.pdf';
+-      const file = admin.storage().bucket('prive-care-vip.firebasestorage.app').file(objectPath);
+-
+-      let exists = false;
+       try {
+-        [exists] = await file.exists();
++        const out = await handleArtifactRead(req, { reportId, module: 'imaging', ttlSeconds: 300 });
++        log('getImaging', out.state ? 'artifact-preparing' : 'artifact-ok', { uid, reportId });
++        return res.status(200).json(out);
+       } catch (err) {
+-        logError('getImaging', 'artifact-stat-failed', err, { uid, reportId });
+-        return jsonError(res, 500, 'INTERNAL', 'STORAGE_ERROR', 'Storage unavailable.');
+-      }
+-      // Item-level suppression also covers the artifact fetch: a hidden
+-      // report must not be retrievable by id. Same response as not-synced,
+-      // so the member learns nothing about what was hidden.
+-      if (filterHidden(portalAccess, 'imaging', [{ id: reportId }], (it) => it.id).length === 0) {
+-        log('getImaging', 'artifact-hidden', { uid, reportId });
+-        return jsonError(res, 404, 'NOT_FOUND', 'ARTIFACT_NOT_SYNCED', 'This report is not available yet.');
++        if ((err.status || 500) >= 500) logError('getImaging', 'artifact-failed', err, { uid, reportId });
++        return jsonError(res, err.status || 500, err.code || 'INTERNAL', err.reason || 'INTERNAL', err.message);
+       }
+-
+-      if (!exists) {
+-        log('getImaging', 'artifact-not-synced', { uid, reportId });
+-        return jsonError(res, 404, 'NOT_FOUND', 'ARTIFACT_NOT_SYNCED', 'This report is not available yet.');
+-      }
+-
+-      let signedUrl;
+-      let expiresAt;
+-      try {
+-        const expiresMs = Date.now() + 30 * 60 * 1000; // 30-minute TTL
+-        const [url] = await file.getSignedUrl({ version: 'v4', action: 'read', expires: expiresMs });
+-        signedUrl = url;
+-        expiresAt = new Date(expiresMs).toISOString();
+-      } catch (err) {
+-        logError('getImaging', 'artifact-sign-failed', err, { uid, reportId });
+-        return jsonError(res, 500, 'INTERNAL', 'SIGN_ERROR', 'Could not prepare the report link.');
+-      }
+-
+-      log('getImaging', 'artifact-ok', { uid, reportId });
+-      return res.status(200).json({ signedUrl, expiresAt, contentType: 'application/pdf' });
+     }
+ 
+     // 4) Read-from-store (D-079 / #233): list mode reads the poller's stored
+--- a/functions/getMedicalRecords.js
++++ b/functions/getMedicalRecords.js
+@@ -18,6 +18,7 @@
+ const {
+   getPortalAccess, assertNotSuspended, isModuleVisible, filterHidden,
+ } = require('./core/services/patient/portalAccess');
++const { handleArtifactRead } = require('./core/services/artifacts/readArtifact');
+ 
+ const ALLOWED_ORIGINS = ['https://care.primecarevip.com', 'http://localhost:5173'];
+ 
+@@ -128,52 +129,27 @@
+ 
+     // getPortalAccess never throws — it returns the all-visible default on error.
+     const portalAccess = await getPortalAccess(elationPatientId);
+-    if (!isModuleVisible(portalAccess, 'records')) {
++    if (!wantArtifact && !isModuleVisible(portalAccess, 'records')) {
+       log('getMedicalRecords', 'module-hidden', { uid });
+       return res.status(200).json({ moduleUnavailable: true });
+     }
+ 
++    // --- Artifact mode (Release 2a, Option A): delegated to THE shared read
++    // path. Ownership (uid-keyed storage prefix), suppression (module off or
++    // item hidden -> 404 ARTIFACT_NOT_SYNCED), the missing-object repair
++    // enqueue and signing all live in one module now. Identity is derived
++    // server-side from the bearer token; req.body is never an identity source.
++    // The audit-first phi_access_log write above still runs before this call,
++    // so denials remain audited.
+     if (wantArtifact) {
+-      const objectPath = 'elation-artifacts/' + uid + '/' + reportId + '/report.pdf';
+-      const file = admin.storage().bucket('prive-care-vip.firebasestorage.app').file(objectPath);
+-
+-      // Item-level suppression also covers the artifact fetch: a hidden
+-      // report must not be retrievable by id. Checked BEFORE the storage
+-      // stat so a suppressed report triggers no storage access at all, and
+-      // answers exactly like not-synced so the member learns nothing about
+-      // what was hidden.
+-      if (filterHidden(portalAccess, 'records', [{ id: reportId }], (it) => it.id).length === 0) {
+-        log('getMedicalRecords', 'artifact-hidden', { uid, reportId });
+-        return jsonError(res, 404, 'NOT_FOUND', 'ARTIFACT_NOT_SYNCED', 'This report is not available yet.');
+-      }
+-
+-      let exists = false;
+-      try {
+-        [exists] = await file.exists();
+-      } catch (err) {
+-        logError('getMedicalRecords', 'artifact-stat-failed', err, { uid, reportId });
+-        return jsonError(res, 500, 'INTERNAL', 'STORAGE_ERROR', 'Storage unavailable.');
+-      }
+-
+-      if (!exists) {
+-        log('getMedicalRecords', 'artifact-not-synced', { uid, reportId });
+-        return jsonError(res, 404, 'NOT_FOUND', 'ARTIFACT_NOT_SYNCED', 'This report is not available yet.');
+-      }
+-
+-      let signedUrl;
+-      let expiresAt;
+       try {
+-        const expiresMs = Date.now() + 30 * 60 * 1000;
+-        const [url] = await file.getSignedUrl({ version: 'v4', action: 'read', expires: expiresMs });
+-        signedUrl = url;
+-        expiresAt = new Date(expiresMs).toISOString();
++        const out = await handleArtifactRead(req, { reportId, module: 'records', ttlSeconds: 300 });
++        log('getMedicalRecords', out.state ? 'artifact-preparing' : 'artifact-ok', { uid, reportId });
++        return res.status(200).json(out);
+       } catch (err) {
+-        logError('getMedicalRecords', 'artifact-sign-failed', err, { uid, reportId });
+-        return jsonError(res, 500, 'INTERNAL', 'SIGN_ERROR', 'Could not prepare the report link.');
++        if ((err.status || 500) >= 500) logError('getMedicalRecords', 'artifact-failed', err, { uid, reportId });
++        return jsonError(res, err.status || 500, err.code || 'INTERNAL', err.reason || 'INTERNAL', err.message);
+       }
+-
+-      log('getMedicalRecords', 'artifact-ok', { uid, reportId });
+-      return res.status(200).json({ signedUrl, expiresAt, contentType: 'application/pdf' });
+     }
+ 
+     let snap;

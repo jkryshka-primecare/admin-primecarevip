@@ -31,15 +31,17 @@ describe('cross-patient access', () => {
   test('patient A cannot read patient B artifact by guessing the path', async () => {
     const a = await seedPatient();
     const b = await seedPatient();
-    const docB = await seedDocument(b, { collection: 'labs' });
+    const docB = await seedDocument(b, { module: 'labs' });
     const res = await readArtifact({ as: a, doc: docB });
-    expect(res.status).toBe(403);
+    // Absence, not "forbidden": A's own record has no such report, and the
+    // object lives under B's uid prefix. Either way A learns nothing.
+    expect(res.status).toBe(404);
     expect(res.signedUrl).toBeUndefined();
   });
 
   test('a guessed storage path is not directly fetchable without a signed URL', async () => {
     const b = await seedPatient();
-    const docB = await seedDocument(b, { collection: 'imaging' });
+    const docB = await seedDocument(b, { module: 'imaging' });
     const direct = await fetch(`https://storage.googleapis.com/${docB.bucket}/${docB.path}`);
     expect(direct.status).toBeGreaterThanOrEqual(400);
   });
@@ -66,8 +68,8 @@ describe('signed URLs', () => {
 describe('suppression survives healing — healing is not a side channel', () => {
   test('a hidden item stays hidden immediately after a heal', async () => {
     const p = await seedPatient();
-    const doc = await seedDocument(p, { missingObject: true, collection: 'labs' });
-    await p.hideItem({ collection: doc.collection, id: doc.documentId });
+    const doc = await seedDocument(p, { missingObject: true, module: 'labs' });
+    await p.hideItem({ module: doc.module, id: doc.documentId });
     await healArtifact(doc); // sweep stores the object
     const res = await readArtifact({ as: p, doc });
     expect(res.status).toBe(404); // hidden items read as absent, never as content
@@ -84,27 +86,27 @@ describe('suppression survives healing — healing is not a side channel', () =>
   });
 });
 
-describe('per-collection suppression matches the wrapper that serves it', () => {
+describe('per-module suppression matches the wrapper that serves it', () => {
   test.each([
     ['getLabs', 'labs'],
     ['getImaging', 'imaging'],
-    ['getMedicalRecords', 'documents'],
-  ])('%s: hiding under %s makes the item read as absent', async (wrapper, collection) => {
+    ['getMedicalRecords', 'records'],
+  ])('%s: hiding under %s makes the item read as absent', async (wrapper, moduleKey) => {
     const p = await seedPatient();
-    const doc = await seedDocument(p, { collection });
+    const doc = await seedDocument(p, { module: moduleKey });
     const ok = await readArtifact({ as: p, doc, wrapper });
     expect(ok.status).toBe(200);
-    await p.hideItem({ collection, id: doc.documentId });
+    await p.hideItem({ module: moduleKey, id: doc.documentId });
     const res = await readArtifact({ as: p, doc, wrapper });
     expect(res.status).toBe(404);
     expect(res.signedUrl).toBeUndefined();
   });
 
-  test('hiding under one collection does not suppress another patient collection', async () => {
+  test('hiding under one module does not suppress another module', async () => {
     const p = await seedPatient();
-    const lab = await seedDocument(p, { collection: 'labs' });
-    const img = await seedDocument(p, { collection: 'imaging' });
-    await p.hideItem({ collection: 'labs', id: lab.documentId });
+    const lab = await seedDocument(p, { module: 'labs' });
+    const img = await seedDocument(p, { module: 'imaging' });
+    await p.hideItem({ module: 'labs', id: lab.documentId });
     expect((await readArtifact({ as: p, doc: lab })).status).toBe(404);
     expect((await readArtifact({ as: p, doc: img })).status).toBe(200);
   });
@@ -119,9 +121,9 @@ describe('repair queue cannot be steered', () => {
     const res = await readArtifact({
       as: a,
       doc: docB,
-      body: { patientId: b.patientId, collection: 'labs' },
+      body: { patientId: b.patientId, module: 'labs' },
     });
-    expect(res.status).toBe(403);
+    expect(res.status).toBe(404);
     const rows = await b.repairQueueRows();
     expect(rows).toHaveLength(0); // nothing was queued on A's behalf for B
   });
