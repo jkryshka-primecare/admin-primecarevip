@@ -82,6 +82,10 @@ export default function IntegrationsAdmin() {
 
       <ConnectionHealth />
 
+      <ArtifactCoveragePanel />
+
+
+
 
       {/* EMR Connection card */}
       <motion.div
