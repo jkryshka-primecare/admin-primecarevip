@@ -173,10 +173,17 @@ async function sweep() {
 
     let healed = 0;
     let failed = 0;
+    let deferred = 0;
 
     for (const doc of snap.docs) {
       const outcome = await repairOne(doc.data(), doc.ref);
       if (outcome === 'blocked') break; // circuit breaker: stop the whole run
+      if (outcome === 'deferred') {
+        // Transient upstream: end the run here and retry on the next schedule
+        // rather than hammering a throttling Elation with the rest of the batch.
+        deferred += 1;
+        break;
+      }
       if (outcome === 'healed') healed += 1;
       else failed += 1;
     }
@@ -184,7 +191,8 @@ async function sweep() {
     // A successful probe while paused clears the pause; a denied probe keeps it.
     if (probeOnly && healed > 0) await resume();
 
-    return { probeOnly, considered: snap.size, healed, failed };
+    return { probeOnly, considered: snap.size, healed, failed, deferred };
+
   } finally {
     await releaseLease();
   }
