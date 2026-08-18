@@ -47,7 +47,12 @@ const ALLOWED_COLLECTIONS = new Set([
   "locations",
   "family",
   "onboard_fees",
+  // Release 2a — artifact integrity. The report enumerates patient ids,
+  // document ids and storage paths, so it is PHI: staff-only, read-only,
+  // and every read lands in phi_access_log like any other patient read.
+  "artifact_coverage_reports",
 ]);
+
 
 const OP_MAP: Record<string, string> = {
   "==": "EQUAL",
