@@ -81,12 +81,12 @@ async function seedPatient({ id, suspended = false } = {}) {
         .doc(patientId)
         .set({ portalAccess: { suspended: true } }, { merge: true });
     },
-    async hideItem({ collection, id: itemId }) {
+    async hideItem({ module: moduleKey, id: itemId }) {
       await db()
         .collection('patients')
         .doc(patientId)
         .set(
-          { portalAccess: { hidden: { [collection]: { [itemId]: true } } } },
+          { portalAccess: { hidden: { [moduleKey]: { [itemId]: true } } } },
           { merge: true },
         );
     },
@@ -105,32 +105,42 @@ async function seedPatient({ id, suspended = false } = {}) {
  * `missingObject: true` seeds a DELIBERATE MISS — the reference exists, the
  * object does not. That is what the on-miss and heal cases require.
  *
- * `collection` mirrors the production wrapper that would serve this artifact
- * (`labs`, `imaging`, `documents`, …). Suppression is per-collection, so the
- * seeded collection must be the one the read is driven with — otherwise the
- * gate exercises a different suppression path than the nine handlers do.
+ * `module` mirrors the production wrapper that would serve this artifact
+ * (`labs` -> getLabs, `imaging` -> getImaging, `records` -> getMedicalRecords).
+ * All artifact-bearing docs live in the patient's `labs` subcollection and are
+ * discriminated by `category`; the OBJECT lives under the caller's uid prefix,
+ * which is how production proves ownership.
  */
 async function seedDocument(
   patient,
-  { documentId, hidden = false, missingObject = false, collection = 'labs' } = {},
+  { documentId, hidden = false, missingObject = false, module: moduleKey = 'labs' } = {},
 ) {
-  const patientId = typeof patient === 'string' ? patient : patient.patientId;
+  if (typeof patient === 'string') throw new Error('seedDocument requires a seedPatient() handle (uid-keyed paths)');
+  const { patientId, firebaseUid } = patient;
   const docId = documentId ? `${PREFIX}${documentId}` : uniqueId('doc');
-  const path = `elation-artifacts/${patientId}/${docId}/report.pdf`;
+  const path = `elation-artifacts/${firebaseUid}/${docId}/report.pdf`;
+  const CATEGORY = { labs: 'lab', imaging: 'imaging', records: 'medical_records' };
   const b = writableBucket();
 
   await db()
     .collection('patients')
     .doc(patientId)
-    .collection(collection)
+    .collection('labs')
     .doc(docId)
-    .set({ redteam: true, hasArtifact: true, artifactPath: path, updatedAt: new Date().toISOString() });
+    .set({
+      redteam: true,
+      hasArtifact: true,
+      category: CATEGORY[moduleKey],
+      deleted: false,
+      artifactPath: path,
+      updatedAt: new Date().toISOString(),
+    });
 
   if (hidden) {
     await db()
       .collection('patients')
       .doc(patientId)
-      .set({ portalAccess: { hidden: { [collection]: { [docId]: true } } } }, { merge: true });
+      .set({ portalAccess: { hidden: { [moduleKey]: { [docId]: true } } } }, { merge: true });
   }
 
   if (missingObject) {
@@ -142,7 +152,7 @@ async function seedDocument(
     });
   }
 
-  return { patientId, documentId: docId, path, bucket: b.name, collection };
+  return { patientId, firebaseUid, documentId: docId, path, bucket: b.name, module: moduleKey };
 }
 
 /** Run the REAL sweep against a seeded miss (never a fake write). */
@@ -169,7 +179,7 @@ async function healArtifact({ patientId, documentId, path }) {
   return _sweep();
 }
 
-/** Every subcollection a seeded artifact can live in (mirrors the nine wrappers). */
+/** Artifact-bearing docs all live in `labs`; the rest are cleaned for safety. */
 const SEEDED_COLLECTIONS = ['labs', 'imaging', 'medications', 'letters', 'documents', 'appointments', 'problems', 'allergies'];
 
 /** Remove everything this suite created. Safe to call repeatedly. */
