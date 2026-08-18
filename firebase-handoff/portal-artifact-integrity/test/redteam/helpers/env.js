@@ -70,10 +70,10 @@ function assertStatefulTargetAllowed() {
   if (PROD_PROJECT_IDS.includes(projectId)) {
     throw new Error(`red-team: refusing to seed production project "${projectId}"`);
   }
-  const bucketName = process.env.REDTEAM_STORAGE_BUCKET || '';
-  if (PROD_PROJECT_IDS.some((p) => bucketName.startsWith(p))) {
-    throw new Error(`red-team: refusing to write objects to production bucket "${bucketName}"`);
+  if (PROD_PROJECT_IDS.some((p) => bucket.startsWith(p))) {
+    throw new Error(`red-team: refusing to write objects to production bucket "${bucket}"`);
   }
+
   return { target: 'test-project', projectId };
 }
 
