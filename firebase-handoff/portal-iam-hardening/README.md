@@ -68,13 +68,17 @@ gcloud projects get-iam-policy prive-care-vip \
   --format="table(bindings.role)"
 ```
 
-If it only holds `roles/cloudfunctions.invoker`/`viewer`-level roles, grant the
-narrowest sufficient role:
+- Holds `roles/cloudfunctions.admin`, `roles/cloudfunctions.editor`, or project
+  `roles/editor` / `roles/owner` → nothing to do, merge.
+- Holds only `roles/cloudfunctions.developer` (or less) → grant
+  **`roles/cloudfunctions.admin`**, the narrowest predefined role that includes
+  `setIamPolicy` (a custom role with `cloudfunctions.functions.getIamPolicy` +
+  `cloudfunctions.functions.setIamPolicy` also works):
 
 ```bash
 gcloud projects add-iam-policy-binding prive-care-vip \
   --member="serviceAccount:<deploy-sa-email>" \
-  --role="roles/cloudfunctions.developer"
+  --role="roles/cloudfunctions.admin"
 ```
 
 Also ensure the deploy SA has `roles/iam.serviceAccountUser` on
