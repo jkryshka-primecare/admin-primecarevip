@@ -1,7 +1,10 @@
 /**
  * Release 2a · A — artifact coverage audit.
  *
- * READ-ONLY. Walks every document reference marked `hasArtifact: true` and
+ * READ-ONLY. Walks every artifact-bearing reference in the patients' `labs`
+ * subcollection group (`hasArtifact: true`) — the SAME collection the shared
+ * read handler and the poller (`ingestElationReports`) use; `documents` does not
+ * exist in production — and
  * proves the object exists in Storage. Writes one report per run to
  * `artifact_coverage_reports/{runId}`.
  *
@@ -54,7 +57,7 @@ async function walk(db, onPage) {
   let seen = 0;
   for (;;) {
     let q = db
-      .collectionGroup('documents')
+      .collectionGroup('labs')
       .where('hasArtifact', '==', true)
       .orderBy(admin.firestore.FieldPath.documentId())
       .limit(PAGE_SIZE);

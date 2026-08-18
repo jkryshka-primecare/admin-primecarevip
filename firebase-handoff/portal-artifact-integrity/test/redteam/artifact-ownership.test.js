@@ -102,6 +102,28 @@ describe('per-module suppression matches the wrapper that serves it', () => {
     expect(res.signedUrl).toBeUndefined();
   });
 
+  test('a hidden lab cannot be laundered through another wrapper (cross-calling)', async () => {
+    const p = await seedPatient();
+    const lab = await seedDocument(p, { module: 'labs' });
+    await p.hideItem({ module: 'labs', id: lab.documentId });
+    // Correct wrapper: suppressed.
+    expect((await readArtifact({ as: p, doc: lab, wrapper: 'getLabs' })).status).toBe(404);
+    // Wrong wrappers must NOT re-open it: the effective module comes from the
+    // stored `category`, not the caller's module param.
+    for (const wrapper of ['getImaging', 'getMedicalRecords']) {
+      const res = await readArtifact({ as: p, doc: lab, wrapper });
+      expect(res.status).toBe(404);
+      expect(res.signedUrl).toBeUndefined();
+    }
+  });
+
+  test('a visible lab is still not servable through the imaging wrapper', async () => {
+    const p = await seedPatient();
+    const lab = await seedDocument(p, { module: 'labs' });
+    expect((await readArtifact({ as: p, doc: lab, wrapper: 'getLabs' })).status).toBe(200);
+    expect((await readArtifact({ as: p, doc: lab, wrapper: 'getImaging' })).status).toBe(404);
+  });
+
   test('hiding under one module does not suppress another module', async () => {
     const p = await seedPatient();
     const lab = await seedDocument(p, { module: 'labs' });
