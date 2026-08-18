@@ -25,6 +25,11 @@ Add the step in [`lock-admin-invokers.yml`](./lock-admin-invokers.yml) to
 `.github/workflows/deploy-production.yml`, in the deploy job, **after** the
 `firebase deploy` step and before/alongside the existing health gate.
 
+GitHub Actions does not carry auth or env across steps, so the step activates
+gcloud itself from `secrets.GOOGLE_APPLICATION_CREDENTIALS_JSON_PRODUCTION`
+(`gcloud auth activate-service-account` + `gcloud config set project`) before
+touching IAM. Without that, every call fails with "no active account".
+
 For each of `adminIssueInvite`, `adminRevokeInvite`, `adminSetPortalAccess`,
 `adminGetPortalAccess`, `adminProvisionPatients` it:
 
@@ -44,6 +49,7 @@ green.
 
 Note it never touches any function outside the five names, so the patient read
 CFs keep their public binding.
+
 
 ## Deploy service account permissions — confirm before merge (blocking)
 
