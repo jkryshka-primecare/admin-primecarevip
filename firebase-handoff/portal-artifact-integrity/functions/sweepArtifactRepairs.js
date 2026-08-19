@@ -23,6 +23,7 @@ const admin = require('firebase-admin');
 // sweep uses `getBinary` against `/reports/<id>/printable` — the exact endpoint
 // `backfillElationReports.js` uses to fetch report PDFs (verified in repo).
 const elation = require('./core/services/elation/client');
+const { artifactBucketName } = require('./core/config/artifactBucket');
 
 const REGION = 'us-central1';
 const BATCH_LIMIT = 100;
@@ -81,7 +82,8 @@ async function resume() {
 }
 
 function bucket() {
-  return admin.storage().bucket();
+  // Never bare: heals must land in the bucket the read path serves from.
+  return admin.storage().bucket(artifactBucketName());
 }
 
 /** Repair one queue row. Returns 'healed' | 'failed' | 'deferred' | 'blocked'. */

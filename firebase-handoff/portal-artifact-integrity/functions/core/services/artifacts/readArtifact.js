@@ -50,7 +50,7 @@ const DEFAULT_TTL_SECONDS = 300;
 const MAX_TTL_SECONDS = 900;
 
 /** The one bucket artifacts live in. Pinned, never caller-supplied. */
-const ARTIFACT_BUCKET = 'prive-care-vip.firebasestorage.app';
+const { ARTIFACT_BUCKET, artifactBucketName } = require('../../config/artifactBucket');
 
 /** Wrapper -> portalAccess module key. One "Records" toggle governs records. */
 const MODULE_KEYS = Object.freeze({
@@ -192,7 +192,7 @@ async function handleArtifactRead(req, params = {}) {
 
   // 6b. The object itself lives under the caller's own uid prefix.
   const path = objectPathFor(uid, reportId);
-  const file = admin.storage().bucket(ARTIFACT_BUCKET).file(path);
+  const file = admin.storage().bucket(artifactBucketName()).file(path);
 
 
   let exists = false;
