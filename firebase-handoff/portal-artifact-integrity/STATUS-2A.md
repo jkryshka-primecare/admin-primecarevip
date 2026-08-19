@@ -49,3 +49,34 @@ Do **not** use the step-6a reference-ownership check as a mutation target expect
 `category` match (5b) and the uid-scoped Storage path independently block cross-patient reads, so the
 suite stays green. That also means the reference check is not independently covered. 2b follow-up:
 add a case that seeds patient B's object under B's uid and points patient A's reference at it.
+
+## Remaining for 2a (2026-08-19)
+
+1. **Red-team green on `main`** — PR #432 (replaces #429, whose branch conflicts post-#428):
+   `initOnce()` only sets `credential` when the emulator key was minted, else falls back to ADC.
+   Merge, then confirm the `push`-event run: bucket-privacy 3/3 + stateful green.
+2. **Sweep outcome on the 79** — record `healed` vs `blocked/deferred` per reason. The queue write
+   is capped at 500/run and the walk at 50,000 docs; 79 < 500, so no tail this cycle. Re-run the
+   audit after the sweep and expect coverage to climb with `missingCount` falling.
+3. **Residual misses are a data question, not a code one** — any that stay missing after two sweeps
+   are artifacts Elation never produced. Classify them (deleted at source / never generated /
+   wrong-path legacy) before cutover; a member opening one gets `{ state: 'preparing' }`, which is
+   correct behavior but a bad experience if it is permanent.
+4. **Live read-path smoke** on the Test Kieffer fixture — real lab PDF 200 + signed URL, hidden 404,
+   suspended 403, plus one imaging and one medical-record artifact. Now genuinely runnable since the
+   SA can `objects.get`.
+5. **Member-UI contract** (`mem://portal-artifact-contract`) — 300s TTL re-request, `preparing`
+   rendered as a state not an error, absence never shown as forbidden. Lovable owns this at cutover.
+
+Not in 2a: **re-keying storage off `firebaseUid` onto an internal UUID.** Hold for 2b. Doing it now
+would invalidate every path the 94.1% number was just measured against and require a full copy +
+backfill of 1,341 objects on the eve of cutover, for zero cutover-blocking benefit. 2b can migrate
+behind `artifactPath` (already honored first by `expectedPath`), which makes it a per-doc, resumable
+cutover rather than a big-bang re-key.
+
+The failed "Deploy to Production" run on the `audit: never conflate...` commit: the merge deploy
+that followed succeeded and the live audit returned the new fields (`erroredCount`, `status`,
+`errorStatusCounts`), which only the new code emits — so live code is correct and the failed run is
+not masking a partial deploy. Still worth reading its log for which step failed (usually the
+post-deploy anonymous health probe hitting an IAM-locked admin function) so the workflow gets fixed
+rather than tolerated.
