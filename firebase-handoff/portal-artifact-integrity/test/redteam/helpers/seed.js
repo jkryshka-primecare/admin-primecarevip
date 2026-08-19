@@ -52,7 +52,7 @@ async function mintPatientToken(firebaseUid) {
  * Create a test patient and return a handle the suite can act through.
  * @returns {Promise<{patientId, firebaseUid, token, suspend, hideItem, repairQueueRows}>}
  */
-async function seedPatient({ id, suspended = false } = {}) {
+async function seedPatient({ id, suspended = false, bound = true } = {}) {
   const patientId = id ? `${PREFIX}${id}` : uniqueId('patient');
   const firebaseUid = `${patientId}-uid`.toLowerCase();
 
@@ -62,7 +62,9 @@ async function seedPatient({ id, suspended = false } = {}) {
     .set(
       {
         redteam: true,
-        firebaseUid,
+        // `bound: false` mirrors a not-yet-claimed member: no uid on the
+        // patient doc, so the audit must classify their artifacts `unpathed`.
+        ...(bound ? { firebaseUid } : {}),
         portalAccess: { suspended, hidden: {} },
         updatedAt: new Date().toISOString(),
       },
