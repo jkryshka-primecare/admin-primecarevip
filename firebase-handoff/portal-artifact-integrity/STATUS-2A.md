@@ -74,9 +74,11 @@ backfill of 1,341 objects on the eve of cutover, for zero cutover-blocking benef
 behind `artifactPath` (already honored first by `expectedPath`), which makes it a per-doc, resumable
 cutover rather than a big-bang re-key.
 
-The failed "Deploy to Production" run on the `audit: never conflate...` commit: the merge deploy
-that followed succeeded and the live audit returned the new fields (`erroredCount`, `status`,
-`errorStatusCounts`), which only the new code emits — so live code is correct and the failed run is
-not masking a partial deploy. Still worth reading its log for which step failed (usually the
-post-deploy anonymous health probe hitting an IAM-locked admin function) so the workflow gets fixed
-rather than tolerated.
+The failed "Deploy to Production" run on the `audit: never conflate...` commit is explained: a **409
+concurrency collision**, not a health/IAM probe. Two Deploy runs (the commit push and the merge)
+raced to update the 2nd-gen `ingestElationReports` / `elationEventTarget`; the loser got
+`409 unable to queue the operation` and failed after one retry. The merge deploy succeeded and the
+live audit returned the new fields (`erroredCount`, `status`, `errorStatusCounts`), so prod is
+correct. Fixed by PR #434 — `concurrency: { group: deploy-production, cancel-in-progress: false }`
+in `deploy-production.yml`, so back-to-back merges serialize instead of racing.
+
