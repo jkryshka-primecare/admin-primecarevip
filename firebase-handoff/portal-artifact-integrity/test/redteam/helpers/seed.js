@@ -52,6 +52,16 @@ async function mintPatientToken(firebaseUid) {
  * Create a test patient and return a handle the suite can act through.
  * @returns {Promise<{patientId, firebaseUid, token, suspend, hideItem, repairQueueRows}>}
  */
+/**
+ * Access state lives in the TOP-LEVEL `portalAccess/{patientId}` collection —
+ * the same one `core/services/patient/portalAccess.js` and `adminSetPortalAccess`
+ * read/write (`status`, `hiddenItems: { module: [ids] }`). A `portalAccess`
+ * FIELD on the patient doc is invisible to production and must never be used.
+ */
+function accessRef(patientId) {
+  return db().collection('portalAccess').doc(patientId);
+}
+
 async function seedPatient({ id, suspended = false, bound = true } = {}) {
   const patientId = id ? `${PREFIX}${id}` : uniqueId('patient');
   const firebaseUid = `${patientId}-uid`.toLowerCase();
@@ -65,11 +75,14 @@ async function seedPatient({ id, suspended = false, bound = true } = {}) {
         // `bound: false` mirrors a not-yet-claimed member: no uid on the
         // patient doc, so the audit must classify their artifacts `unpathed`.
         ...(bound ? { firebaseUid } : {}),
-        portalAccess: { suspended, hidden: {} },
         updatedAt: new Date().toISOString(),
       },
       { merge: true },
     );
+
+  if (suspended) {
+    await accessRef(patientId).set({ redteam: true, status: 'suspended' }, { merge: true });
+  }
 
   const token = await mintPatientToken(firebaseUid);
 
@@ -78,19 +91,16 @@ async function seedPatient({ id, suspended = false, bound = true } = {}) {
     firebaseUid,
     token,
     async suspend() {
-      await db()
-        .collection('patients')
-        .doc(patientId)
-        .set({ portalAccess: { suspended: true } }, { merge: true });
+      await accessRef(patientId).set({ redteam: true, status: 'suspended' }, { merge: true });
     },
     async hideItem({ module: moduleKey, id: itemId }) {
-      await db()
-        .collection('patients')
-        .doc(patientId)
-        .set(
-          { portalAccess: { hidden: { [moduleKey]: { [itemId]: true } } } },
-          { merge: true },
-        );
+      await accessRef(patientId).set(
+        {
+          redteam: true,
+          hiddenItems: { [moduleKey]: admin.firestore.FieldValue.arrayUnion(String(itemId)) },
+        },
+        { merge: true },
+      );
     },
     async repairQueueRows() {
       const snap = await db()
