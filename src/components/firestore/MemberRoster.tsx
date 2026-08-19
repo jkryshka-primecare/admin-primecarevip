@@ -7,6 +7,7 @@ import {
 } from "@/hooks/useMemberReconciliation";
 import { useAuth } from "@/hooks/useAuth";
 import ProvisionMissingDialog from "@/components/firestore/ProvisionMissingDialog";
+import RosterExceptions from "@/components/firestore/RosterExceptions";
 import SendInviteButton from "@/components/firestore/SendInviteButton";
 
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -123,6 +124,11 @@ export default function MemberRoster() {
           </CardContent>
         </Card>
       )}
+
+      {!loading && !error && (
+        <RosterExceptions missing={missingMembers} rows={rows} />
+      )}
+
 
       <div className="flex flex-wrap items-center gap-3">
         <div className="flex flex-wrap gap-1 bg-muted/50 border border-border rounded-full p-1 w-fit">
