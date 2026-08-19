@@ -1,5 +1,47 @@
 {
-  "indexes": [],
+  "indexes": [
+    {
+      "collectionGroup": "appointment_requests",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "userId", "order": "ASCENDING" },
+        { "fieldPath": "status", "order": "ASCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "chat_conversations",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "type", "order": "ASCENDING" },
+        { "fieldPath": "participantIdentities", "arrayConfig": "CONTAINS" }
+      ]
+    },
+    {
+      "collectionGroup": "messages",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "users", "arrayConfig": "CONTAINS" },
+        { "fieldPath": "lastMessageAt", "order": "DESCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "scheduledMessages",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "conversationSid", "order": "ASCENDING" },
+        { "fieldPath": "status", "order": "ASCENDING" },
+        { "fieldPath": "sendAt", "order": "ASCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "scheduledMessages",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "status", "order": "ASCENDING" },
+        { "fieldPath": "nextAttemptAt", "order": "ASCENDING" }
+      ]
+    }
+  ],
   "fieldOverrides": [
     {
       "collectionGroup": "labs",
