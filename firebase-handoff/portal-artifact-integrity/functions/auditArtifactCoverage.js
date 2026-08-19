@@ -130,6 +130,7 @@ async function runAudit() {
     .get()
     .catch(() => ({ docs: [] }));
   const prior = new Map(priorSnap.docs.map((d) => [d.id, d.data()]));
+  const uidFor = makeUidResolver(db);
 
   const { seen, truncated } = await walk(db, async (docs) => {
     totalReferenced += docs.length;
@@ -139,13 +140,20 @@ async function runAudit() {
       // The owning patient id is read from the document's own parent — never
       // from anything a caller supplied.
       const patientId = doc.ref.parent.parent ? doc.ref.parent.parent.id : null;
-      const path = expectedPath(doc);
+      // eslint-disable-next-line no-await-in-loop
+      const uid = await uidFor(patientId);
+      const path = expectedPath(doc, uid);
       if (!path) {
-        unpathed.push({ patientId, documentId: doc.id, reason: 'no artifactPath and no firebaseUid' });
+        unpathed.push({
+          patientId,
+          documentId: doc.id,
+          reason: 'no artifactPath and patient has no firebaseUid/authUid',
+        });
         continue;
       }
       pathed.push({ patientId, documentId: doc.id, path });
     }
+
 
     const exists = await chunkedExists(pathed.map((p) => p.path));
     pathed.forEach((p, i) => {
