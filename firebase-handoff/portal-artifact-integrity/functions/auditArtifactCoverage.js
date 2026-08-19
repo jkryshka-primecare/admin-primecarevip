@@ -103,18 +103,33 @@ async function walk(db, onPage) {
   }
 }
 
+/**
+ * Existence probe that NEVER conflates "couldn't check" with "absent".
+ *
+ * A swallowed error here is how a project-wide `storage.objects.get` denial
+ * (403) was reported to us as a tidy, false "0% coverage" with a clean log.
+ * Each path now resolves to 'present' | 'absent' | { error }, and a systemic
+ * error rate fails the run loudly instead of queueing 1,341 bogus repairs.
+ */
 async function chunkedExists(paths) {
   const out = [];
   for (let i = 0; i < paths.length; i += EXISTS_CONCURRENCY) {
     const slice = paths.slice(i, i + EXISTS_CONCURRENCY);
     // eslint-disable-next-line no-await-in-loop
     const results = await Promise.all(
-      slice.map((p) => bucket().file(p).exists().then(([e]) => e).catch(() => false)),
+      slice.map((p) => bucket().file(p).exists()
+        .then(([e]) => (e ? { state: 'present' } : { state: 'absent' }))
+        .catch((err) => ({
+          state: 'error',
+          status: err && (err.code || err.status) ? Number(err.code || err.status) : null,
+          message: err && err.message ? String(err.message).slice(0, 300) : 'unknown storage error',
+        }))),
     );
     out.push(...results);
   }
   return out;
 }
+
 
 async function runAudit() {
   const db = admin.firestore();
@@ -125,6 +140,8 @@ async function runAudit() {
   let presentCount = 0;
   const missing = [];
   const unpathed = [];
+  const errored = [];
+  const errorStatusCounts = {};
 
   const priorSnap = await db
     .collection('artifact_repair_queue')
@@ -157,10 +174,18 @@ async function runAudit() {
     }
 
 
-    const exists = await chunkedExists(pathed.map((p) => p.path));
+    const probes = await chunkedExists(pathed.map((p) => p.path));
     pathed.forEach((p, i) => {
-      if (exists[i]) {
+      const probe = probes[i] || { state: 'error', status: null, message: 'no probe result' };
+      if (probe.state === 'present') {
         presentCount += 1;
+        return;
+      }
+      if (probe.state === 'error') {
+        // "Couldn't check" is NOT "absent". Never queued for repair.
+        const key = String(probe.status || 'unknown');
+        errorStatusCounts[key] = (errorStatusCounts[key] || 0) + 1;
+        errored.push({ ...p, status: probe.status, message: probe.message });
         return;
       }
       const known = prior.get(`${p.patientId}:${p.documentId}`) || {};
@@ -174,7 +199,13 @@ async function runAudit() {
   });
 
   const missingCount = missing.length;
+  const erroredCount = errored.length;
   const checked = presentCount + missingCount;
+  const probed = checked + erroredCount;
+  // A systemic storage failure (IAM denial, bucket gone) must fail the run, not
+  // be laundered into a coverage number or a repair queue full of ghosts.
+  const systemicStorageFailure = probed > 0 && erroredCount / probed >= 0.25;
+
   const report = {
     generatedAt: new Date().toISOString(),
     scope: 'referenced',
@@ -189,7 +220,16 @@ async function runAudit() {
     // never queued. They are a data-quality item, not a storage miss.
     unpathedCount: unpathed.length,
     unpathed: unpathed.slice(0, 500),
-    coveragePct: checked > 0 ? (presentCount / checked) * 100 : null,
+    // Docs whose Storage probe FAILED (e.g. 403 storage.objects.get). Excluded
+    // from the percentage and never queued.
+    erroredCount,
+    errorStatusCounts,
+    errored: errored.slice(0, 200),
+    systemicStorageFailure,
+    status: systemicStorageFailure ? 'failed_storage_unreadable' : 'ok',
+    coveragePct: systemicStorageFailure || checked === 0
+      ? null
+      : (presentCount / checked) * 100,
     // Cap the embedded list so the report doc stays under the 1 MiB limit; the
     // full set always lives in artifact_repair_queue.
     missing: missing.slice(0, 500),
@@ -197,6 +237,16 @@ async function runAudit() {
   };
 
   await db.collection('artifact_coverage_reports').doc(runId).set(report);
+
+  if (systemicStorageFailure) {
+    functions.logger.error('artifact coverage audit: storage unreadable — refusing to queue repairs', {
+      runId,
+      erroredCount,
+      errorStatusCounts,
+      sample: errored.slice(0, 3).map((e) => ({ path: e.path, status: e.status, message: e.message })),
+    });
+    return { runId, ...report };
+  }
 
   // Feed the healer: one queue row per miss, keyed (patientId, documentId).
   const batch = db.batch();
@@ -220,6 +270,7 @@ async function runAudit() {
   });
   await batch.commit();
 
+
   return { runId, ...report };
 }
 
@@ -234,6 +285,8 @@ exports.auditArtifactCoverageScheduled = functions
       runId: out.runId,
       coveragePct: out.coveragePct,
       missingCount: out.missingCount,
+      erroredCount: out.erroredCount,
+      status: out.status,
       truncatedWalk: out.truncatedWalk,
     });
     return null;
@@ -263,6 +316,8 @@ exports.auditArtifactCoverageOnDemand = functions
       runId: out.runId,
       coveragePct: out.coveragePct,
       missingCount: out.missingCount,
+      erroredCount: out.erroredCount,
+      status: out.status,
       truncatedWalk: out.truncatedWalk,
     });
     return null;
