@@ -28,6 +28,7 @@
 
 const functions = require('firebase-functions');
 const admin = require('firebase-admin');
+const { artifactBucketName } = require('./core/config/artifactBucket');
 
 const REGION = 'us-central1';
 const PAGE_SIZE = 500;
@@ -37,7 +38,8 @@ const EXISTS_CONCURRENCY = 50;
 const MAX_DOCS = 50000;
 
 function bucket() {
-  return admin.storage().bucket();
+  // Never bare: the default bucket is not where artifacts live (see config).
+  return admin.storage().bucket(artifactBucketName());
 }
 
 /**
