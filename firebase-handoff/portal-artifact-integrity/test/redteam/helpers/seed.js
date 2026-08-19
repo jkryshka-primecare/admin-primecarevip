@@ -52,9 +52,9 @@ async function mintPatientToken(firebaseUid) {
  * Create a test patient and return a handle the suite can act through.
  * @returns {Promise<{patientId, firebaseUid, token, suspend, hideItem, repairQueueRows}>}
  */
-async function seedPatient({ id, suspended = false } = {}) {
+async function seedPatient({ id, suspended = false, bound = true } = {}) {
   const patientId = id ? `${PREFIX}${id}` : uniqueId('patient');
-  const firebaseUid = `${patientId}-uid`;
+  const firebaseUid = `${patientId}-uid`.toLowerCase();
 
   await db()
     .collection('patients')
@@ -62,7 +62,9 @@ async function seedPatient({ id, suspended = false } = {}) {
     .set(
       {
         redteam: true,
-        firebaseUid,
+        // `bound: false` mirrors a not-yet-claimed member: no uid on the
+        // patient doc, so the audit must classify their artifacts `unpathed`.
+        ...(bound ? { firebaseUid } : {}),
         portalAccess: { suspended, hidden: {} },
         updatedAt: new Date().toISOString(),
       },
@@ -130,9 +132,12 @@ async function seedDocument(
     .set({
       redteam: true,
       hasArtifact: true,
+      reportId: docId,
       category: CATEGORY[moduleKey],
       deleted: false,
-      artifactPath: path,
+      // Production lab docs carry NO artifactPath — the uid lives on the parent
+      // patient doc and the path is derived. Seeding artifactPath here hid the
+      // audit's uid-resolution bug, so the seed now matches production shape.
       updatedAt: new Date().toISOString(),
     });
 

@@ -43,16 +43,40 @@ function bucket() {
 /**
  * The current (pre-2b) artifact path. Re-keying is deliberately out of 2a.
  *
- * Review item 4: a doc with neither `artifactPath` nor `firebaseUid` used to
- * resolve to a literal `elation-artifacts/null/...` path — a false miss that
- * the sweep would then "heal" by writing junk at `null/`. Such docs are now
- * classified `unpathed` instead: reported separately, never queued for repair.
+ * The uid does NOT live on the lab doc — it lives on the PARENT patient doc
+ * (`firebaseUid`, falling back to `authUid`) and is LOWERCASED, exactly like the
+ * read path (`readArtifact.js`) and the writer (`backfillElationReports.js`).
+ * Resolving it off the lab doc classified every artifact as `unpathed`.
+ *
+ * Review item 4: a doc that resolves to no uid must stay `unpathed` — reported
+ * separately, never queued for repair, so the sweep can never "heal" junk at
+ * `elation-artifacts/null/...`.
  */
-function expectedPath(doc) {
+function expectedPath(doc, patientUid) {
   if (doc.artifactPath) return doc.artifactPath;
-  if (!doc.firebaseUid) return null;
-  return `elation-artifacts/${doc.firebaseUid}/${doc.id}/report.pdf`;
+  if (!patientUid) return null;
+  return `elation-artifacts/${patientUid}/${doc.id}/report.pdf`;
 }
+
+/** patientId -> lowercased uid (or null). One patient doc read per patient. */
+function makeUidResolver(db) {
+  const cache = new Map();
+  return async function uidFor(patientId) {
+    if (!patientId) return null;
+    if (cache.has(patientId)) return cache.get(patientId);
+    let uid = null;
+    try {
+      const snap = await db.collection('patients').doc(patientId).get();
+      const raw = snap.exists ? snap.get('firebaseUid') || snap.get('authUid') : null;
+      uid = raw ? String(raw).toLowerCase() : null;
+    } catch (_e) {
+      uid = null;
+    }
+    cache.set(patientId, uid);
+    return uid;
+  };
+}
+
 
 async function walk(db, onPage) {
   let last = null;
@@ -106,6 +130,7 @@ async function runAudit() {
     .get()
     .catch(() => ({ docs: [] }));
   const prior = new Map(priorSnap.docs.map((d) => [d.id, d.data()]));
+  const uidFor = makeUidResolver(db);
 
   const { seen, truncated } = await walk(db, async (docs) => {
     totalReferenced += docs.length;
@@ -115,13 +140,20 @@ async function runAudit() {
       // The owning patient id is read from the document's own parent — never
       // from anything a caller supplied.
       const patientId = doc.ref.parent.parent ? doc.ref.parent.parent.id : null;
-      const path = expectedPath(doc);
+      // eslint-disable-next-line no-await-in-loop
+      const uid = await uidFor(patientId);
+      const path = expectedPath(doc, uid);
       if (!path) {
-        unpathed.push({ patientId, documentId: doc.id, reason: 'no artifactPath and no firebaseUid' });
+        unpathed.push({
+          patientId,
+          documentId: doc.id,
+          reason: 'no artifactPath and patient has no firebaseUid/authUid',
+        });
         continue;
       }
       pathed.push({ patientId, documentId: doc.id, path });
     }
+
 
     const exists = await chunkedExists(pathed.map((p) => p.path));
     pathed.forEach((p, i) => {

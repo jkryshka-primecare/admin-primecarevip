@@ -180,3 +180,32 @@ describe.skip('[2b] grant-scoped access', () => {
   test('a guardian sees exactly their own record plus active-grant dependents', () => {});
   test('module-off on a child applies to every linked guardian', () => {});
 });
+
+describe('coverage audit resolves the uid from the parent patient doc', () => {
+  // Production lab docs carry no `artifactPath` and no `firebaseUid`; the uid
+  // lives on the parent patient doc, lowercased. Resolving it off the lab doc
+  // classified every artifact as `unpathed` (coveragePct: null).
+  // eslint-disable-next-line import/no-unresolved, global-require
+  const { _runAudit } = require('../../functions/auditArtifactCoverage');
+
+  it('counts a bound patient as present and an unbound patient as unpathed', async () => {
+    const bound = await seedPatient({ id: 'audit-bound' });
+    const seededBound = await seedDocument(bound, { documentId: 'audit-present' });
+
+    const unbound = await seedPatient({ id: 'audit-unbound', bound: false });
+    const seededUnbound = await seedDocument(unbound, { documentId: 'audit-unpathed' });
+
+    const report = await _runAudit();
+
+    const isPresent = !report.missing.some((m) => m.documentId === seededBound.documentId);
+    expect(isPresent).toBe(true);
+    expect(report.presentCount).toBeGreaterThan(0);
+    expect(report.coveragePct).not.toBeNull();
+
+    const unpathedIds = report.unpathed.map((u) => u.documentId);
+    expect(unpathedIds).toContain(seededUnbound.documentId);
+    // Never queued — the sweep must not be able to heal junk at `null/`.
+    const rows = await unbound.repairQueueRows();
+    expect(rows.some((r) => r.documentId === seededUnbound.documentId)).toBe(false);
+  });
+});
