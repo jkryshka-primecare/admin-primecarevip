@@ -53,11 +53,17 @@ function emulatorSigningCredential() {
 
 function initOnce() {
   if (!admin.apps.length) {
-    admin.initializeApp({
+    const opts = {
       projectId: resolveProjectId() || undefined,
       storageBucket: process.env.REDTEAM_STORAGE_BUCKET,
-      credential: emulatorSigningCredential(),
-    });
+    };
+    // Only set `credential` when we actually minted one (emulator, no ADC).
+    // Passing `undefined` explicitly makes the Admin SDK throw
+    // "credential must be an object which implements the Credential interface"
+    // in the credentialed bucket-privacy job — omit it so ADC is used.
+    const cred = emulatorSigningCredential();
+    if (cred) opts.credential = cred;
+    admin.initializeApp(opts);
   }
   return admin;
 }
