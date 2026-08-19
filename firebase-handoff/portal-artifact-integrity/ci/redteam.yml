@@ -55,6 +55,10 @@ jobs:
           # does exactly that — so the test bucket is prefixed instead, and the
           # guard still catches a real production bucket name.
           REDTEAM_STORAGE_BUCKET: test-prive-care-vip.appspot.com
+          # Match REDTEAM_STORAGE_BUCKET so seed-write, read and audit all agree
+          # under the emulator. Unset in production, where artifactBucketName()
+          # falls back to the real prive-care-vip.firebasestorage.app.
+          ARTIFACT_BUCKET: test-prive-care-vip.appspot.com
           REDTEAM_WEB_API_KEY: ${{ secrets.REDTEAM_WEB_API_KEY }}
         run: npm run test:redteam
 
