@@ -13,6 +13,8 @@
 
 const admin = require('firebase-admin');
 const { assertReadOnlyTargetConfigured, assertStatefulTargetAllowed, resolveProjectId } = require('./env');
+const { artifactBucketName } = require('../../../functions/core/config/artifactBucket');
+
 
 function initOnce() {
   if (!admin.apps.length) {
@@ -32,11 +34,22 @@ function bucket() {
   return b;
 }
 
-/** Write-capable bucket handle. Refuses production targets. */
+/**
+ * Write-capable bucket handle. Refuses production targets.
+ *
+ * CRITICAL: the seed MUST write to the same bucket the code under test reads.
+ * Resolving the app default here (REDTEAM_STORAGE_BUCKET) while read/audit/sweep
+ * resolve `artifactBucketName()` made writer and readers disagree under the
+ * emulator — signed reads 500'd or `exists()` reported false. One resolver only.
+ */
 function writableBucket() {
   assertStatefulTargetAllowed();
-  return bucket();
+  assertReadOnlyTargetConfigured();
+  const b = initOnce().storage().bucket(artifactBucketName());
+  if (!b || !b.name) throw new Error('red-team: no real Storage bucket resolved — refusing to run');
+  return b;
 }
+
 
 /** Raw bucket metadata, including uniformBucketLevelAccess. */
 async function getBucketMetadata() {
