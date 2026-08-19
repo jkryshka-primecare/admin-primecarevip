@@ -9,6 +9,7 @@ import {
 } from "@/hooks/usePortalAdmin";
 import type { ReconRow } from "@/hooks/useMemberReconciliation";
 import { isTestFixture } from "@/lib/portal/fixtures";
+import { ADULT_AGE, ageFromDob, eligibility } from "@/lib/portal/exceptions";
 
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
