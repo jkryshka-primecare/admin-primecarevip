@@ -54,7 +54,7 @@ async function mintPatientToken(firebaseUid) {
  */
 async function seedPatient({ id, suspended = false } = {}) {
   const patientId = id ? `${PREFIX}${id}` : uniqueId('patient');
-  const firebaseUid = `${patientId}-uid`;
+  const firebaseUid = `${patientId}-uid`.toLowerCase();
 
   await db()
     .collection('patients')
@@ -130,9 +130,12 @@ async function seedDocument(
     .set({
       redteam: true,
       hasArtifact: true,
+      reportId: docId,
       category: CATEGORY[moduleKey],
       deleted: false,
-      artifactPath: path,
+      // Production lab docs carry NO artifactPath — the uid lives on the parent
+      // patient doc and the path is derived. Seeding artifactPath here hid the
+      // audit's uid-resolution bug, so the seed now matches production shape.
       updatedAt: new Date().toISOString(),
     });
 
