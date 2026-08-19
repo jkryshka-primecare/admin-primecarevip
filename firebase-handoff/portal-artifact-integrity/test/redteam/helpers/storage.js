@@ -12,8 +12,14 @@
  */
 
 const admin = require('firebase-admin');
-const { assertReadOnlyTargetConfigured, assertStatefulTargetAllowed, resolveProjectId } = require('./env');
+const {
+  assertReadOnlyTargetConfigured,
+  assertStatefulTargetAllowed,
+  resolveProjectId,
+  PROD_PROJECT_IDS,
+} = require('./env');
 const { artifactBucketName } = require('../../../functions/core/config/artifactBucket');
+
 
 
 function initOnce() {
