@@ -209,6 +209,8 @@ async function cleanup() {
       const docs = await doc.ref.collection(col).get();
       await Promise.all(docs.docs.map((d) => d.ref.delete()));
     }
+    // Access state lives in the top-level collection, keyed by patient id.
+    await firestore.collection('portalAccess').doc(doc.id).delete().catch(() => {});
     await doc.ref.delete();
   }
   const queue = await firestore.collection('artifact_repair_queue').where('source', '==', 'redteam').get();
