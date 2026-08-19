@@ -43,16 +43,40 @@ function bucket() {
 /**
  * The current (pre-2b) artifact path. Re-keying is deliberately out of 2a.
  *
- * Review item 4: a doc with neither `artifactPath` nor `firebaseUid` used to
- * resolve to a literal `elation-artifacts/null/...` path — a false miss that
- * the sweep would then "heal" by writing junk at `null/`. Such docs are now
- * classified `unpathed` instead: reported separately, never queued for repair.
+ * The uid does NOT live on the lab doc — it lives on the PARENT patient doc
+ * (`firebaseUid`, falling back to `authUid`) and is LOWERCASED, exactly like the
+ * read path (`readArtifact.js`) and the writer (`backfillElationReports.js`).
+ * Resolving it off the lab doc classified every artifact as `unpathed`.
+ *
+ * Review item 4: a doc that resolves to no uid must stay `unpathed` — reported
+ * separately, never queued for repair, so the sweep can never "heal" junk at
+ * `elation-artifacts/null/...`.
  */
-function expectedPath(doc) {
+function expectedPath(doc, patientUid) {
   if (doc.artifactPath) return doc.artifactPath;
-  if (!doc.firebaseUid) return null;
-  return `elation-artifacts/${doc.firebaseUid}/${doc.id}/report.pdf`;
+  if (!patientUid) return null;
+  return `elation-artifacts/${patientUid}/${doc.id}/report.pdf`;
 }
+
+/** patientId -> lowercased uid (or null). One patient doc read per patient. */
+function makeUidResolver(db) {
+  const cache = new Map();
+  return async function uidFor(patientId) {
+    if (!patientId) return null;
+    if (cache.has(patientId)) return cache.get(patientId);
+    let uid = null;
+    try {
+      const snap = await db.collection('patients').doc(patientId).get();
+      const raw = snap.exists ? snap.get('firebaseUid') || snap.get('authUid') : null;
+      uid = raw ? String(raw).toLowerCase() : null;
+    } catch (_e) {
+      uid = null;
+    }
+    cache.set(patientId, uid);
+    return uid;
+  };
+}
+
 
 async function walk(db, onPage) {
   let last = null;
