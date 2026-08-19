@@ -22,15 +22,46 @@ const { artifactBucketName } = require('../../../functions/core/config/artifactB
 
 
 
+/**
+ * v4 signing needs a private key. Under the emulator the stateful job has NO
+ * credentials by design (no production SA on the PR trigger), so
+ * `file.getSignedUrl()` throws "Could not load the default credentials" and the
+ * shared read path maps it to 500 SIGN_ERROR — every expected-200 serve case
+ * fails while suppression/preparing cases (which never sign) pass.
+ *
+ * GOOG4-RSA signing is entirely local: any RSA key produces a valid signature,
+ * and the Storage emulator does not verify it. So the harness mints a throwaway
+ * key per run and signs with that. This keeps the REAL serve path under test —
+ * no assertion is weakened — and the key never leaves the process.
+ * Only ever used when a Storage emulator is present.
+ */
+function emulatorSigningCredential() {
+  if (!process.env.STORAGE_EMULATOR_HOST) return undefined;
+  if (process.env.GOOGLE_APPLICATION_CREDENTIALS) return undefined;
+  // eslint-disable-next-line global-require
+  const { generateKeyPairSync } = require('crypto');
+  const { privateKey } = generateKeyPairSync('rsa', {
+    modulusLength: 2048,
+    privateKeyEncoding: { type: 'pkcs8', format: 'pem' },
+  });
+  return admin.credential.cert({
+    projectId: resolveProjectId() || 'demo-redteam',
+    clientEmail: `redteam@${resolveProjectId() || 'demo-redteam'}.iam.gserviceaccount.com`,
+    privateKey,
+  });
+}
+
 function initOnce() {
   if (!admin.apps.length) {
     admin.initializeApp({
       projectId: resolveProjectId() || undefined,
       storageBucket: process.env.REDTEAM_STORAGE_BUCKET,
+      credential: emulatorSigningCredential(),
     });
   }
   return admin;
 }
+
 
 /** Read-only bucket handle (inspection only). */
 function bucket() {
