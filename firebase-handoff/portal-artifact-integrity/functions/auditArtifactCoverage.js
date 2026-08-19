@@ -103,18 +103,33 @@ async function walk(db, onPage) {
   }
 }
 
+/**
+ * Existence probe that NEVER conflates "couldn't check" with "absent".
+ *
+ * A swallowed error here is how a project-wide `storage.objects.get` denial
+ * (403) was reported to us as a tidy, false "0% coverage" with a clean log.
+ * Each path now resolves to 'present' | 'absent' | { error }, and a systemic
+ * error rate fails the run loudly instead of queueing 1,341 bogus repairs.
+ */
 async function chunkedExists(paths) {
   const out = [];
   for (let i = 0; i < paths.length; i += EXISTS_CONCURRENCY) {
     const slice = paths.slice(i, i + EXISTS_CONCURRENCY);
     // eslint-disable-next-line no-await-in-loop
     const results = await Promise.all(
-      slice.map((p) => bucket().file(p).exists().then(([e]) => e).catch(() => false)),
+      slice.map((p) => bucket().file(p).exists()
+        .then(([e]) => (e ? { state: 'present' } : { state: 'absent' }))
+        .catch((err) => ({
+          state: 'error',
+          status: err && (err.code || err.status) ? Number(err.code || err.status) : null,
+          message: err && err.message ? String(err.message).slice(0, 300) : 'unknown storage error',
+        }))),
     );
     out.push(...results);
   }
   return out;
 }
+
 
 async function runAudit() {
   const db = admin.firestore();
