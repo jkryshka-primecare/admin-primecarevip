@@ -4,7 +4,17 @@ Reconciled with the repo agent after the merge of PR #421 (`release-2a/centraliz
 and the lockfile follow-up PR #422. Lovable's GitHub token is Actions-blind (403 on workflow runs),
 so the runtime evidence below comes from the repo agent, not from a read of `main`.
 
+## Coverage measurement (2026-08-19)
+
+First trustworthy run: **94.1%** — 1,262 / 1,341 referenced artifacts present, 79 genuinely
+missing, `erroredCount: 0`, `status: ok`, `truncatedWalk: false`. Unblocked by granting
+`roles/storage.objectAdmin` to `prive-care-vip@appspot.gserviceaccount.com` scoped to
+`prive-care-vip.firebasestorage.app` (project Editor mapped only to `storage.legacyBucketOwner`,
+a bucket-level role — hence `ls` worked and `objects.get` 403'd). Error classification (#430) is
+merged and deployed; probes now resolve present/absent/error and errors never enter the queue.
+
 ## Closed
+
 
 - **Code on `main`** — verified file by file: `readArtifact.js`, `repairQueue.js`, the three
   delegating wrappers (`!wantArtifact` list guard, audit-first `phi_access_log`, module pinned,
