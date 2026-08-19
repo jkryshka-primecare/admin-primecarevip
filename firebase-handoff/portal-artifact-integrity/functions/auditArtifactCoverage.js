@@ -210,14 +210,20 @@ exports.auditArtifactCoverageScheduled = functions
  * claims a run id, answers 202 immediately, and the caller polls
  * `artifact_coverage_reports/{runId}` through the bridge.
  */
-const requireAdminCaller = require('./middleware/requireAdminCaller');
+const { requireAdminCaller, selfAudience } = require('./middleware/requireAdminCaller');
 
 exports.adminRunArtifactAudit = functions
   .region(REGION)
   .runWith({ timeoutSeconds: 540, memory: '512MB' })
   .https.onRequest(async (req, res) => {
-    const caller = await requireAdminCaller(req, res);
-    if (!caller) return; // requireAdminCaller already answered
+    // Same pattern as the five Step 1 admin functions: the gate returns a
+    // result object and never writes the response — inspect `.ok` yourself.
+    const gate = await requireAdminCaller(req, selfAudience(req, 'adminRunArtifactAudit'));
+    if (!gate.ok) {
+      functions.logger.warn('adminRunArtifactAudit caller-rejected', { reason: gate.reason });
+      return res.status(gate.status).json({ ok: false, error: gate.reason });
+    }
+
 
     // Fire and forget: the report doc is the result channel.
     runAudit()
