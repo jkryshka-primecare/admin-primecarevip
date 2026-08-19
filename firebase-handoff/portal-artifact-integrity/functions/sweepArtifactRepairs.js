@@ -32,10 +32,25 @@ const LEASE_MS = 10 * 60 * 1000;
 /** Transient upstream statuses: back off the run, never park the document. */
 const TRANSIENT = new Set([429, 500, 502, 503, 504]);
 
-/** Binary fetch for a document's PDF via the shared client. */
-function fetchDocumentPdf(documentId) {
-  return elation.getBinary(`/reports/${documentId}/printable`);
+/**
+ * Binary fetch for a document's PDF via the shared client.
+ *
+ * `getBinary` resolves to a WRAPPER — `{ buffer, contentType, ... }` — not raw
+ * bytes (this is exactly how `backfillElationReports.js` consumes it). Passing
+ * the wrapper straight into `file.save()` makes Node throw
+ * `The "body" argument must be of type ... Received an instance of Object`,
+ * which healed 0 / failed 100 on the first sweep run. Always unwrap here so the
+ * caller can only ever see a Buffer.
+ */
+async function fetchDocumentPdf(documentId) {
+  const res = await elation.getBinary(`/reports/${documentId}/printable`);
+  const bytes = Buffer.isBuffer(res) ? res : res && (res.buffer || res.body || res.data);
+  if (!bytes) {
+    throw new Error(`elation getBinary returned no bytes for report ${documentId}`);
+  }
+  return Buffer.isBuffer(bytes) ? bytes : Buffer.from(bytes);
 }
+
 
 
 const stateRef = () => admin.firestore().collection('artifact_repair_state');
