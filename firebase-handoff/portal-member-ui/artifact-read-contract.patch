@@ -1,0 +1,616 @@
+diff --git a/artifacts/web-member/src/services/api/clinicalApi.js b/artifacts/web-member/src/services/api/clinicalApi.js
+--- a/artifacts/web-member/src/services/api/clinicalApi.js
++++ b/artifacts/web-member/src/services/api/clinicalApi.js
+@@ -87,7 +87,13 @@
+  * Artifact-mode caller for read CFs that serve a stored PDF (getImaging, getLabs).
+  * Unlike callRead, the success payload is a single object, not an array under a key:
+  *   { kind: 'artifact', artifact: { signedUrl, expiresAt, contentType } }
++ *   { kind: 'preparing' }   — 200 { state: 'preparing' }: reference exists, object is
++ *                             being restored server-side. Not an error, not a 404.
+  *   { kind: 'error', error }
++ *
++ * The signed URL is short-lived (300s, server-pinned — ttlSeconds is never caller-supplied).
++ * Consumers MUST re-request through this function on expiry instead of caching the link;
++ * see hooks/useArtifact.js, which owns that lifecycle.
+  * Sends { reportId } in the body (the ONLY read CF body that carries a client value;
+  * ownership is still resolved from the token per D-064 — reportId only selects which
+  * of the caller's own artifacts to sign).
+@@ -135,6 +141,14 @@
+     return { kind: 'error', error: parseApiError(res.status, json) };
+   }
+ 
++  // The reference exists but the stored object is not in place yet. The server has
++  // already queued a self-heal repair and answers 200 { state: 'preparing' }. This is
++  // NOT an error and NOT a 404 — the caller renders a friendly preparing state and
++  // may poll. (Release 2a artifact read contract.)
++  if (json && json.state === 'preparing') {
++    return { kind: 'preparing' };
++  }
++
+   if (json && typeof json.signedUrl === 'string') {
+     return { kind: 'artifact', artifact: { signedUrl: json.signedUrl, expiresAt: json.expiresAt ?? null, contentType: json.contentType ?? null } };
+   }
+diff --git a/artifacts/web-member/src/components/PdfViewer.jsx b/artifacts/web-member/src/components/PdfViewer.jsx
+--- a/artifacts/web-member/src/components/PdfViewer.jsx
++++ b/artifacts/web-member/src/components/PdfViewer.jsx
+@@ -1,8 +1,13 @@
+ // PdfViewer.jsx — branded PDF viewer shared by the Imaging and Medical Records screens.
+ // Receives a short-lived GCS v4 signed URL and renders it with react-pdf.
+ // Inline styles only, to match the existing screens. Never throws.
++//
++// The URL lives 300s (Release 2a contract). A load/fetch failure is therefore far more
++// likely to be an expired link than a broken document, so the first failure asks the
++// owner (useArtifact) for a fresh URL via onExpired() instead of showing a dead end.
++// Only a failure on the freshly minted URL becomes the terminal message.
+ 
+-import { useState, useEffect } from 'react';
++import { useState, useEffect, useRef } from 'react';
+ import { Document, Page, pdfjs } from 'react-pdf';
+ import 'react-pdf/dist/Page/TextLayer.css';
+ import 'react-pdf/dist/Page/AnnotationLayer.css';
+@@ -17,20 +22,31 @@
+ const MAX_SCALE = 3.0;
+ const SCALE_STEP = 0.25;
+ 
+-function PdfViewer({ signedUrl }) {
++function PdfViewer({ signedUrl, onExpired }) {
+   const [numPages, setNumPages] = useState(null);
+   const [pageNumber, setPageNumber] = useState(1);
+   const [scale, setScale] = useState(1.0);
+   const [loadError, setLoadError] = useState(false);
+   const [busy, setBusy] = useState(false);
++  // One re-request per URL, so an genuinely broken document cannot loop.
++  const retriedRef = useRef(false);
+ 
+   // Reset paging + error state whenever a new document arrives.
+   useEffect(() => {
+     setNumPages(null);
+     setPageNumber(1);
+     setLoadError(false);
++    retriedRef.current = false;
+   }, [signedUrl]);
+ 
++  // Ask for a fresh signed URL once; return true if a retry was started.
++  function tryRefresh() {
++    if (retriedRef.current || typeof onExpired !== 'function') return false;
++    retriedRef.current = true;
++    onExpired();
++    return true;
++  }
++
+   const centeredMessage = (text) => (
+     <div
+       style={{
+@@ -99,6 +115,9 @@
+       objectUrl = URL.createObjectURL(blob);
+       action(objectUrl);
+     } catch {
++      // Most likely the 300s link expired between render and click: ask for a fresh
++      // one rather than opening a URL we already know is dead.
++      if (tryRefresh()) return;
+       // Fallback: open the signed URL directly in a new tab.
+       window.open(signedUrl, '_blank', 'noopener');
+     } finally {
+@@ -260,7 +279,10 @@
+         <Document
+           file={signedUrl}
+           onLoadSuccess={({ numPages: n }) => setNumPages(n)}
+-          onLoadError={() => setLoadError(true)}
++          onLoadError={() => {
++            // Expired link first, broken document second.
++            if (!tryRefresh()) setLoadError(true);
++          }}
+           loading={centeredMessage('Loading document…')}
+           error={centeredMessage("This document couldn't be displayed.")}
+         >
+diff --git a/artifacts/web-member/src/screens/LabResults.jsx b/artifacts/web-member/src/screens/LabResults.jsx
+--- a/artifacts/web-member/src/screens/LabResults.jsx
++++ b/artifacts/web-member/src/screens/LabResults.jsx
+@@ -6,12 +6,17 @@
+ // shows a neutral chip, NEVER "critical/panic".
+ //
+ // LAYOUT: MyHealthLayout — left ReportListPane (400px) of live getLabs items;
+-// right pane opens the stored PDF via fetchArtifact('getLabs', reportId) when
+-// hasArtifact (D-065). If no PDF, falls back to structured results detail.
++// right pane opens the stored PDF through useArtifact('getLabs') when hasArtifact
++// (D-065). If no PDF, falls back to structured results detail.
++//
++// The artifact lifecycle (300s signed-URL re-request, { state: 'preparing' } rendered
++// as a state and not an error, absence never shown as forbidden) lives entirely in
++// useArtifact — see the Release 2a artifact read contract documented there.
+ 
+-import { useState, useRef, lazy, Suspense } from 'react';
+-import { fetchMyLabs, fetchArtifact } from '../services/api/clinicalApi.js';
++import { useState, useEffect, lazy, Suspense } from 'react';
++import { fetchMyLabs } from '../services/api/clinicalApi.js';
+ import { useClinicalData } from '../hooks/useClinicalData.js';
++import { useArtifact } from '../hooks/useArtifact.js';
+ import { useAuth } from '../auth/AuthContext.jsx';
+ import { COLORS, FONT } from '../theme.js';
+ import { DirectionChip } from '../components/clinical.jsx';
+@@ -102,7 +107,7 @@
+   );
+ }
+ 
+-function Viewer({ state, activeItem }) {
++function Viewer({ state, activeItem, onRetry }) {
+   const base = {
+     width: '100%',
+     height: '100%',
+@@ -119,8 +124,40 @@
+   if (state.kind === 'loading') {
+     return <div style={base}><span style={{ fontSize: 13, color: COLORS.textMuted }}>Opening report…</span></div>;
+   }
++  if (state.kind === 'preparing') {
++    // Not an error: the document is being restored server-side. Neutral copy, no red,
++    // no "try again" — the poll in useArtifact handles it.
++    return (
++      <div style={base}>
++        <span style={{ fontSize: 13, color: COLORS.textMuted, padding: 24, textAlign: 'center', maxWidth: 360 }}>
++          {state.message}
++        </span>
++      </div>
++    );
++  }
+   if (state.kind === 'error') {
+-    return <div style={base}><span style={{ fontSize: 13, color: '#B4232A', padding: 20, textAlign: 'center' }}>{state.message}</span></div>;
++    // Absence and pauses are stated calmly; only genuinely transient faults are red
++    // and offer a retry, because retrying anything else cannot change the answer.
++    return (
++      <div style={base}>
++        <div style={{ padding: 20, textAlign: 'center', maxWidth: 360 }}>
++          <span style={{ fontSize: 13, color: state.transient ? '#B4232A' : COLORS.textMuted }}>
++            {state.message}
++          </span>
++          {state.transient && onRetry ? (
++            <div style={{ marginTop: 12 }}>
++              <button
++                type="button"
++                onClick={onRetry}
++                style={{ fontFamily: FONT, fontSize: 13, fontWeight: 600, color: COLORS.navy, background: '#fff', border: `1px solid ${COLORS.border}`, borderRadius: 8, padding: '6px 14px', cursor: 'pointer' }}
++              >
++                Try again
++              </button>
++            </div>
++          ) : null}
++        </div>
++      </div>
++    );
+   }
+   if (state.kind === 'detail' && activeItem) {
+     return <LabDetail item={activeItem} />;
+@@ -129,7 +166,8 @@
+     return (
+       <Suspense fallback={<div style={base}><span style={{ fontSize: 13, color: COLORS.textMuted }}>Opening viewer…</span></div>}>
+         <div style={{ width: '100%', height: '100%', minHeight: 0 }}>
+-          <PdfViewer signedUrl={state.url} />
++          {/* onExpired re-requests through the read CF; the 300s link is never reused. */}
++          <PdfViewer signedUrl={state.url} onExpired={onRetry} />
+         </div>
+       </Suspense>
+     );
+@@ -137,46 +175,42 @@
+   return null;
+ }
+ 
+-function friendlyArtifactError(error) {
+-  const reason = error?.reason;
+-  if (reason === 'ARTIFACT_NOT_SYNCED') return 'This report is not available to view yet.';
+-  if (error?.httpStatus === 401) return 'Your session expired. Please sign in again.';
+-  if (error?.httpStatus === 0) return 'Connection problem. Please try again.';
+-  return 'This report could not be opened. Please try again.';
+-}
+-
+ export default function LabResults() {
+   const { status, items, error, reload } = useClinicalData(fetchMyLabs);
+   const { getIdToken } = useAuth();
+   const [activeId, setActiveId] = useState(null);
+   const [activeItem, setActiveItem] = useState(null);
+-  const [viewer, setViewer] = useState({ kind: 'idle' });
+-  const openGenRef = useRef(0);
++  // 'detail' is a labs-only fallback (structured results when there is no PDF), so the
++  // screen keeps a thin local state that shadows the artifact state when chosen.
++  const [detailOnly, setDetailOnly] = useState(false);
++  const { state: artifact, open: openArtifact, refresh, close } = useArtifact('getLabs', getIdToken);
++
++  // A non-transient artifact outcome on a report that has structured results is not
++  // worth a message — show the results instead of telling the member about a PDF.
++  useEffect(() => {
++    if (artifact.kind === 'error' && !artifact.transient && (activeItem?.results?.length ?? 0) > 0) {
++      setDetailOnly(true);
++    }
++  }, [artifact, activeItem]);
+ 
+-  async function open(item) {
+-    const gen = ++openGenRef.current;
++  function open(item) {
+     setActiveId(item.id ?? null);
+     setActiveItem(item);
+ 
+     // Prefer the stored PDF when present (same path as Imaging / Medical Records).
+     if (item.hasArtifact && item.id) {
+-      setViewer({ kind: 'loading' });
+-      const result = await fetchArtifact('getLabs', item.id, getIdToken);
+-      if (gen !== openGenRef.current) return;
+-      if (result.kind === 'artifact') {
+-        setViewer({ kind: 'ready', url: result.artifact.signedUrl });
+-      } else if ((item.results?.length ?? 0) > 0) {
+-        setViewer({ kind: 'detail' });
+-      } else {
+-        setViewer({ kind: 'error', message: friendlyArtifactError(result.error) });
+-      }
++      setDetailOnly(false);
++      openArtifact(item.id);
+       return;
+     }
+ 
+     // No PDF — show structured results when available.
+-    setViewer({ kind: 'detail' });
++    close();
++    setDetailOnly(true);
+   }
+ 
++  const viewer = detailOnly ? { kind: 'detail' } : artifact;
++
+   return (
+     <MyHealthLayout
+       pageTitle="Lab Work"
+@@ -199,7 +233,7 @@
+       bodyPadding={0}
+     >
+       <div style={{ width: '100%', height: '100%', minHeight: 0, overflow: 'hidden' }}>
+-        <Viewer state={viewer} activeItem={activeItem} />
++        <Viewer state={viewer} activeItem={activeItem} onRetry={refresh} />
+       </div>
+     </MyHealthLayout>
+   );
+diff --git a/artifacts/web-member/src/screens/Imaging.jsx b/artifacts/web-member/src/screens/Imaging.jsx
+--- a/artifacts/web-member/src/screens/Imaging.jsx
++++ b/artifacts/web-member/src/screens/Imaging.jsx
+@@ -1,18 +1,21 @@
+ // Imaging.jsx — patient self-read of their imaging reports (Path B read #6, #277).
+ // Reads getImaging list mode (reads-from-store per D-079) via fetchMyImaging, and
+-// opens a report's stored PDF via fetchArtifact('getImaging', reportId) which returns
+-// a short-lived v4 signed URL (contract v1.34). Ownership is resolved from the token
++// opens a report's stored PDF through useArtifact('getImaging'), which returns a
++// short-lived v4 signed URL (300s, Release 2a). Ownership is resolved from the token
+ // (D-064); reportId only selects which of the caller's own artifacts to sign.
++// Expiry re-request, the { state: 'preparing' } state, and "absence is never forbidden"
++// all live in useArtifact — this screen only renders what it reports.
+ //
+ // LAYOUT: standalone MyHealthLayout (not nested under Test Results) — left
+ // ReportListPane (400px), right edge-to-edge PDF viewer. title/resultedDate may
+ // be null on real data — render null-safe.
+ 
+-import { useState, useRef, lazy, Suspense } from 'react';
+-import { fetchMyImaging, fetchArtifact } from '../services/api/clinicalApi.js';
++import { useState, lazy, Suspense } from 'react';
++import { fetchMyImaging } from '../services/api/clinicalApi.js';
+ import { useClinicalData } from '../hooks/useClinicalData.js';
++import { useArtifact, ARTIFACT_COPY } from '../hooks/useArtifact.js';
+ import { useAuth } from '../auth/AuthContext.jsx';
+-import { COLORS } from '../theme.js';
++import { COLORS, FONT } from '../theme.js';
+ import MyHealthLayout from '../components/MyHealthLayout.jsx';
+ import ReportListPane, { formatDocDate } from '../components/ReportListPane.jsx';
+ 
+@@ -26,7 +29,7 @@
+   return formatDocDate(item.resultedDate || item.documentDate || null);
+ }
+ 
+-function Viewer({ state }) {
++function Viewer({ state, onRetry }) {
+   const base = {
+     width: '100%',
+     height: '100%',
+@@ -43,55 +46,74 @@
+   if (state.kind === 'loading') {
+     return <div style={base}><span style={{ fontSize: 13, color: COLORS.textMuted }}>Opening report…</span></div>;
+   }
++  if (state.kind === 'preparing') {
++    // A state, not a failure: the object is being restored and the repair is queued.
++    return (
++      <div style={base}>
++        <span style={{ fontSize: 13, color: COLORS.textMuted, padding: 24, textAlign: 'center', maxWidth: 360 }}>
++          {state.message}
++        </span>
++      </div>
++    );
++  }
+   if (state.kind === 'error') {
+-    return <div style={base}><span style={{ fontSize: 13, color: '#B4232A', padding: 20, textAlign: 'center' }}>{state.message}</span></div>;
++    return (
++      <div style={base}>
++        <div style={{ padding: 20, textAlign: 'center', maxWidth: 360 }}>
++          <span style={{ fontSize: 13, color: state.transient ? '#B4232A' : COLORS.textMuted }}>
++            {state.message}
++          </span>
++          {state.transient && onRetry ? (
++            <div style={{ marginTop: 12 }}>
++              <button
++                type="button"
++                onClick={onRetry}
++                style={{ fontFamily: FONT, fontSize: 13, fontWeight: 600, color: COLORS.navy, background: '#fff', border: `1px solid ${COLORS.border}`, borderRadius: 8, padding: '6px 14px', cursor: 'pointer' }}
++              >
++                Try again
++              </button>
++            </div>
++          ) : null}
++        </div>
++      </div>
++    );
+   }
++  if (state.kind !== 'ready') return null;
+   return (
+     <Suspense fallback={<div style={base}><span style={{ fontSize: 13, color: COLORS.textMuted }}>Opening viewer…</span></div>}>
+       <div style={{ width: '100%', height: '100%', minHeight: 0 }}>
+-        <PdfViewer signedUrl={state.url} />
++        {/* onExpired re-requests through getImaging; the 300s link is never reused. */}
++        <PdfViewer signedUrl={state.url} onExpired={onRetry} />
+       </div>
+     </Suspense>
+   );
+ }
+ 
+-function friendlyArtifactError(error) {
+-  const reason = error?.reason;
+-  if (reason === 'ARTIFACT_NOT_SYNCED') return 'This report is not available to view yet.';
+-  if (error?.httpStatus === 401) return 'Your session expired. Please sign in again.';
+-  if (error?.httpStatus === 0) return 'Connection problem. Please try again.';
+-  return 'This report could not be opened. Please try again.';
+-}
+-
+ export default function Imaging() {
+   const { status, items, error, reload } = useClinicalData(fetchMyImaging);
+   const { getIdToken } = useAuth();
+   const [activeId, setActiveId] = useState(null);
+-  const [viewer, setViewer] = useState({ kind: 'idle' });
+-  const openGenRef = useRef(0);
++  const [noArtifact, setNoArtifact] = useState(false);
++  const { state: artifact, open: openArtifact, refresh, close } = useArtifact('getImaging', getIdToken);
+ 
+-  async function open(item) {
+-    const gen = ++openGenRef.current;
++  function open(item) {
+     setActiveId(item.id ?? null);
+ 
+     if (!item.hasArtifact || !item.id) {
+-      setViewer({
+-        kind: 'error',
+-        message: 'This report is not available to view yet.',
+-      });
++      // Same copy as a server-side absence — the member never learns which it was.
++      close();
++      setNoArtifact(true);
+       return;
+     }
+ 
+-    setViewer({ kind: 'loading' });
+-    const result = await fetchArtifact('getImaging', item.id, getIdToken);
+-    if (gen !== openGenRef.current) return;
+-    if (result.kind === 'artifact') {
+-      setViewer({ kind: 'ready', url: result.artifact.signedUrl });
+-    } else {
+-      setViewer({ kind: 'error', message: friendlyArtifactError(result.error) });
+-    }
++    setNoArtifact(false);
++    openArtifact(item.id);
+   }
+ 
++  const viewer = noArtifact
++    ? { kind: 'error', message: ARTIFACT_COPY.notAvailable, transient: false }
++    : artifact;
++
+   return (
+     <MyHealthLayout
+       pageTitle="Imaging"
+@@ -114,7 +136,7 @@
+       bodyPadding={0}
+     >
+       <div style={{ width: '100%', height: '100%', minHeight: 0, overflow: 'hidden' }}>
+-        <Viewer state={viewer} />
++        <Viewer state={viewer} onRetry={refresh} />
+       </div>
+     </MyHealthLayout>
+   );
+diff --git a/artifacts/web-member/src/hooks/useArtifact.js b/artifacts/web-member/src/hooks/useArtifact.js
+new file mode 100644
+--- /dev/null
++++ b/artifacts/web-member/src/hooks/useArtifact.js
+@@ -0,0 +1,196 @@
++// useArtifact — owns the whole lifecycle of one stored PDF for the artifact-mode
++// read CFs (getLabs | getImaging | getMedicalRecords).
++//
++// Release 2a artifact read contract:
++//   1. The signed URL is short-lived — 300s, pinned server-side. Never cache the link:
++//      re-request through fetchArtifact before it expires, and again if a viewer load
++//      fails because it expired anyway (clock skew, backgrounded tab).
++//   2. 200 { state: 'preparing' } means the reference exists but the object is being
++//      restored server-side. Render a friendly preparing state, NOT an error, NOT a 404.
++//      The server has already queued the repair; we just poll a bounded number of times.
++//   3. Absence is never "forbidden": hidden item, module off, wrong module and
++//      not-yet-synced ALL answer 404 ARTIFACT_NOT_SYNCED. The UI must not distinguish
++//      them or imply something was withheld.
++//   4. 403 ACCESS_SUSPENDED -> "portal access paused, contact the office". 503 -> transient.
++//
++// State shape (one of):
++//   { kind: 'idle' }
++//   { kind: 'loading' }
++//   { kind: 'preparing' }
++//   { kind: 'ready', url, expiresAt }
++//   { kind: 'error', message, transient }
++
++import { useCallback, useEffect, useRef, useState } from 'react';
++import { fetchArtifact } from '../services/api/clinicalApi.js';
++
++// Re-request this far ahead of the stated expiry, so a click on Print/Download can
++// never race the 300s window. Also covers modest client clock skew.
++const REFRESH_LEAD_MS = 45000;
++// Floor, so a bad/short expiresAt can't turn into a refresh storm.
++const MIN_REFRESH_MS = 15000;
++
++const PREPARING_POLL_MS = 8000;
++const PREPARING_MAX_POLLS = 5; // ~40s, then we stop and leave the calm copy on screen
++
++export const ARTIFACT_COPY = {
++  // Deliberately identical for every flavour of absence — see contract rule 3.
++  notAvailable: 'This report is not available to view yet.',
++  preparing: 'We are preparing this document. It will be ready in a moment.',
++  preparingSlow:
++    'This document is still being prepared. Please check back shortly — no action is needed on your part.',
++  paused: 'Portal access is paused. Please contact the office and we will restore it.',
++  transient: 'We could not open this report just now. Please try again in a moment.',
++  signedOut: 'Your session expired. Please sign in again.',
++  offline: 'Connection problem. Please try again.',
++};
++
++/** Map a parseApiError shape to member-facing copy. Never leaks why something is absent. */
++export function friendlyArtifactError(error) {
++  const status = error?.httpStatus;
++  const reason = error?.reason;
++  if (reason === 'ARTIFACT_NOT_SYNCED' || status === 404) {
++    return { message: ARTIFACT_COPY.notAvailable, transient: false };
++  }
++  if (reason === 'ACCESS_SUSPENDED' || status === 403) {
++    return { message: ARTIFACT_COPY.paused, transient: false };
++  }
++  if (status === 401) return { message: ARTIFACT_COPY.signedOut, transient: false };
++  if (status === 0) return { message: ARTIFACT_COPY.offline, transient: true };
++  if (status === 503) return { message: ARTIFACT_COPY.transient, transient: true };
++  return { message: ARTIFACT_COPY.transient, transient: true };
++}
++
++function msUntilRefresh(expiresAt) {
++  if (!expiresAt) return null;
++  const at = Date.parse(expiresAt);
++  if (Number.isNaN(at)) return null;
++  return Math.max(MIN_REFRESH_MS, at - Date.now() - REFRESH_LEAD_MS);
++}
++
++/**
++ * @param {string} fnName  getLabs | getImaging | getMedicalRecords
++ * @param {() => Promise<string|null>} getIdToken from useAuth()
++ */
++export function useArtifact(fnName, getIdToken) {
++  const [state, setState] = useState({ kind: 'idle' });
++
++  // Generation counter: every open()/close() invalidates in-flight work, so a slow
++  // response for report A can never paint over report B.
++  const genRef = useRef(0);
++  const reportIdRef = useRef(null);
++  const timerRef = useRef(null);
++  const pollsRef = useRef(0);
++  const mountedRef = useRef(true);
++
++  const clearTimer = () => {
++    if (timerRef.current) {
++      clearTimeout(timerRef.current);
++      timerRef.current = null;
++    }
++  };
++
++  useEffect(() => () => {
++    mountedRef.current = false;
++    clearTimer();
++  }, []);
++
++  const load = useCallback(
++    async (reportId, gen, { polling } = {}) => {
++      if (!polling) {
++        pollsRef.current = 0;
++        setState({ kind: 'loading' });
++      }
++
++      const result = await fetchArtifact(fnName, reportId, getIdToken);
++      if (!mountedRef.current || gen !== genRef.current) return;
++
++      if (result.kind === 'artifact') {
++        pollsRef.current = 0;
++        const { signedUrl, expiresAt } = result.artifact;
++        setState({ kind: 'ready', url: signedUrl, expiresAt });
++
++        // Rule 1: re-request before the link dies rather than showing a broken PDF.
++        const wait = msUntilRefresh(expiresAt);
++        clearTimer();
++        if (wait != null) {
++          timerRef.current = setTimeout(() => {
++            if (gen === genRef.current) load(reportId, gen, { polling: true });
++          }, wait);
++        }
++        return;
++      }
++
++      // moduleOff comes back from the shared client when the care team turns a module
++      // off. Contract rule 3: the member sees plain absence, never "forbidden".
++      if (result.kind === 'moduleOff') {
++        clearTimer();
++        setState({ kind: 'error', message: ARTIFACT_COPY.notAvailable, transient: false });
++        return;
++      }
++
++      if (result.kind === 'suspended') {
++        clearTimer();
++        setState({ kind: 'error', message: ARTIFACT_COPY.paused, transient: false });
++        return;
++      }
++
++      if (result.kind === 'preparing') {
++        // Rule 2: a state, not an error. The repair is already queued server-side.
++        const attempt = pollsRef.current;
++        setState({
++          kind: 'preparing',
++          message: attempt >= 2 ? ARTIFACT_COPY.preparingSlow : ARTIFACT_COPY.preparing,
++        });
++        clearTimer();
++        if (attempt < PREPARING_MAX_POLLS) {
++          pollsRef.current = attempt + 1;
++          timerRef.current = setTimeout(() => {
++            if (gen === genRef.current) load(reportId, gen, { polling: true });
++          }, PREPARING_POLL_MS);
++        }
++        return;
++      }
++
++      clearTimer();
++      const { message, transient } = friendlyArtifactError(result.error);
++      setState({ kind: 'error', message, transient });
++    },
++    [fnName, getIdToken],
++  );
++
++  /** Open a report. Safe to call repeatedly; the newest call always wins. */
++  const open = useCallback(
++    (reportId) => {
++      clearTimer();
++      const gen = ++genRef.current;
++      reportIdRef.current = reportId;
++      if (!reportId) {
++        setState({ kind: 'error', message: ARTIFACT_COPY.notAvailable, transient: false });
++        return;
++      }
++      load(reportId, gen);
++    },
++    [load],
++  );
++
++  /** Re-request the current report — used by retry and by viewer expiry recovery. */
++  const refresh = useCallback(() => {
++    const reportId = reportIdRef.current;
++    if (!reportId) return;
++    clearTimer();
++    const gen = ++genRef.current;
++    load(reportId, gen, { polling: true });
++  }, [load]);
++
++  const close = useCallback(() => {
++    clearTimer();
++    genRef.current += 1;
++    reportIdRef.current = null;
++    pollsRef.current = 0;
++    setState({ kind: 'idle' });
++  }, []);
++
++  return { state, open, refresh, close };
++}
++
++export default useArtifact;

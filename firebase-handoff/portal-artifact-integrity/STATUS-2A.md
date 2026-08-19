@@ -52,10 +52,11 @@ add a case that seeds patient B's object under B's uid and points patient A's re
 
 ## Remaining for 2a (2026-08-19)
 
-1. **Red-team green on `main`** — PR #432 (replaces #429, whose branch conflicts post-#428):
-   `initOnce()` only sets `credential` when the emulator key was minted, else falls back to ADC.
-   Merge, then confirm the `push`-event run: bucket-privacy 3/3 + stateful green.
-2. **Sweep outcome on the 79** — record `healed` vs `blocked/deferred` per reason. The queue write
+1. ~~**Red-team green on `main`**~~ — PR #432 merged 2026-08-19 20:30 UTC (`51dda90`). Confirm the
+   `push`-event run: bucket-privacy 3/3 + stateful green. (#433 sweep-buffer and #434 deploy
+   concurrency also merged.)
+2. **Sweep outcome on the 79** — now unblocked by #433. Clear the ghost queue entries left from the
+   403 IAM window first, then record `healed` vs `blocked/deferred` per reason. The queue write
    is capped at 500/run and the walk at 50,000 docs; 79 < 500, so no tail this cycle. Re-run the
    audit after the sweep and expect coverage to climb with `missingCount` falling.
 3. **Residual misses are a data question, not a code one** — any that stay missing after two sweeps
@@ -66,7 +67,12 @@ add a case that seeds patient B's object under B's uid and points patient A's re
    suspended 403, plus one imaging and one medical-record artifact. Now genuinely runnable since the
    SA can `objects.get`.
 5. **Member-UI contract** (`mem://portal-artifact-contract`) — 300s TTL re-request, `preparing`
-   rendered as a state not an error, absence never shown as forbidden. Lovable owns this at cutover.
+   rendered as a state not an error, absence never shown as forbidden.
+   **Authored**: `firebase-handoff/portal-member-ui/artifact-read-contract.patch` — new
+   `hooks/useArtifact.js`, `fetchArtifact` `preparing` branch, `PdfViewer` `onExpired` re-request,
+   and calm `preparing`/absence states on Labs and Imaging. `patch -p1 --dry-run` clean against
+   `main` at `51dda90`; esbuild-parsed. Remaining: land the branch and smoke it on the fixture.
+
 
 Not in 2a: **re-keying storage off `firebaseUid` onto an internal UUID.** Hold for 2b. Doing it now
 would invalidate every path the 94.1% number was just measured against and require a full copy +
