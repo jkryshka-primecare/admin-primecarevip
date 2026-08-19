@@ -152,10 +152,13 @@ async function seedDocument(
     });
 
   if (hidden) {
-    await db()
-      .collection('patients')
-      .doc(patientId)
-      .set({ portalAccess: { hidden: { [moduleKey]: { [docId]: true } } } }, { merge: true });
+    await accessRef(patientId).set(
+      {
+        redteam: true,
+        hiddenItems: { [moduleKey]: admin.firestore.FieldValue.arrayUnion(String(docId)) },
+      },
+      { merge: true },
+    );
   }
 
   if (missingObject) {
