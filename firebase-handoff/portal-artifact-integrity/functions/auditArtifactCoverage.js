@@ -20,8 +20,10 @@
  * function. It MUST be listed in `lock-admin-invokers.yml`'s ADMIN_FUNCTIONS,
  * excluded from both health-gate FUNCTIONS arrays in deploy-production.yml
  * (IAM-restricted, so an anonymous probe gets 403), and exported INSIDE
- * `module.exports` in index.js. The two scheduled functions are pub/sub and
- * need none of that.
+ * `module.exports` in index.js. The scheduled and topic functions
+ * (`auditArtifactCoverageScheduled`, `auditArtifactCoverageOnDemand`) are
+ * pub/sub and need none of that, but both must be exported in index.js.
+
  */
 
 const functions = require('firebase-functions');
