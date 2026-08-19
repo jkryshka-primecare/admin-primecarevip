@@ -90,3 +90,24 @@ Paste **both** outputs here. Cases expected to flip red under the mutation:
 - On the Test Kieffer fixture: a real lab PDF opens (200 + signed URL), a hidden
   item returns 404, a suspended patient returns 403, and one imaging + one
   medical-record artifact each open — three wrappers, three checks.
+
+## Signed URLs under the emulator (why the serve cases were 500)
+
+The stateful job runs with NO credentials (the production SA is deliberately
+kept off the `pull_request` trigger). `file.getSignedUrl({version:'v4'})` needs a
+private key, so it threw `Could not load the default credentials`, which
+`readArtifact.js` maps to `500 / SIGN_ERROR`. That hit exactly the cases that
+reach the sign step (the five module-matrix 200s); suspend/hidden/preparing and
+the audit case never sign, which is why they were green.
+
+Reproduced standalone:
+
+    STORAGE_EMULATOR_HOST=http://127.0.0.1:9199 node -e "…getSignedUrl…"
+    -> SIGN_ERROR: Could not load the default credentials.
+
+This is an emulator/credential limitation, NOT a serve-path bug — no cutover
+blocker. Rather than weaken the assertions, `helpers/storage.js` now mints a
+throwaway in-process RSA key and initializes the Admin SDK with it whenever
+`STORAGE_EMULATOR_HOST` is set and no ADC is configured. GOOG4-RSA signing is
+local, and the emulator does not verify the signature, so the real serve path
+(including `getSignedUrl`) stays under test and the five reads return 200.
