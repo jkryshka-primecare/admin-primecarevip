@@ -7,6 +7,7 @@ import {
 } from "@/hooks/useMemberReconciliation";
 import { useAuth } from "@/hooks/useAuth";
 import ProvisionMissingDialog from "@/components/firestore/ProvisionMissingDialog";
+import RosterExceptions from "@/components/firestore/RosterExceptions";
 import SendInviteButton from "@/components/firestore/SendInviteButton";
 
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
