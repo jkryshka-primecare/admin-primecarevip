@@ -285,6 +285,8 @@ exports.auditArtifactCoverageScheduled = functions
       runId: out.runId,
       coveragePct: out.coveragePct,
       missingCount: out.missingCount,
+      erroredCount: out.erroredCount,
+      status: out.status,
       truncatedWalk: out.truncatedWalk,
     });
     return null;
@@ -314,6 +316,8 @@ exports.auditArtifactCoverageOnDemand = functions
       runId: out.runId,
       coveragePct: out.coveragePct,
       missingCount: out.missingCount,
+      erroredCount: out.erroredCount,
+      status: out.status,
       truncatedWalk: out.truncatedWalk,
     });
     return null;
