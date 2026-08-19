@@ -241,18 +241,34 @@ exports.auditArtifactCoverageOnDemand = functions
  * `artifact_coverage_reports` (latest by generatedAt). No work is performed
  * after the response is sent.
  *
- * DEPLOY NOTE: requires `@google-cloud/pubsub` in functions/package.json and
- * the runtime SA to hold `roles/pubsub.publisher` on the topic (the default
- * App Engine / compute SA does within its own project). The topic is created
- * automatically by the `auditArtifactCoverageOnDemand` deploy.
+ * DEPLOY NOTE: no new npm dependency. We publish over the Pub/Sub REST API with
+ * `google-auth-library` (already installed transitively and used elsewhere),
+ * so functions/package-lock.json is untouched. The runtime SA needs
+ * `roles/pubsub.publisher` (the default App Engine SA has Editor in-project).
+ * The topic is created automatically when `auditArtifactCoverageOnDemand`
+ * deploys.
  */
-const { PubSub } = require('@google-cloud/pubsub');
+const { GoogleAuth } = require('google-auth-library');
 const { requireAdminCaller, selfAudience } = require('./middleware/requireAdminCaller');
 
-let pubsubClient = null;
-function topic() {
-  if (!pubsubClient) pubsubClient = new PubSub();
-  return pubsubClient.topic(AUDIT_TOPIC);
+let authClient = null;
+async function publishAuditRequest(attributes, payload) {
+  if (!authClient) {
+    authClient = new GoogleAuth({ scopes: ['https://www.googleapis.com/auth/cloud-platform'] });
+  }
+  const projectId = process.env.GCLOUD_PROJECT || process.env.GCP_PROJECT || (await authClient.getProjectId());
+  const client = await authClient.getClient();
+  const url = `https://pubsub.googleapis.com/v1/projects/${projectId}/topics/${AUDIT_TOPIC}:publish`;
+  const resp = await client.request({
+    url,
+    method: 'POST',
+    data: {
+      messages: [
+        { data: Buffer.from(JSON.stringify(payload)).toString('base64'), attributes },
+      ],
+    },
+  });
+  return (resp.data.messageIds || [])[0] || null;
 }
 
 exports.adminRunArtifactAudit = functions
@@ -268,11 +284,12 @@ exports.adminRunArtifactAudit = functions
     }
 
     try {
-      const messageId = await topic().publishMessage({
-        json: { trigger: 'on-demand', requestedAt: new Date().toISOString() },
-        attributes: { requestedBy: String(gate.email || gate.uid || 'admin') },
-      });
+      const messageId = await publishAuditRequest(
+        { requestedBy: String(gate.email || gate.uid || 'admin') },
+        { trigger: 'on-demand', requestedAt: new Date().toISOString() },
+      );
       functions.logger.info('artifact coverage audit requested', { messageId });
+
       return res.status(202).json({
         ok: true,
         started: true,
