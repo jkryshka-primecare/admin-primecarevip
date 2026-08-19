@@ -8,7 +8,6 @@ import {
   type ProvisionResult,
 } from "@/hooks/usePortalAdmin";
 import type { ReconRow } from "@/hooks/useMemberReconciliation";
-import { isTestFixture } from "@/lib/portal/fixtures";
 import { ADULT_AGE, ageFromDob, eligibility } from "@/lib/portal/exceptions";
 
 import { Button } from "@/components/ui/button";
@@ -32,7 +31,6 @@ const MAX_BATCH = 300;
 /** Size of the recommended first validation run against production. */
 const VALIDATION_BATCH = 5;
 
-const ISO_DATE = /^\d{4}-\d{2}-\d{2}$/;
 
 
 
