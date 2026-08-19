@@ -20,8 +20,10 @@
  * function. It MUST be listed in `lock-admin-invokers.yml`'s ADMIN_FUNCTIONS,
  * excluded from both health-gate FUNCTIONS arrays in deploy-production.yml
  * (IAM-restricted, so an anonymous probe gets 403), and exported INSIDE
- * `module.exports` in index.js. The two scheduled functions are pub/sub and
- * need none of that.
+ * `module.exports` in index.js. The scheduled and topic functions
+ * (`auditArtifactCoverageScheduled`, `auditArtifactCoverageOnDemand`) are
+ * pub/sub and need none of that, but both must be exported in index.js.
+
  */
 
 const functions = require('firebase-functions');
@@ -204,17 +206,74 @@ exports.auditArtifactCoverageScheduled = functions
   });
 
 /**
- * Admin-only on-demand run. Reuses the Step 1 admin caller gate.
+ * On-demand walk, executed in a DURABLE context.
  *
- * Review item 6: does not block the HTTP request on a full corpus walk. It
- * claims a run id, answers 202 immediately, and the caller polls
- * `artifact_coverage_reports/{runId}` through the bridge.
+ * An HTTP (1st-gen) function's instance is CPU-throttled/reclaimed the moment
+ * the response is sent, so a fire-and-forget `runAudit()` after `res.json()`
+ * never finishes and never writes the report (it does not even reach `.catch`).
+ * Pub/Sub functions, by contrast, stay alive until the returned promise
+ * settles — so the on-demand path publishes to this topic and the walk runs
+ * here, on exactly the same code path as the schedule.
  */
+const AUDIT_TOPIC = 'artifact-coverage-audit';
+
+exports.auditArtifactCoverageOnDemand = functions
+  .region(REGION)
+  .runWith({ timeoutSeconds: 540, memory: '512MB' })
+  .pubsub.topic(AUDIT_TOPIC)
+  .onPublish(async (message) => {
+    const attrs = (message && message.attributes) || {};
+    const out = await runAudit();
+    functions.logger.info('on-demand artifact coverage audit complete', {
+      requestedBy: attrs.requestedBy || null,
+      runId: out.runId,
+      coveragePct: out.coveragePct,
+      missingCount: out.missingCount,
+      truncatedWalk: out.truncatedWalk,
+    });
+    return null;
+  });
+
+/**
+ * Admin-only on-demand trigger. Reuses the Step 1 admin caller gate.
+ *
+ * Publishes to `AUDIT_TOPIC` and answers 202; the caller polls
+ * `artifact_coverage_reports` (latest by generatedAt). No work is performed
+ * after the response is sent.
+ *
+ * DEPLOY NOTE: no new npm dependency. We publish over the Pub/Sub REST API with
+ * `google-auth-library` (already installed transitively and used elsewhere),
+ * so functions/package-lock.json is untouched. The runtime SA needs
+ * `roles/pubsub.publisher` (the default App Engine SA has Editor in-project).
+ * The topic is created automatically when `auditArtifactCoverageOnDemand`
+ * deploys.
+ */
+const { GoogleAuth } = require('google-auth-library');
 const { requireAdminCaller, selfAudience } = require('./middleware/requireAdminCaller');
+
+let authClient = null;
+async function publishAuditRequest(attributes, payload) {
+  if (!authClient) {
+    authClient = new GoogleAuth({ scopes: ['https://www.googleapis.com/auth/cloud-platform'] });
+  }
+  const projectId = process.env.GCLOUD_PROJECT || process.env.GCP_PROJECT || (await authClient.getProjectId());
+  const client = await authClient.getClient();
+  const url = `https://pubsub.googleapis.com/v1/projects/${projectId}/topics/${AUDIT_TOPIC}:publish`;
+  const resp = await client.request({
+    url,
+    method: 'POST',
+    data: {
+      messages: [
+        { data: Buffer.from(JSON.stringify(payload)).toString('base64'), attributes },
+      ],
+    },
+  });
+  return (resp.data.messageIds || [])[0] || null;
+}
 
 exports.adminRunArtifactAudit = functions
   .region(REGION)
-  .runWith({ timeoutSeconds: 540, memory: '512MB' })
+  .runWith({ timeoutSeconds: 60, memory: '256MB' })
   .https.onRequest(async (req, res) => {
     // Same pattern as the five Step 1 admin functions: the gate returns a
     // result object and never writes the response — inspect `.ok` yourself.
@@ -224,20 +283,25 @@ exports.adminRunArtifactAudit = functions
       return res.status(gate.status).json({ ok: false, error: gate.reason });
     }
 
+    try {
+      const messageId = await publishAuditRequest(
+        { requestedBy: String(gate.email || gate.uid || 'admin') },
+        { trigger: 'on-demand', requestedAt: new Date().toISOString() },
+      );
+      functions.logger.info('artifact coverage audit requested', { messageId });
 
-    // Fire and forget: the report doc is the result channel.
-    runAudit()
-      .then((out) =>
-        functions.logger.info('on-demand artifact coverage audit complete', {
-          runId: out.runId,
-          coveragePct: out.coveragePct,
-          missingCount: out.missingCount,
-          truncatedWalk: out.truncatedWalk,
-        }),
-      )
-      .catch((err) => functions.logger.error('on-demand artifact coverage audit failed', err));
-
-    res.status(202).json({ ok: true, started: true, poll: 'artifact_coverage_reports (latest by generatedAt)' });
+      return res.status(202).json({
+        ok: true,
+        started: true,
+        messageId,
+        poll: 'artifact_coverage_reports (latest by generatedAt)',
+      });
+    } catch (err) {
+      functions.logger.error('failed to enqueue artifact coverage audit', err);
+      return res.status(500).json({ ok: false, error: 'enqueue_failed' });
+    }
   });
 
 exports._runAudit = runAudit;
+exports._AUDIT_TOPIC = AUDIT_TOPIC;
+
