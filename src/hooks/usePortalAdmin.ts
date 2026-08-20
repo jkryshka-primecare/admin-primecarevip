@@ -322,3 +322,32 @@ export function useRunArtifactAudit() {
   });
 }
 
+
+export type SmokeCase = { name: string; pass: boolean; detail: string };
+export type SmokeReport = {
+  fixture?: { patientId: string; uid: string; missingId: string };
+  base?: string;
+  ranAt?: string;
+  total?: number;
+  passed?: number;
+  failed?: number;
+  results?: SmokeCase[];
+};
+
+/**
+ * Runs the live read-path smoke against the DEPLOYED patient endpoints, using
+ * the Test Kieffer fixture only. Admin-only and audited. It flips the
+ * fixture's portalAccess to prove hidden/suspended behaviour and restores it
+ * verbatim — no real member is touched.
+ */
+export function useRunReadPathSmoke() {
+  return useMutation({
+    mutationFn: async (vars?: { reason?: string }) => {
+      const res = await callPortalAdmin<SmokeReport>({
+        action: "smoke",
+        reason: vars?.reason ?? "Manual read-path smoke from the admin OS",
+      });
+      return res.data ?? {};
+    },
+  });
+}
