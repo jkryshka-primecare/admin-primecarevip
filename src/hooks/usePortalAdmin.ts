@@ -300,3 +300,25 @@ export function useProvisionPortalRecords() {
     },
   });
 }
+
+/**
+ * Asks the artifact-coverage job to run now rather than waiting for the 03:15
+ * schedule. Read-only against member data: the job walks references and writes
+ * a report. Admin-only, and the request itself is audited.
+ */
+export function useRunArtifactAudit() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (vars?: { reason?: string }) => {
+      const res = await callPortalAdmin<{ runId?: string; queued?: boolean }>({
+        action: "runAudit",
+        reason: vars?.reason ?? "Manual artifact coverage audit from the admin OS",
+      });
+      return res.data ?? {};
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["firestore"] });
+    },
+  });
+}
+
