@@ -9,6 +9,8 @@ import { useAuth } from "@/hooks/useAuth";
 import ProvisionMissingDialog from "@/components/firestore/ProvisionMissingDialog";
 import RosterExceptions from "@/components/firestore/RosterExceptions";
 import SendInviteButton from "@/components/firestore/SendInviteButton";
+import { buildExceptionLists } from "@/lib/portal/exceptions";
+
 
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -65,7 +67,15 @@ export default function MemberRoster() {
     });
   }, [rows, filter, search]);
 
+  const adultsReady = useMemo(
+    () =>
+      buildExceptionLists(missingMembers, rows).find((l) => l.id === "adults_ready")?.rows.length ??
+      0,
+    [missingMembers, rows],
+  );
+
   const countFor = (f: Filter) => (f === "all" ? rows.length : counts[f]);
+
 
   return (
     <div className="space-y-4">
@@ -77,13 +87,14 @@ export default function MemberRoster() {
           </p>
         </div>
         <div className="flex items-center gap-2">
-          {isAdmin && missingMembers.length > 0 && (
+          {isAdmin && adultsReady > 0 && (
             <Button variant="outline" size="sm" onClick={() => setProvisionOpen(true)}>
               <UserPlus className="mr-1 h-3.5 w-3.5" />
-              Provision {missingMembers.length} missing record
-              {missingMembers.length === 1 ? "" : "s"}
+              Provision {adultsReady} adult{adultsReady === 1 ? "" : "s"}
+              <span className="ml-1 text-muted-foreground">of {missingMembers.length} missing</span>
             </Button>
           )}
+
           <Button variant="outline" size="icon" onClick={() => refetch()} disabled={loading}>
             <RefreshCw className={cn("h-4 w-4", loading && "animate-spin")} />
           </Button>
