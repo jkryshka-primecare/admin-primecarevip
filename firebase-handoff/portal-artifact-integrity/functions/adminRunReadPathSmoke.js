@@ -107,10 +107,19 @@ function reasonOf(r) {
 
 // ------------------------------------------------------------ discovery ----
 
+/**
+ * All three modules read the SAME subcollection — `patients/{id}/labs` — and
+ * separate themselves by `category` ('lab' | 'imaging' | 'medical_records').
+ * The first cut of this smoke queried `imaging` / `records` subcollections
+ * that do not exist in the data model, so imaging and records could never
+ * find a fixture and always reported FAIL. Discovery now mirrors the handlers.
+ */
+const CATEGORY_BY_MODULE = { labs: 'lab', imaging: 'imaging', records: 'medical_records' };
+
 async function discover(moduleKey) {
-  const col = moduleKey === 'labs' ? 'labs' : moduleKey === 'imaging' ? 'imaging' : 'records';
   const snap = await admin.firestore()
-    .collection('patients').doc(FIXTURE_PATIENT_ID).collection(col)
+    .collection('patients').doc(FIXTURE_PATIENT_ID).collection('labs')
+    .where('category', '==', CATEGORY_BY_MODULE[moduleKey])
     .where('hasArtifact', '==', true)
     .limit(10)
     .get()
@@ -119,6 +128,7 @@ async function discover(moduleKey) {
   const hit = snap.docs.find((d) => d.id !== MISSING_ID);
   return hit ? hit.id : null;
 }
+
 
 // ------------------------------------------------- portalAccess toggling ----
 
