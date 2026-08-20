@@ -65,7 +65,15 @@ export default function MemberRoster() {
     });
   }, [rows, filter, search]);
 
+  const adultsReady = useMemo(
+    () =>
+      buildExceptionLists(missingMembers, rows).find((l) => l.id === "adults_ready")?.rows.length ??
+      0,
+    [missingMembers, rows],
+  );
+
   const countFor = (f: Filter) => (f === "all" ? rows.length : counts[f]);
+
 
   return (
     <div className="space-y-4">
