@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { motion } from "framer-motion";
-import { ShieldCheck, RefreshCw, Download, AlertTriangle, FileWarning, PlayCircle, Stethoscope, Check, X } from "lucide-react";
+import { ShieldCheck, RefreshCw, Download, AlertTriangle, FileWarning, PlayCircle, Stethoscope, Check, X, MinusCircle } from "lucide-react";
 import { useArtifactCoverage, missesToCsv } from "@/hooks/useArtifactCoverage";
 import { useRunArtifactAudit, useRunReadPathSmoke, type SmokeReport } from "@/hooks/usePortalAdmin";
 import { useToast } from "@/hooks/use-toast";
