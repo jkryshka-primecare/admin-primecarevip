@@ -1,8 +1,8 @@
 import { useState } from "react";
 import { motion } from "framer-motion";
-import { ShieldCheck, RefreshCw, Download, AlertTriangle, FileWarning, PlayCircle } from "lucide-react";
+import { ShieldCheck, RefreshCw, Download, AlertTriangle, FileWarning, PlayCircle, Stethoscope, Check, X } from "lucide-react";
 import { useArtifactCoverage, missesToCsv } from "@/hooks/useArtifactCoverage";
-import { useRunArtifactAudit } from "@/hooks/usePortalAdmin";
+import { useRunArtifactAudit, useRunReadPathSmoke, type SmokeReport } from "@/hooks/usePortalAdmin";
 import { useToast } from "@/hooks/use-toast";
 
 /**
@@ -23,6 +23,8 @@ export default function ArtifactCoveragePanel() {
   const { toast } = useToast();
   const [exporting, setExporting] = useState(false);
   const runAudit = useRunArtifactAudit();
+  const runSmoke = useRunReadPathSmoke();
+  const [smoke, setSmoke] = useState<SmokeReport | null>(null);
 
   const pct = report?.coveragePct;
   const healthy = pct !== null && pct !== undefined && pct >= 100;
@@ -45,6 +47,25 @@ export default function ArtifactCoveragePanel() {
     }
   };
 
+
+  const triggerSmoke = async () => {
+    setSmoke(null);
+    try {
+      const res = await runSmoke.mutateAsync({});
+      setSmoke(res);
+      toast({
+        title: res.failed ? "Read-path smoke finished with failures" : "Read-path smoke passed",
+        description: `${res.passed ?? 0}/${res.total ?? 0} checks passed`,
+        variant: res.failed ? "destructive" : undefined,
+      });
+    } catch (e) {
+      toast({
+        variant: "destructive",
+        title: "Could not run the read-path smoke",
+        description: e instanceof Error ? e.message : String(e),
+      });
+    }
+  };
 
   const exportCsv = async () => {
     setExporting(true);
@@ -100,6 +121,14 @@ export default function ArtifactCoveragePanel() {
             {runAudit.isPending ? "Starting…" : "Run audit now"}
           </button>
           <button
+            onClick={triggerSmoke}
+            disabled={runSmoke.isPending}
+            className="inline-flex items-center gap-1.5 rounded-lg border border-border px-3 py-2 text-xs font-medium text-foreground hover:bg-muted disabled:opacity-50"
+          >
+            <Stethoscope className={`h-3 w-3 ${runSmoke.isPending ? "animate-pulse" : ""}`} />
+            {runSmoke.isPending ? "Running smoke…" : "Run read-path smoke"}
+          </button>
+          <button
             onClick={() => refetch()}
             disabled={fetching}
             className="inline-flex items-center gap-1.5 rounded-lg border border-border px-3 py-2 text-xs font-medium text-muted-foreground hover:bg-muted disabled:opacity-50"
@@ -116,6 +145,37 @@ export default function ArtifactCoveragePanel() {
           </button>
         </div>
       </div>
+
+      {smoke && (
+        <div className="mt-4 overflow-hidden rounded-xl border border-border">
+          <div className="flex flex-wrap items-center justify-between gap-2 bg-muted/60 px-3 py-2">
+            <p className="text-xs font-medium text-foreground">
+              Live read-path smoke — {smoke.passed ?? 0}/{smoke.total ?? 0} passed
+              {smoke.fixture ? ` · fixture ${smoke.fixture.patientId}` : ""}
+            </p>
+            <p className="text-xs text-muted-foreground">
+              {smoke.ranAt ? new Date(smoke.ranAt).toLocaleString() : ""}
+            </p>
+          </div>
+          <table className="w-full text-left text-xs">
+            <tbody>
+              {(smoke.results ?? []).map((c) => (
+                <tr key={c.name} className="border-t border-border">
+                  <td className="w-8 px-3 py-2">
+                    {c.pass ? (
+                      <Check className="h-3.5 w-3.5 text-success" />
+                    ) : (
+                      <X className="h-3.5 w-3.5 text-destructive" />
+                    )}
+                  </td>
+                  <td className="px-3 py-2 text-foreground">{c.name}</td>
+                  <td className="px-3 py-2 font-mono text-muted-foreground">{c.detail}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
 
       {error && (
         <p className="mt-4 flex items-center gap-2 rounded-lg bg-destructive/10 px-3 py-2 text-xs text-destructive">
