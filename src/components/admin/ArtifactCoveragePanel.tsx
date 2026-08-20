@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { forwardRef, useState } from "react";
 import { motion } from "framer-motion";
 import { ShieldCheck, RefreshCw, Download, AlertTriangle, FileWarning, PlayCircle, Stethoscope, Check, X, MinusCircle } from "lucide-react";
 import { useArtifactCoverage, missesToCsv } from "@/hooks/useArtifactCoverage";
