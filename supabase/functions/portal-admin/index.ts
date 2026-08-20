@@ -352,6 +352,11 @@ Deno.serve(async (req) => {
     }
   }
 
+  if (ADMIN_ONLY.includes(action) && !(await isAdmin(ctx))) {
+    return deny(403, "Only administrators can run the artifact coverage audit.");
+  }
+
+
   let provisionMembers: ProvisionMember[] = [];
   if (action === "provision") {
     const parsed = parseProvisionMembers(body.members);
