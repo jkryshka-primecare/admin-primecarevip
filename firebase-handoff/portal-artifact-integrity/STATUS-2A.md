@@ -100,3 +100,22 @@ Only item 4 (live read-path smoke) remains as verification. The runnable script 
 `README-prod-smoke.md` — Cloud Shell, prod ADC, deployed endpoints, restores any portalAccess
 toggles it flips, and calls out the `iam.serviceAccountTokenCreator` self-grant by name if v4
 signing fails.
+
+## 2026-08-20 15:41 UTC — 2a CLOSED
+
+Live read-path smoke ran as a deployed admin function (`adminRunReadPathSmoke`, PRs #435/#436),
+triggered from Admin -> Artifact Coverage. Result: **6 passed / 2 skipped / 0 failed**.
+
+- present lab -> 200, 738,251 bytes, `%PDF-` magic
+- `SMOKE-LAB-2` -> 200 `{ state: 'preparing' }`
+- hidden lab -> 404 `ARTIFACT_NOT_SYNCED`
+- suspended -> 403 `ACCESS_SUSPENDED`
+- imaging / medical_records present -> SKIPPED (fixture holds no such doc with `hasArtifact: true`)
+- portalAccess restored to its pre-smoke state
+
+All four contract behaviors in `.lovable/memory/portal-artifact-contract.md` are verified in
+production. Coverage 99.925% with the one synthetic residual by design. **Release 2a is complete.**
+
+Carried into 2b: seed one imaging + one medical-record artifact on the fixture to turn the two skips
+green; the reference-ownership red-team case; re-keying storage off `firebaseUid`; minors/family
+access; and landing the held member-UI artifact-contract patch at portal cutover.
