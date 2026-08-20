@@ -491,7 +491,18 @@ Deno.serve(async (req) => {
       httpStatus: status,
       errorMessage,
     });
+  } else if (ADMIN_ONLY.includes(action)) {
+    await recordAction(ctx, {
+      elationPatientId: null,
+      action,
+      reason: reason || null,
+      after: payload,
+      ok,
+      httpStatus: status,
+      errorMessage,
+    });
   }
+
 
   await logPhiAccess(ctx, req, {
     source: "portal.admin",
