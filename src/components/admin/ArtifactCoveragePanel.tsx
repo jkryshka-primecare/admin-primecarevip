@@ -1,7 +1,8 @@
 import { useState } from "react";
 import { motion } from "framer-motion";
-import { ShieldCheck, RefreshCw, Download, AlertTriangle, FileWarning } from "lucide-react";
+import { ShieldCheck, RefreshCw, Download, AlertTriangle, FileWarning, PlayCircle } from "lucide-react";
 import { useArtifactCoverage, missesToCsv } from "@/hooks/useArtifactCoverage";
+import { useRunArtifactAudit } from "@/hooks/usePortalAdmin";
 import { useToast } from "@/hooks/use-toast";
 
 /**
@@ -12,16 +13,38 @@ import { useToast } from "@/hooks/use-toast";
  * Storage. 100% here means "no dangling 404s" — it does not mean we hold
  * everything Elation has, which is a Release 2b question.
  *
- * READ-ONLY. The export re-reads the report through the staff-gated bridge so
- * the download itself lands in the PHI access log.
+ * Read-only except for "Run audit now", which asks the Firebase job to run
+ * ahead of its 03:15 schedule. The job writes a report; it never touches
+ * member data. The export re-reads the report through the staff-gated bridge
+ * so the download itself lands in the PHI access log.
  */
 export default function ArtifactCoveragePanel() {
   const { report, loading, fetching, error, refetch } = useArtifactCoverage();
   const { toast } = useToast();
   const [exporting, setExporting] = useState(false);
+  const runAudit = useRunArtifactAudit();
 
   const pct = report?.coveragePct;
   const healthy = pct !== null && pct !== undefined && pct >= 100;
+
+  const triggerAudit = async () => {
+    try {
+      const res = await runAudit.mutateAsync({});
+      toast({
+        title: "Audit started",
+        description: res?.runId
+          ? `Run ${res.runId} queued. Refresh in a few minutes for the report.`
+          : "The coverage job is running. Refresh in a few minutes for the report.",
+      });
+    } catch (e) {
+      toast({
+        variant: "destructive",
+        title: "Could not start the audit",
+        description: e instanceof Error ? e.message : String(e),
+      });
+    }
+  };
+
 
   const exportCsv = async () => {
     setExporting(true);
