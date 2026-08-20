@@ -151,6 +151,8 @@ export default function ArtifactCoveragePanel() {
           <div className="flex flex-wrap items-center justify-between gap-2 bg-muted/60 px-3 py-2">
             <p className="text-xs font-medium text-foreground">
               Live read-path smoke — {smoke.passed ?? 0}/{smoke.total ?? 0} passed
+              {smoke.skipped ? ` · ${smoke.skipped} skipped` : ""}
+              {smoke.failed ? ` · ${smoke.failed} failed` : ""}
               {smoke.fixture ? ` · fixture ${smoke.fixture.patientId}` : ""}
             </p>
             <p className="text-xs text-muted-foreground">
@@ -162,13 +164,17 @@ export default function ArtifactCoveragePanel() {
               {(smoke.results ?? []).map((c) => (
                 <tr key={c.name} className="border-t border-border">
                   <td className="w-8 px-3 py-2">
-                    {c.pass ? (
+                    {c.skipped ? (
+                      <MinusCircle className="h-3.5 w-3.5 text-muted-foreground" />
+                    ) : c.pass ? (
                       <Check className="h-3.5 w-3.5 text-success" />
                     ) : (
                       <X className="h-3.5 w-3.5 text-destructive" />
                     )}
                   </td>
-                  <td className="px-3 py-2 text-foreground">{c.name}</td>
+                  <td className={`px-3 py-2 ${c.skipped ? "text-muted-foreground" : "text-foreground"}`}>
+                    {c.name}
+                  </td>
                   <td className="px-3 py-2 font-mono text-muted-foreground">{c.detail}</td>
                 </tr>
               ))}
@@ -176,6 +182,7 @@ export default function ArtifactCoveragePanel() {
           </table>
         </div>
       )}
+
 
       {error && (
         <p className="mt-4 flex items-center gap-2 rounded-lg bg-destructive/10 px-3 py-2 text-xs text-destructive">
