@@ -9,6 +9,8 @@ import { useAuth } from "@/hooks/useAuth";
 import ProvisionMissingDialog from "@/components/firestore/ProvisionMissingDialog";
 import RosterExceptions from "@/components/firestore/RosterExceptions";
 import SendInviteButton from "@/components/firestore/SendInviteButton";
+import { buildExceptionLists } from "@/lib/portal/exceptions";
+
 
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
