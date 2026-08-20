@@ -22,7 +22,7 @@ type ServiceAccount = {
   project_id: string;
 };
 
-type Action = "get" | "invite" | "revoke" | "setAccess" | "provision";
+type Action = "get" | "invite" | "revoke" | "setAccess" | "provision" | "runAudit";
 
 const FUNCTION_BY_ACTION: Record<Action, string> = {
   get: "adminGetPortalAccess",
@@ -30,12 +30,20 @@ const FUNCTION_BY_ACTION: Record<Action, string> = {
   revoke: "adminRevokeInvite",
   setAccess: "adminSetPortalAccess",
   provision: "adminProvisionPatients",
+  runAudit: "adminRunArtifactAudit",
 };
 
 const MUTATIONS: Action[] = ["invite", "revoke", "setAccess", "provision"];
 
+/**
+ * Admin-only but not a member mutation: it changes no patient state, it only
+ * asks the artifact-coverage job to run now instead of at 03:15.
+ */
+const ADMIN_ONLY: Action[] = ["runAudit"];
+
 /** Actions that act on a set of members rather than a single patient. */
-const BATCH_ACTIONS: Action[] = ["provision"];
+const BATCH_ACTIONS: Action[] = ["provision", "runAudit"];
+
 
 /**
  * A provision run creates portal roster records. It never sends an invite and
