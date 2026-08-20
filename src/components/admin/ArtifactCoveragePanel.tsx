@@ -92,12 +92,21 @@ export default function ArtifactCoveragePanel() {
         </div>
         <div className="flex items-center gap-2">
           <button
+            onClick={triggerAudit}
+            disabled={runAudit.isPending}
+            className="inline-flex items-center gap-1.5 rounded-lg border border-border px-3 py-2 text-xs font-medium text-foreground hover:bg-muted disabled:opacity-50"
+          >
+            <PlayCircle className={`h-3 w-3 ${runAudit.isPending ? "animate-pulse" : ""}`} />
+            {runAudit.isPending ? "Starting…" : "Run audit now"}
+          </button>
+          <button
             onClick={() => refetch()}
             disabled={fetching}
             className="inline-flex items-center gap-1.5 rounded-lg border border-border px-3 py-2 text-xs font-medium text-muted-foreground hover:bg-muted disabled:opacity-50"
           >
             <RefreshCw className={`h-3 w-3 ${fetching ? "animate-spin" : ""}`} /> Refresh
           </button>
+
           <button
             onClick={exportCsv}
             disabled={exporting || !report?.misses.length}
