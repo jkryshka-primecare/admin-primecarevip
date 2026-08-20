@@ -22,7 +22,7 @@ type ServiceAccount = {
   project_id: string;
 };
 
-type Action = "get" | "invite" | "revoke" | "setAccess" | "provision" | "runAudit";
+type Action = "get" | "invite" | "revoke" | "setAccess" | "provision" | "runAudit" | "smoke";
 
 const FUNCTION_BY_ACTION: Record<Action, string> = {
   get: "adminGetPortalAccess",
@@ -31,6 +31,7 @@ const FUNCTION_BY_ACTION: Record<Action, string> = {
   setAccess: "adminSetPortalAccess",
   provision: "adminProvisionPatients",
   runAudit: "adminRunArtifactAudit",
+  smoke: "adminRunReadPathSmoke",
 };
 
 const MUTATIONS: Action[] = ["invite", "revoke", "setAccess", "provision"];
@@ -39,10 +40,10 @@ const MUTATIONS: Action[] = ["invite", "revoke", "setAccess", "provision"];
  * Admin-only but not a member mutation: it changes no patient state, it only
  * asks the artifact-coverage job to run now instead of at 03:15.
  */
-const ADMIN_ONLY: Action[] = ["runAudit"];
+const ADMIN_ONLY: Action[] = ["runAudit", "smoke"];
 
 /** Actions that act on a set of members rather than a single patient. */
-const BATCH_ACTIONS: Action[] = ["provision", "runAudit"];
+const BATCH_ACTIONS: Action[] = ["provision", "runAudit", "smoke"];
 
 
 /**
@@ -353,7 +354,7 @@ Deno.serve(async (req) => {
   }
 
   if (ADMIN_ONLY.includes(action) && !(await isAdmin(ctx))) {
-    return deny(403, "Only administrators can run the artifact coverage audit.");
+    return deny(403, "Only administrators can run coverage and read-path checks.");
   }
 
 
