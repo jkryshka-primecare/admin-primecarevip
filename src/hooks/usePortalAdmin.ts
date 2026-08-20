@@ -323,7 +323,7 @@ export function useRunArtifactAudit() {
 }
 
 
-export type SmokeCase = { name: string; pass: boolean; detail: string };
+export type SmokeCase = { name: string; pass: boolean; detail: string; skipped?: boolean };
 export type SmokeReport = {
   fixture?: { patientId: string; uid: string; missingId: string };
   base?: string;
@@ -331,6 +331,7 @@ export type SmokeReport = {
   total?: number;
   passed?: number;
   failed?: number;
+  skipped?: number;
   results?: SmokeCase[];
 };
 

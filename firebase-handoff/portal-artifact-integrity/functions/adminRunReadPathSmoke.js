@@ -107,10 +107,19 @@ function reasonOf(r) {
 
 // ------------------------------------------------------------ discovery ----
 
+/**
+ * All three modules read the SAME subcollection — `patients/{id}/labs` — and
+ * separate themselves by `category` ('lab' | 'imaging' | 'medical_records').
+ * The first cut of this smoke queried `imaging` / `records` subcollections
+ * that do not exist in the data model, so imaging and records could never
+ * find a fixture and always reported FAIL. Discovery now mirrors the handlers.
+ */
+const CATEGORY_BY_MODULE = { labs: 'lab', imaging: 'imaging', records: 'medical_records' };
+
 async function discover(moduleKey) {
-  const col = moduleKey === 'labs' ? 'labs' : moduleKey === 'imaging' ? 'imaging' : 'records';
   const snap = await admin.firestore()
-    .collection('patients').doc(FIXTURE_PATIENT_ID).collection(col)
+    .collection('patients').doc(FIXTURE_PATIENT_ID).collection('labs')
+    .where('category', '==', CATEGORY_BY_MODULE[moduleKey])
     .where('hasArtifact', '==', true)
     .limit(10)
     .get()
@@ -119,6 +128,7 @@ async function discover(moduleKey) {
   const hit = snap.docs.find((d) => d.id !== MISSING_ID);
   return hit ? hit.id : null;
 }
+
 
 // ------------------------------------------------- portalAccess toggling ----
 
@@ -142,6 +152,17 @@ async function runSmoke() {
     results.push({ name, pass, detail: detail || '' });
     functions.logger.info(`smoke ${pass ? 'PASS' : 'FAIL'}: ${name}`, { detail });
   };
+  /**
+   * Absence of fixture data is NOT a read-path defect. If the fixture patient
+   * holds no imaging (or no medical record) with an artifact, there is nothing
+   * to assert — that case is inconclusive, and reporting it as FAIL made the
+   * whole smoke look red for a data-seeding gap.
+   */
+  const skip = (name, detail) => {
+    results.push({ name, pass: true, skipped: true, detail: detail || '' });
+    functions.logger.info(`smoke SKIP: ${name}`, { detail });
+  };
+
 
   const token = await mintPatientIdToken();
   record('mint patient ID token', true, 'custom token + identitytoolkit exchange');
@@ -211,22 +232,38 @@ async function runSmoke() {
       await restoreAccess(saved);
     }
 
-    // 5 — the other two artifact modules.
+    // 5 — the other two artifact modules. Same assertion as case 1, including
+    //     the byte-fetch: a signed URL that does not serve `%PDF-` is a
+    //     signing/ACL failure, not a pass.
     for (const pair of [['imaging', imagingId], ['records', recordId]]) {
       const moduleKey = pair[0];
       const id = pair[1];
       if (!id) {
-        record(`5. ${moduleKey} present -> 200 + signed URL`, false, 'no fixture with hasArtifact:true');
+        skip(
+          `5. ${moduleKey} present -> 200 + signed URL`,
+          `skipped — fixture ${FIXTURE_PATIENT_ID} holds no ${CATEGORY_BY_MODULE[moduleKey]} document with hasArtifact:true`,
+        );
         continue;
       }
       const r = await callRead(token, moduleKey, id);
       const url = r.json && r.json.signedUrl;
+      if (effectiveStatus(r) !== 200 || !url) {
+        const hint = /signBlob|could not sign|SigningError/i.test(r.raw)
+          ? ' >>> SIGNING FAILURE: grant roles/iam.serviceAccountTokenCreator to the RUNTIME SA on ITSELF <<<'
+          : '';
+        record(`5. ${moduleKey} present -> 200 + signed URL`, false, `${effectiveStatus(r)} ${r.raw}${hint}`);
+        continue;
+      }
+      const got = await fetch(url);
+      const buf = Buffer.from(await got.arrayBuffer());
+      const magic = buf.slice(0, 5).toString('latin1');
       record(
-        `5. ${moduleKey} present -> 200 + signed URL`,
-        effectiveStatus(r) === 200 && Boolean(url),
-        `${effectiveStatus(r)} ${url ? 'signed URL returned' : r.raw}`,
+        `5. ${moduleKey} present -> 200 + signed URL serves PDF bytes`,
+        got.ok && magic === '%PDF-',
+        `GET ${got.status}, ${buf.length} bytes, magic=${magic}`,
       );
     }
+
   } finally {
     await restoreAccess(saved);
     const after = await snapshotAccess();
@@ -240,15 +277,18 @@ async function runSmoke() {
   }
 
   const failed = results.filter((r) => !r.pass).length;
+  const skipped = results.filter((r) => r.skipped).length;
   return {
     fixture: { patientId: FIXTURE_PATIENT_ID, uid: FIXTURE_UID, missingId: MISSING_ID },
     base: BASE,
     ranAt: new Date().toISOString(),
     total: results.length,
-    passed: results.length - failed,
+    passed: results.length - failed - skipped,
     failed,
+    skipped,
     results,
   };
+
 }
 
 exports.adminRunReadPathSmoke = functions
