@@ -77,13 +77,14 @@ export default function MemberRoster() {
           </p>
         </div>
         <div className="flex items-center gap-2">
-          {isAdmin && missingMembers.length > 0 && (
+          {isAdmin && adultsReady > 0 && (
             <Button variant="outline" size="sm" onClick={() => setProvisionOpen(true)}>
               <UserPlus className="mr-1 h-3.5 w-3.5" />
-              Provision {missingMembers.length} missing record
-              {missingMembers.length === 1 ? "" : "s"}
+              Provision {adultsReady} adult{adultsReady === 1 ? "" : "s"}
+              <span className="ml-1 text-muted-foreground">of {missingMembers.length} missing</span>
             </Button>
           )}
+
           <Button variant="outline" size="icon" onClick={() => refetch()} disabled={loading}>
             <RefreshCw className={cn("h-4 w-4", loading && "animate-spin")} />
           </Button>
