@@ -277,15 +277,18 @@ async function runSmoke() {
   }
 
   const failed = results.filter((r) => !r.pass).length;
+  const skipped = results.filter((r) => r.skipped).length;
   return {
     fixture: { patientId: FIXTURE_PATIENT_ID, uid: FIXTURE_UID, missingId: MISSING_ID },
     base: BASE,
     ranAt: new Date().toISOString(),
     total: results.length,
-    passed: results.length - failed,
+    passed: results.length - failed - skipped,
     failed,
+    skipped,
     results,
   };
+
 }
 
 exports.adminRunReadPathSmoke = functions
