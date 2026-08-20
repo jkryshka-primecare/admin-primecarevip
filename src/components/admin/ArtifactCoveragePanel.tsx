@@ -274,15 +274,14 @@ export default function ArtifactCoveragePanel() {
   );
 }
 
-function Stat({
-  label,
-  value,
-  tone = "neutral",
-}: {
-  label: string;
-  value: string;
-  tone?: "neutral" | "good" | "warn" | "bad";
-}) {
+const Stat = forwardRef<
+  HTMLDivElement,
+  {
+    label: string;
+    value: string;
+    tone?: "neutral" | "good" | "warn" | "bad";
+  }
+>(function Stat({ label, value, tone = "neutral" }, ref) {
   const toneClass =
     tone === "good"
       ? "text-success"
@@ -292,9 +291,10 @@ function Stat({
           ? "text-destructive"
           : "text-foreground";
   return (
-    <div className="rounded-xl border border-border bg-background px-4 py-3">
+    <div ref={ref} className="rounded-xl border border-border bg-background px-4 py-3">
       <p className="text-[11px] uppercase tracking-wide text-muted-foreground">{label}</p>
       <p className={`mt-1 font-mono text-lg ${toneClass}`}>{value}</p>
     </div>
   );
-}
+});
+
