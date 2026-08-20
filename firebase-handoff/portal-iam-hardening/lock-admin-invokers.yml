@@ -28,6 +28,7 @@
             adminGetPortalAccess
             adminProvisionPatients
             adminRunArtifactAudit
+            adminRunReadPathSmoke
           )
 
           printf '%s' "$GOOGLE_APPLICATION_CREDENTIALS_JSON" > /tmp/production-sa.json
