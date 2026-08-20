@@ -88,3 +88,15 @@ live audit returned the new fields (`erroredCount`, `status`, `errorStatusCounts
 correct. Fixed by PR #434 — `concurrency: { group: deploy-production, cancel-in-progress: false }`
 in `deploy-production.yml`, so back-to-back merges serialize instead of racing.
 
+## 2026-08-20 — overnight result
+
+Sweep drained hands-off: `missingCount` 79 -> 1, `presentCount` 1341/1342, `coveragePct 99.925%`,
+`erroredCount: 0`. The single residual is `SMOKE-LAB-2` on the Test Kieffer fixture — a synthetic
+reference with no Elation source. Keep it: it is the live `{ state: 'preparing' }` case. It parks
+at MAX_FAILURES=5 and stops retrying. Real-patient coverage is effectively 100%.
+
+Only item 4 (live read-path smoke) remains as verification. The runnable script is
+`firebase-handoff/portal-artifact-integrity/scripts/prod-read-path-smoke.js` with
+`README-prod-smoke.md` — Cloud Shell, prod ADC, deployed endpoints, restores any portalAccess
+toggles it flips, and calls out the `iam.serviceAccountTokenCreator` self-grant by name if v4
+signing fails.
