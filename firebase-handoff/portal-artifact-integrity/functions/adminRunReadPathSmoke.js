@@ -232,22 +232,38 @@ async function runSmoke() {
       await restoreAccess(saved);
     }
 
-    // 5 — the other two artifact modules.
+    // 5 — the other two artifact modules. Same assertion as case 1, including
+    //     the byte-fetch: a signed URL that does not serve `%PDF-` is a
+    //     signing/ACL failure, not a pass.
     for (const pair of [['imaging', imagingId], ['records', recordId]]) {
       const moduleKey = pair[0];
       const id = pair[1];
       if (!id) {
-        record(`5. ${moduleKey} present -> 200 + signed URL`, false, 'no fixture with hasArtifact:true');
+        skip(
+          `5. ${moduleKey} present -> 200 + signed URL`,
+          `skipped — fixture ${FIXTURE_PATIENT_ID} holds no ${CATEGORY_BY_MODULE[moduleKey]} document with hasArtifact:true`,
+        );
         continue;
       }
       const r = await callRead(token, moduleKey, id);
       const url = r.json && r.json.signedUrl;
+      if (effectiveStatus(r) !== 200 || !url) {
+        const hint = /signBlob|could not sign|SigningError/i.test(r.raw)
+          ? ' >>> SIGNING FAILURE: grant roles/iam.serviceAccountTokenCreator to the RUNTIME SA on ITSELF <<<'
+          : '';
+        record(`5. ${moduleKey} present -> 200 + signed URL`, false, `${effectiveStatus(r)} ${r.raw}${hint}`);
+        continue;
+      }
+      const got = await fetch(url);
+      const buf = Buffer.from(await got.arrayBuffer());
+      const magic = buf.slice(0, 5).toString('latin1');
       record(
-        `5. ${moduleKey} present -> 200 + signed URL`,
-        effectiveStatus(r) === 200 && Boolean(url),
-        `${effectiveStatus(r)} ${url ? 'signed URL returned' : r.raw}`,
+        `5. ${moduleKey} present -> 200 + signed URL serves PDF bytes`,
+        got.ok && magic === '%PDF-',
+        `GET ${got.status}, ${buf.length} bytes, magic=${magic}`,
       );
     }
+
   } finally {
     await restoreAccess(saved);
     const after = await snapshotAccess();
