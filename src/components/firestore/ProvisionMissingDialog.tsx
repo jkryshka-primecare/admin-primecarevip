@@ -405,6 +405,22 @@ export default function ProvisionMissingDialog({
                         <td className="p-2 text-right text-[10px] uppercase tracking-wide text-muted-foreground">
                           {e.ok ? (r.memberType ?? "") : e.why}
                         </td>
+                        <td className="w-40 p-2">
+                          <Input
+                            value={elationIds[r.key] ?? ""}
+                            inputMode="numeric"
+                            placeholder="Elation ID (optional)"
+                            className="h-7 font-mono text-[11px]"
+                            disabled={!e.ok || !isAdmin || provision.isPending}
+                            onChange={(ev) =>
+                              setElationIds((prev) => ({
+                                ...prev,
+                                [r.key]: ev.target.value.replace(/\D/g, ""),
+                              }))
+                            }
+                          />
+                        </td>
+
 
                       </tr>
                     );
