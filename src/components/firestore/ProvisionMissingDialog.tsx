@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { AlertTriangle, Download, Loader2, UserPlus } from "lucide-react";
 
 import { useAuth } from "@/hooks/useAuth";
@@ -29,6 +29,7 @@ import { cn } from "@/lib/utils";
 
 /** Matches MAX_PROVISION_BATCH in the portal-admin edge function. */
 const MAX_BATCH = 300;
+const ELATION_ID_STORAGE_KEY = "pcvip.provision.elationIds";
 
 /** Size of the recommended first validation run against production. */
 const VALIDATION_BATCH = 5;
@@ -81,8 +82,26 @@ export default function ProvisionMissingDialog({
   const [reason, setReason] = useState("");
   const [adultsOnly, setAdultsOnly] = useState(true);
   const [selectedKeys, setSelectedKeys] = useState<Set<string>>(new Set());
-  /** Staff-entered Elation chart ids, keyed by roster row, for manual matches. */
-  const [elationIds, setElationIds] = useState<Record<string, string>>({});
+  /**
+   * Staff-entered Elation chart ids, keyed by roster row, for manual matches.
+   * Persisted locally so a hand-looked-up chart id survives closing the dialog
+   * or a roster refetch — retyping it every time was losing manual matches.
+   */
+  const [elationIds, setElationIds] = useState<Record<string, string>>(() => {
+    try {
+      return JSON.parse(localStorage.getItem(ELATION_ID_STORAGE_KEY) ?? "{}");
+    } catch {
+      return {};
+    }
+  });
+
+  useEffect(() => {
+    try {
+      localStorage.setItem(ELATION_ID_STORAGE_KEY, JSON.stringify(elationIds));
+    } catch {
+      /* storage unavailable — keep in-memory only */
+    }
+  }, [elationIds]);
 
   const [result, setResult] = useState<ProvisionResult | null>(null);
   const [submitted, setSubmitted] = useState<ReconRow[]>([]);
@@ -235,7 +254,6 @@ export default function ProvisionMissingDialog({
           setSubmitted([]);
           setReason("");
           setSelectedKeys(new Set());
-          setElationIds({});
 
         }
         onOpenChange(next);
@@ -466,9 +484,14 @@ export default function ProvisionMissingDialog({
               <Button
                 variant="outline"
                 onClick={() => {
+                  // Keep the unresolved members selected so a manual Elation id
+                  // can be typed and retried without hunting for them again.
+                  const retry = new Set(
+                    outcomes.filter((o) => o.status === "unresolved").map((o) => o.key),
+                  );
                   setResult(null);
                   setSubmitted([]);
-                  setSelectedKeys(new Set());
+                  setSelectedKeys(retry);
                 }}
               >
                 Provision another batch
