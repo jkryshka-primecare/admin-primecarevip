@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { Baby, Check, Download, Mail, Search, UserPlus, X } from "lucide-react";
+import { Baby, Check, Download, IdCard, Mail, Search, UserPlus, X } from "lucide-react";
 
 import type { ReconRow } from "@/hooks/useMemberReconciliation";
 import {
