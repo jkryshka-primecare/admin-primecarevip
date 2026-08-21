@@ -8,6 +8,7 @@ import {
 import { useAuth } from "@/hooks/useAuth";
 import ProvisionMissingDialog from "@/components/firestore/ProvisionMissingDialog";
 import RosterExceptions from "@/components/firestore/RosterExceptions";
+import DependentMatches from "@/components/firestore/DependentMatches";
 import SendInviteButton from "@/components/firestore/SendInviteButton";
 import { buildExceptionLists } from "@/lib/portal/exceptions";
 
@@ -139,6 +140,8 @@ export default function MemberRoster() {
       {!loading && !error && (
         <RosterExceptions missing={missingMembers} rows={rows} />
       )}
+
+      {!loading && !error && <DependentMatches rows={rows} />}
 
 
       <div className="flex flex-wrap items-center gap-3">

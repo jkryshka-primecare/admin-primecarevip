@@ -32,6 +32,8 @@ export type ReconRow = {
   membershipStatus: string;
   portalStatus: string | null;
   memberType: string | null;
+  /** Hint membership (household) id — shared by everyone on one contract. */
+  membershipId: string | null;
   bucket: ReconBucket;
 };
 
@@ -101,6 +103,7 @@ export function useMemberReconciliation(enabled = true) {
         membershipStatus: m.membershipStatus,
         portalStatus: portal ? String(portal.status ?? "unknown") : null,
         memberType: m.memberType,
+        membershipId: m.membershipId,
         bucket: bucketForMember(m, portal),
       });
     }
@@ -122,6 +125,7 @@ export function useMemberReconciliation(enabled = true) {
         membershipStatus: "none",
         portalStatus: String(doc.status ?? "unknown"),
         memberType: null,
+        membershipId: null,
         bucket: "portal_no_membership",
       });
     }
