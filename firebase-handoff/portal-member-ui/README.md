@@ -50,15 +50,21 @@ Both patches landed: module-off/suspension states + the Release 2a artifact cont
 revision `dc99165` making `module_off` byte-identical to a genuinely empty section.
 Only `artifacts/web-member/src` changed; backend, IAM, indexes and workflows untouched.
 
-Remaining: confirm the production deploy of the member app, then run the smoke matrix in
-`artifact-read-contract.README.md` against the Test Kieffer fixture:
+## Smoke matrix result (2026-08-21) — ALL PASS
 
-| Case | Expected member UI |
-| --- | --- |
-| Visible lab, open PDF | Renders; link silently re-requested before the 300s expiry |
-| Reference present, object missing | Calm "preparing" state, polls every 8s, no error/404 |
-| Item hidden by admin | "Not available to view yet" — identical to never-synced |
-| Module toggled off | Section renders as a normal empty section (no notice) |
-| Account suspended | Full-screen "Portal access is paused" + concierge number |
-| Restore / re-enable | Normal content returns on reload |
+Deploy confirmed live on `care.primecarevip.com`; run against the Test Kieffer fixture
+(`patient-test-1@primecarevip.com`, member `816455979040769`).
+
+| Case | Expected member UI | Result |
+| --- | --- | --- |
+| Visible lab, open PDF | Renders; link silently re-requested before the 300s expiry | PASS |
+| Reference present, object missing (`SMOKE-LAB-2`) | Calm "preparing" state, polls every 8s, no error/404 | PASS |
+| Item hidden by admin | "Not available to view yet" — identical to never-synced; sibling lab unaffected | PASS |
+| Unhide | Item returns to the list and opens normally | PASS |
+| Module toggled off (Labs) | Section renders as a normal empty section, no notice | PASS |
+| Account suspended | Full-screen "Portal access is paused" + concierge number + Sign out | PASS |
+| Restore / re-enable | Normal content returns on reload | PASS |
+
+Release 2a member-UI cutover is verified in production. No follow-up defects logged.
+
 
