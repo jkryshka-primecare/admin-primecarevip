@@ -356,6 +356,13 @@ export default function ProvisionMissingDialog({
               </span>
             </div>
 
+            <p className="text-xs text-muted-foreground">
+              For anyone that comes back <span className="font-medium">unresolved</span>, open the
+              chart in Elation, copy the Elation Patient ID from the header, and paste it into that
+              member&apos;s row below. A pasted id is used exactly as given — verify the name and
+              date of birth on the chart match the row first.
+            </p>
+
 
             {selected.length === 0 && (
               <p className="text-xs text-muted-foreground">
