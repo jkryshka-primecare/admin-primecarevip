@@ -527,6 +527,11 @@ export default function DependentMatches({ rows }: { rows: ReconRow[] }) {
                         {m.minor.dob ?? "no dob"}
                         {m.minor.elationId ? ` · ${m.minor.elationId}` : ""}
                       </p>
+                      {!m.minor.elationId && resolveNotes[m.key] ? (
+                        <p className="text-[11px] text-destructive">
+                          Elation: {resolveNotes[m.key]}
+                        </p>
+                      ) : null}
                     </TableCell>
                     <TableCell className="font-mono text-xs">{m.age ?? "—"}</TableCell>
                     <TableCell>
