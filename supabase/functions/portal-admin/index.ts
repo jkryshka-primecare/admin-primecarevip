@@ -63,7 +63,10 @@ type ProvisionMember = {
   email: string | null;
   dob: string;
   phone: string | null;
+  /** Optional manual override when automatic Elation matching is inconclusive. */
+  elationPatientId?: string;
 };
+
 
 function parseProvisionMembers(raw: unknown): ProvisionMember[] | string {
   if (!Array.isArray(raw) || raw.length === 0) {
