@@ -41,7 +41,83 @@ const TONE: Record<MatchConfidence, string> = {
   none: "bg-muted text-muted-foreground border-border",
 };
 
-type Decision = { guardianKeys: string[]; confirmed: boolean };
+type Decision = { guardianKeys: string[]; confirmed: boolean; manualKeys?: string[] };
+
+/** Searchable patient picker for minors the heuristics couldn't match. */
+function GuardianSearch({
+  pool,
+  exclude,
+  onPick,
+}: {
+  pool: GuardianCandidate[];
+  exclude: string[];
+  onPick: (candidate: GuardianCandidate) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const [q, setQ] = useState("");
+
+  const results = useMemo(() => {
+    const needle = q.trim().toLowerCase();
+    const base = pool.filter((c) => !exclude.includes(c.row.key));
+    if (!needle) return base.slice(0, 25);
+    return base
+      .filter((c) =>
+        [c.row.name, c.row.email, c.row.elationId, c.row.dob].some(
+          (v) => v && String(v).toLowerCase().includes(needle),
+        ),
+      )
+      .slice(0, 25);
+  }, [pool, exclude, q]);
+
+  return (
+    <Popover open={open} onOpenChange={setOpen}>
+      <PopoverTrigger asChild>
+        <Button variant="outline" size="sm" className="h-7 text-[11px]">
+          <UserPlus className="mr-1 h-3 w-3" />
+          Attach a patient
+        </Button>
+      </PopoverTrigger>
+      <PopoverContent align="start" className="w-80 p-2">
+        <div className="relative">
+          <Search className="absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
+          <Input
+            autoFocus
+            value={q}
+            onChange={(e) => setQ(e.target.value)}
+            placeholder="Search patients by name, email, DOB…"
+            className="h-8 pl-8 text-xs"
+          />
+        </div>
+        <div className="mt-2 max-h-64 space-y-0.5 overflow-y-auto">
+          {results.length === 0 ? (
+            <p className="px-2 py-3 text-xs text-muted-foreground">No matching adult patient.</p>
+          ) : (
+            results.map((c) => (
+              <button
+                key={c.row.key}
+                onClick={() => {
+                  onPick(c);
+                  setOpen(false);
+                  setQ("");
+                }}
+                className="w-full rounded px-2 py-1.5 text-left text-xs hover:bg-muted"
+              >
+                <span className="block text-foreground">
+                  {c.row.name}
+                  {c.age !== null ? ` · ${c.age}` : ""}
+                </span>
+                <span className="block font-mono text-[10px] text-muted-foreground">
+                  {c.row.dob ?? "no dob"}
+                  {c.row.email ? ` · ${c.row.email}` : ""}
+                </span>
+              </button>
+            ))
+          )}
+        </div>
+      </PopoverContent>
+    </Popover>
+  );
+}
 
 /**
  * Release 2b guardian matching — review surface.
