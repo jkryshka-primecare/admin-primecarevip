@@ -22,6 +22,7 @@ import {
 } from "@/hooks/useElation";
 import { useFirestoreDoc, useFirestoreList, pickString } from "@/hooks/useFirestore";
 import PortalAdminPanel from "./PortalAdminPanel";
+import AppLayout from "@/components/AppLayout";
 
 
 import { Input } from "@/components/ui/input";
@@ -103,7 +104,8 @@ export default function PatientsHome() {
 
 
   return (
-    <div className="container mx-auto p-6 space-y-6">
+    <AppLayout title="Patients">
+    <div className="space-y-6">
       <header className="space-y-2">
         <h1 className="font-serif text-3xl text-foreground">Patients</h1>
         <p className="text-sm text-muted-foreground">
@@ -228,6 +230,7 @@ export default function PatientsHome() {
         onOpenChange={(open) => !open && setSelectedId(null)}
       />
     </div>
+    </AppLayout>
   );
 }
 
