@@ -187,6 +187,25 @@ export function buildDependentMatches(rows: ReconRow[]): DependentMatch[] {
   });
 }
 
+/**
+ * Every adult on the roster who could be attached to a minor by hand.
+ *
+ * Used by the review panel's guardian search box for the "No guardian found"
+ * queue, where neither the household nor the shared-email signal fired.
+ */
+export function eligibleGuardianPool(rows: ReconRow[]): GuardianCandidate[] {
+  return rows
+    .map((row) => ({ row, age: ageFromDob(row.dob) }))
+    .filter(({ row, age }) => isEligibleGuardian(row, age))
+    .map(({ row, age }) => ({
+      row,
+      age,
+      source: "manual_search" as const,
+      rationale: "Attached by staff from patient search",
+    }))
+    .sort((a, b) => a.row.name.localeCompare(b.row.name));
+}
+
 export const CONFIDENCE_LABEL: Record<MatchConfidence, string> = {
   high: "Household match",
   medium: "Inferred — confirm",
