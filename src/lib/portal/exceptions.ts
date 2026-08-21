@@ -6,7 +6,7 @@
  * here writes anywhere — these are read-only, reviewable, exportable sets.
  */
 import type { ReconRow } from "@/hooks/useMemberReconciliation";
-import { isTestFixture } from "@/lib/portal/fixtures";
+import { isTestFixture, isTestFixtureName } from "@/lib/portal/fixtures";
 
 const ISO_DATE = /^\d{4}-\d{2}-\d{2}$/;
 
@@ -38,6 +38,8 @@ export function eligibility(
   adultsOnly = false,
 ): { ok: boolean; why?: string } {
   if (isTestFixture(row.elationId)) return { ok: false, why: "Smoke-test fixture" };
+  if (isTestFixtureName(row.firstName, row.lastName) || isTestFixtureName(row.name))
+    return { ok: false, why: "Health-check test record" };
   if (!row.hintId) return { ok: false, why: "No Hint id" };
   if (!row.dob || !ISO_DATE.test(row.dob)) return { ok: false, why: "No date of birth" };
   if (!row.firstName || !row.lastName) return { ok: false, why: "Incomplete name" };
@@ -94,7 +96,12 @@ export function buildExceptionLists(
   const ambiguous: ReconRow[] = [];
 
   for (const r of missing) {
-    if (isTestFixture(r.elationId)) continue;
+    if (
+      isTestFixture(r.elationId) ||
+      isTestFixtureName(r.firstName, r.lastName) ||
+      isTestFixtureName(r.name)
+    )
+      continue;
     const identity = eligibility(r, false);
     if (!identity.ok) {
       incomplete.push(r);
