@@ -1,10 +1,11 @@
 import { useEffect, useMemo, useState } from "react";
-import { Baby, Check, Download, X } from "lucide-react";
+import { Baby, Check, Download, Search, UserPlus, X } from "lucide-react";
 
 import type { ReconRow } from "@/hooks/useMemberReconciliation";
 import {
   buildDependentMatches,
   CONFIDENCE_LABEL,
+  eligibleGuardianPool,
   linksToCsv,
   toConfirmedLink,
   type ConfirmedLink,
@@ -18,6 +19,8 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Checkbox } from "@/components/ui/checkbox";
+import { Input } from "@/components/ui/input";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import {
   Table,
   TableBody,
