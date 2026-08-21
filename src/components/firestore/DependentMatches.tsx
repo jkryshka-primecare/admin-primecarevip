@@ -340,7 +340,12 @@ export default function DependentMatches({ rows }: { rows: ReconRow[] }) {
         : [...current, guardianKey];
       return {
         ...d,
-        [m.key]: { guardianKeys, manualKeys: prev?.manualKeys, confirmed: false },
+        [m.key]: {
+          guardianKeys,
+          manualKeys: prev?.manualKeys,
+          externals: prev?.externals,
+          confirmed: false,
+        },
       };
     });
 
@@ -348,12 +353,14 @@ export default function DependentMatches({ rows }: { rows: ReconRow[] }) {
     setDecisions((d) => {
       const current = d[m.key];
       const guardianKeys = current?.guardianKeys ?? m.suggested.map((c) => c.row.key);
-      if (!guardianKeys.length) return d;
+      const externals = current?.externals ?? [];
+      if (!guardianKeys.length && !externals.length) return d;
       return {
         ...d,
         [m.key]: {
           guardianKeys,
           manualKeys: current?.manualKeys,
+          externals,
           confirmed: !current?.confirmed,
         },
       };
