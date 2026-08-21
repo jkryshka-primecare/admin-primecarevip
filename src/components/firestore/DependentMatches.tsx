@@ -534,9 +534,9 @@ export default function DependentMatches({ rows }: { rows: ReconRow[] }) {
                         </Badge>
                       )}
 
-                      {chosen.length > 0 && (
+                      {totalGuardians > 0 && (
                         <p className="mt-1 text-[11px] text-muted-foreground">
-                          {chosen.length} guardian{chosen.length === 1 ? "" : "s"} selected
+                          {totalGuardians} guardian{totalGuardians === 1 ? "" : "s"} selected
                         </p>
                       )}
                     </TableCell>
@@ -544,7 +544,7 @@ export default function DependentMatches({ rows }: { rows: ReconRow[] }) {
                       <Button
                         variant={confirmed ? "secondary" : "outline"}
                         size="sm"
-                        disabled={!chosen.length}
+                        disabled={!totalGuardians}
                         onClick={() => toggleConfirm(m)}
                       >
                         {confirmed ? (
