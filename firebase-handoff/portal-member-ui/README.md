@@ -42,14 +42,23 @@ Every read page reaches one of these three shared surfaces (`ClinicalScreen`, `R
 - Row 9 (suspend): full-screen "Portal access is paused"; other handlers' 403 `ACCESS_SUSPENDED` land on
   the same copy inside each page. Restore returns to normal on reload.
 
-## Cutover status (2026-08-21)
+## Cutover status (2026-08-21) — MERGED
 
-Both patches are stacked in **PR #437** — branch `portal-cutover/member-artifact-contract`,
-now **ready for review** (approved revision `dc99165`: `module_off` renders byte-identical to a
-genuinely empty section — no dedicated notice anywhere). Only `artifacts/web-member/src` changes;
-backend, IAM, indexes and workflows untouched. `LabResults.jsx` and `Imaging.jsx`
-were hand-merged where the two patches overlap; all changed modules syntax-checked
-with esbuild.
+**PR #437 merged to `main`** (`2540561`), branch `portal-cutover/member-artifact-contract`.
+Both patches landed: module-off/suspension states + the Release 2a artifact contract
+(300s TTL re-request, `preparing` polling, absence-never-forbidden), with the approved
+revision `dc99165` making `module_off` byte-identical to a genuinely empty section.
+Only `artifacts/web-member/src` changed; backend, IAM, indexes and workflows untouched.
 
-Next: merge → deploy, then run the smoke matrix in `artifact-read-contract.README.md`
-against the Test Kieffer fixture (suspend/restore, module off/on, hidden item, expired link).
+Remaining: confirm the production deploy of the member app, then run the smoke matrix in
+`artifact-read-contract.README.md` against the Test Kieffer fixture:
+
+| Case | Expected member UI |
+| --- | --- |
+| Visible lab, open PDF | Renders; link silently re-requested before the 300s expiry |
+| Reference present, object missing | Calm "preparing" state, polls every 8s, no error/404 |
+| Item hidden by admin | "Not available to view yet" — identical to never-synced |
+| Module toggled off | Section renders as a normal empty section (no notice) |
+| Account suspended | Full-screen "Portal access is paused" + concierge number |
+| Restore / re-enable | Normal content returns on reload |
+
