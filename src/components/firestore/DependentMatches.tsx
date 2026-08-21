@@ -35,6 +35,7 @@ import {
 import { cn } from "@/lib/utils";
 
 const STORAGE_KEY = "pcvip.dependents.decisions.v2";
+const ELATION_IDS_KEY = "pcvip.dependents.elationIds.v1";
 const stamp = () => new Date().toISOString().slice(0, 10);
 
 const TONE: Record<MatchConfidence, string> = {
