@@ -441,6 +441,8 @@ export default function DependentMatches({ rows }: { rows: ReconRow[] }) {
                 const chosen = chosenFor(m);
                 const chosenKeys = chosen.map((c) => c.row.key);
                 const confirmed = Boolean(decisions[m.key]?.confirmed);
+                const externals = externalsFor(m);
+                const totalGuardians = chosen.length + externals.length;
                 return (
                   <TableRow key={m.key} className={cn(confirmed && "bg-success/5")}>
                     <TableCell>
