@@ -9,6 +9,7 @@ import {
   toConfirmedLink,
   type ConfirmedLink,
   type DependentMatch,
+  type GuardianCandidate,
   type MatchConfidence,
 } from "@/lib/portal/dependents";
 import { downloadCsv } from "@/lib/portal/exceptions";
@@ -16,13 +17,7 @@ import { downloadCsv } from "@/lib/portal/exceptions";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
+import { Checkbox } from "@/components/ui/checkbox";
 import {
   Table,
   TableBody,
@@ -33,7 +28,7 @@ import {
 } from "@/components/ui/table";
 import { cn } from "@/lib/utils";
 
-const STORAGE_KEY = "pcvip.dependents.decisions";
+const STORAGE_KEY = "pcvip.dependents.decisions.v2";
 const stamp = () => new Date().toISOString().slice(0, 10);
 
 const TONE: Record<MatchConfidence, string> = {
@@ -43,7 +38,7 @@ const TONE: Record<MatchConfidence, string> = {
   none: "bg-muted text-muted-foreground border-border",
 };
 
-type Decision = { guardianKey: string | null; confirmed: boolean };
+type Decision = { guardianKeys: string[]; confirmed: boolean };
 
 /**
  * Release 2b guardian matching — review surface.
@@ -81,9 +76,10 @@ export default function DependentMatches({ rows }: { rows: ReconRow[] }) {
     return c;
   }, [matches, decisions]);
 
-  const chosenFor = (m: DependentMatch) => {
-    const picked = decisions[m.key]?.guardianKey;
-    if (picked) return m.candidates.find((c) => c.row.key === picked) ?? null;
+  /** A minor can have several guardians — both parents usually want access. */
+  const chosenFor = (m: DependentMatch): GuardianCandidate[] => {
+    const picked = decisions[m.key]?.guardianKeys;
+    if (picked) return m.candidates.filter((c) => picked.includes(c.row.key));
     return m.suggested;
   };
 
@@ -91,8 +87,7 @@ export default function DependentMatches({ rows }: { rows: ReconRow[] }) {
     () =>
       matches.flatMap((m) => {
         if (!decisions[m.key]?.confirmed) return [];
-        const candidate = chosenFor(m);
-        return candidate ? [toConfirmedLink(m, candidate)] : [];
+        return chosenFor(m).map((candidate) => toConfirmedLink(m, candidate));
       }),
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [matches, decisions],
@@ -104,15 +99,21 @@ export default function DependentMatches({ rows }: { rows: ReconRow[] }) {
     return m.confidence === filter;
   });
 
-  const setGuardian = (key: string, guardianKey: string) =>
-    setDecisions((d) => ({ ...d, [key]: { guardianKey, confirmed: false } }));
+  const toggleGuardian = (m: DependentMatch, guardianKey: string) =>
+    setDecisions((d) => {
+      const current = d[m.key]?.guardianKeys ?? m.suggested.map((c) => c.row.key);
+      const guardianKeys = current.includes(guardianKey)
+        ? current.filter((k) => k !== guardianKey)
+        : [...current, guardianKey];
+      return { ...d, [m.key]: { guardianKeys, confirmed: false } };
+    });
 
   const toggleConfirm = (m: DependentMatch) =>
     setDecisions((d) => {
       const current = d[m.key];
-      const guardianKey = current?.guardianKey ?? m.suggested?.row.key ?? null;
-      if (!guardianKey) return d;
-      return { ...d, [m.key]: { guardianKey, confirmed: !current?.confirmed } };
+      const guardianKeys = current?.guardianKeys ?? m.suggested.map((c) => c.row.key);
+      if (!guardianKeys.length) return d;
+      return { ...d, [m.key]: { guardianKeys, confirmed: !current?.confirmed } };
     });
 
   const FILTERS: { id: typeof filter; label: string; n: number }[] = [
@@ -136,7 +137,7 @@ export default function DependentMatches({ rows }: { rows: ReconRow[] }) {
               Dependent guardian matching
             </CardTitle>
             <p className="mt-1 text-xs text-muted-foreground">
-              Minors get no login of their own — a guardian proxies in. Proposals only;
+              Minors get no login of their own — one or more guardians proxy in. Proposals only;
               a link becomes real once staff confirm it and the control plane applies it.
             </p>
           </div>
@@ -179,7 +180,7 @@ export default function DependentMatches({ rows }: { rows: ReconRow[] }) {
               <TableRow>
                 <TableHead>Minor</TableHead>
                 <TableHead className="w-16">Age</TableHead>
-                <TableHead>Proposed guardian</TableHead>
+                <TableHead>Proposed guardians</TableHead>
                 <TableHead>Evidence</TableHead>
                 <TableHead className="w-32 text-right">Decision</TableHead>
               </TableRow>
@@ -187,6 +188,7 @@ export default function DependentMatches({ rows }: { rows: ReconRow[] }) {
             <TableBody>
               {visible.map((m) => {
                 const chosen = chosenFor(m);
+                const chosenKeys = chosen.map((c) => c.row.key);
                 const confirmed = Boolean(decisions[m.key]?.confirmed);
                 return (
                   <TableRow key={m.key} className={cn(confirmed && "bg-success/5")}>
@@ -200,22 +202,27 @@ export default function DependentMatches({ rows }: { rows: ReconRow[] }) {
                     <TableCell className="font-mono text-xs">{m.age ?? "—"}</TableCell>
                     <TableCell>
                       {m.candidates.length ? (
-                        <Select
-                          value={chosen?.row.key ?? ""}
-                          onValueChange={(v) => setGuardian(m.key, v)}
-                        >
-                          <SelectTrigger className="h-8 w-[15rem] text-xs">
-                            <SelectValue placeholder="Choose a guardian" />
-                          </SelectTrigger>
-                          <SelectContent>
-                            {m.candidates.map((c) => (
-                              <SelectItem key={c.row.key} value={c.row.key}>
+                        <div className="space-y-1.5">
+                          {m.candidates.map((c) => (
+                            <label
+                              key={c.row.key}
+                              className="flex items-start gap-2 text-xs text-foreground"
+                            >
+                              <Checkbox
+                                checked={chosenKeys.includes(c.row.key)}
+                                onCheckedChange={() => toggleGuardian(m, c.row.key)}
+                                className="mt-0.5"
+                              />
+                              <span>
                                 {c.row.name}
                                 {c.age !== null ? ` · ${c.age}` : ""}
-                              </SelectItem>
-                            ))}
-                          </SelectContent>
-                        </Select>
+                                <span className="block text-[11px] text-muted-foreground">
+                                  {c.rationale}
+                                </span>
+                              </span>
+                            </label>
+                          ))}
+                        </div>
                       ) : (
                         <span className="text-xs text-muted-foreground">
                           {m.blocker ?? "No candidate"}
@@ -226,9 +233,9 @@ export default function DependentMatches({ rows }: { rows: ReconRow[] }) {
                       <Badge variant="outline" className={cn("text-[10px]", TONE[m.confidence])}>
                         {CONFIDENCE_LABEL[m.confidence]}
                       </Badge>
-                      {chosen && (
+                      {chosen.length > 0 && (
                         <p className="mt-1 text-[11px] text-muted-foreground">
-                          {chosen.rationale}
+                          {chosen.length} guardian{chosen.length === 1 ? "" : "s"} selected
                         </p>
                       )}
                     </TableCell>
@@ -236,7 +243,7 @@ export default function DependentMatches({ rows }: { rows: ReconRow[] }) {
                       <Button
                         variant={confirmed ? "secondary" : "outline"}
                         size="sm"
-                        disabled={!chosen}
+                        disabled={!chosen.length}
                         onClick={() => toggleConfirm(m)}
                       >
                         {confirmed ? (
