@@ -155,12 +155,44 @@ export default function DependentMatches({ rows }: { rows: ReconRow[] }) {
     return c;
   }, [matches, decisions]);
 
+  /** Every adult who can be attached by hand from the patient search box. */
+  const pool = useMemo(() => eligibleGuardianPool(rows), [rows]);
+  const poolByKey = useMemo(
+    () => new Map(pool.map((c) => [c.row.key, c])),
+    [pool],
+  );
+
+  /** Proposed candidates plus any patient staff attached manually. */
+  const candidatesFor = (m: DependentMatch): GuardianCandidate[] => {
+    const manual = (decisions[m.key]?.manualKeys ?? [])
+      .filter((k) => !m.candidates.some((c) => c.row.key === k))
+      .map((k) => poolByKey.get(k))
+      .filter((c): c is GuardianCandidate => Boolean(c));
+    return [...m.candidates, ...manual];
+  };
+
   /** A minor can have several guardians — both parents usually want access. */
   const chosenFor = (m: DependentMatch): GuardianCandidate[] => {
     const picked = decisions[m.key]?.guardianKeys;
-    if (picked) return m.candidates.filter((c) => picked.includes(c.row.key));
+    if (picked) return candidatesFor(m).filter((c) => picked.includes(c.row.key));
     return m.suggested;
   };
+
+  const attachGuardian = (m: DependentMatch, candidate: GuardianCandidate) =>
+    setDecisions((d) => {
+      const current = d[m.key];
+      const manualKeys = Array.from(
+        new Set([...(current?.manualKeys ?? []), candidate.row.key]),
+      );
+      const guardianKeys = Array.from(
+        new Set([
+          ...(current?.guardianKeys ?? m.suggested.map((c) => c.row.key)),
+          candidate.row.key,
+        ]),
+      );
+      return { ...d, [m.key]: { guardianKeys, manualKeys, confirmed: false } };
+    });
+
 
   const confirmedLinks: ConfirmedLink[] = useMemo(
     () =>
