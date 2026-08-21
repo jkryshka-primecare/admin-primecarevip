@@ -44,7 +44,75 @@ const TONE: Record<MatchConfidence, string> = {
   none: "bg-muted text-muted-foreground border-border",
 };
 
-type Decision = { guardianKeys: string[]; confirmed: boolean; manualKeys?: string[] };
+type Decision = {
+  guardianKeys: string[];
+  confirmed: boolean;
+  manualKeys?: string[];
+  /** Guardians who aren't patients — invited by email address only. */
+  externals?: ExternalGuardian[];
+};
+
+/** Attach a guardian who has no chart: parent email on the child's record. */
+function EmailGuardianAttach({
+  defaultEmail,
+  onAdd,
+}: {
+  defaultEmail: string | null;
+  onAdd: (guardian: ExternalGuardian) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const [email, setEmail] = useState(defaultEmail ?? "");
+  const [name, setName] = useState("");
+  const valid = isValidEmail(email);
+
+  return (
+    <Popover
+      open={open}
+      onOpenChange={(o) => {
+        setOpen(o);
+        if (o) setEmail(defaultEmail ?? "");
+      }}
+    >
+      <PopoverTrigger asChild>
+        <Button variant="outline" size="sm" className="h-7 text-[11px]">
+          <Mail className="mr-1 h-3 w-3" />
+          Attach by email
+        </Button>
+      </PopoverTrigger>
+      <PopoverContent align="start" className="w-80 space-y-2 p-3">
+        <p className="text-[11px] text-muted-foreground">
+          Use when the parent isn't a patient. The portal invites this address and proxies it
+          into the child's record.
+        </p>
+        <Input
+          autoFocus
+          value={email}
+          onChange={(e) => setEmail(e.target.value)}
+          placeholder="parent@example.com"
+          className="h-8 text-xs"
+        />
+        <Input
+          value={name}
+          onChange={(e) => setName(e.target.value)}
+          placeholder="Guardian name (optional)"
+          className="h-8 text-xs"
+        />
+        <Button
+          size="sm"
+          className="w-full"
+          disabled={!valid}
+          onClick={() => {
+            onAdd({ email: email.trim(), name: name.trim() || undefined });
+            setOpen(false);
+            setName("");
+          }}
+        >
+          Attach guardian
+        </Button>
+      </PopoverContent>
+    </Popover>
+  );
+}
 
 /** Searchable patient picker for minors the heuristics couldn't match. */
 function GuardianSearch({
