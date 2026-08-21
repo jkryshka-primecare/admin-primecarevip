@@ -22,6 +22,7 @@ import {
 } from "@/hooks/useElation";
 import { useFirestoreDoc, useFirestoreList, pickString } from "@/hooks/useFirestore";
 import PortalAdminPanel from "./PortalAdminPanel";
+import AppLayout from "@/components/AppLayout";
 
 
 import { Input } from "@/components/ui/input";
