@@ -81,8 +81,26 @@ export default function ProvisionMissingDialog({
   const [reason, setReason] = useState("");
   const [adultsOnly, setAdultsOnly] = useState(true);
   const [selectedKeys, setSelectedKeys] = useState<Set<string>>(new Set());
-  /** Staff-entered Elation chart ids, keyed by roster row, for manual matches. */
-  const [elationIds, setElationIds] = useState<Record<string, string>>({});
+  /**
+   * Staff-entered Elation chart ids, keyed by roster row, for manual matches.
+   * Persisted locally so a hand-looked-up chart id survives closing the dialog
+   * or a roster refetch — retyping it every time was losing manual matches.
+   */
+  const [elationIds, setElationIds] = useState<Record<string, string>>(() => {
+    try {
+      return JSON.parse(localStorage.getItem(ELATION_ID_STORAGE_KEY) ?? "{}");
+    } catch {
+      return {};
+    }
+  });
+
+  useEffect(() => {
+    try {
+      localStorage.setItem(ELATION_ID_STORAGE_KEY, JSON.stringify(elationIds));
+    } catch {
+      /* storage unavailable — keep in-memory only */
+    }
+  }, [elationIds]);
 
   const [result, setResult] = useState<ProvisionResult | null>(null);
   const [submitted, setSubmitted] = useState<ReconRow[]>([]);
