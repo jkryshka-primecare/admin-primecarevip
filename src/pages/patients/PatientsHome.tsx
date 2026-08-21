@@ -230,6 +230,7 @@ export default function PatientsHome() {
         onOpenChange={(open) => !open && setSelectedId(null)}
       />
     </div>
+    </AppLayout>
   );
 }
 
