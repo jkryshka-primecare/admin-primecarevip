@@ -452,17 +452,32 @@ export default function DependentMatches({ rows }: { rows: ReconRow[] }) {
               a link becomes real once staff confirm it and the control plane applies it.
             </p>
           </div>
-          <Button
-            variant="outline"
-            size="sm"
-            disabled={!confirmedLinks.length}
-            onClick={() =>
-              downloadCsv(`guardian-links-${stamp()}.csv`, linksToCsv(confirmedLinks))
-            }
-          >
-            <Download className="mr-1 h-3.5 w-3.5" />
-            Export {confirmedLinks.length} confirmed
-          </Button>
+          <div className="flex flex-wrap items-center gap-2">
+            <Button
+              variant="outline"
+              size="sm"
+              disabled={!unresolved.length || Boolean(resolving)}
+              onClick={runResolve}
+              title="Looks up each minor's chart in Elation by first name + last name + DOB"
+            >
+              <IdCard className="mr-1 h-3.5 w-3.5" />
+              {resolving
+                ? `Resolving ${resolving.done}/${resolving.total}…`
+                : `Resolve ${unresolved.length} Elation IDs`}
+            </Button>
+            <Button
+              variant="outline"
+              size="sm"
+              disabled={!confirmedLinks.length}
+              onClick={() =>
+                downloadCsv(`guardian-links-${stamp()}.csv`, linksToCsv(confirmedLinks))
+              }
+            >
+              <Download className="mr-1 h-3.5 w-3.5" />
+              Export {confirmedLinks.length} confirmed
+            </Button>
+          </div>
+
         </div>
       </CardHeader>
 
