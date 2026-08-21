@@ -17,6 +17,7 @@ import {
   type MatchConfidence,
 } from "@/lib/portal/dependents";
 import { downloadCsv } from "@/lib/portal/exceptions";
+import { resolveElationIds } from "@/lib/portal/elationResolve";
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
