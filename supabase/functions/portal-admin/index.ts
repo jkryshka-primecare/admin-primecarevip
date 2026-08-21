@@ -99,6 +99,14 @@ function parseProvisionMembers(raw: unknown): ProvisionMember[] | string {
       return `Refusing to provision the smoke-test fixture (${firstName} ${lastName}).`;
     }
 
+    // A staff-supplied Elation chart id, used only when the automatic resolver
+    // could not confidently match. Digits only: the doc id of a roster record
+    // IS this value, so a malformed one must never get through.
+    const elationPatientId = m.elationPatientId ? String(m.elationPatientId).trim() : "";
+    if (elationPatientId && !/^\d{6,25}$/.test(elationPatientId)) {
+      return `Member ${firstName} ${lastName} has an invalid Elation patient id.`;
+    }
+
     out.push({
       hintId,
       firstName,
@@ -106,19 +114,9 @@ function parseProvisionMembers(raw: unknown): ProvisionMember[] | string {
       email: m.email ? String(m.email).trim().slice(0, 320) : null,
       dob,
       phone: m.phone ? String(m.phone).trim().slice(0, 40) : null,
-      // A staff-supplied Elation chart id, used only when the automatic
-      // resolver could not confidently match. Digits only: the doc id of a
-      // roster record IS this value, so a malformed one must never get through.
-      ...(m.elationPatientId
-        ? (() => {
-            const id = String(m.elationPatientId).trim();
-            if (!/^\d{6,25}$/.test(id)) {
-              throw new Error(`Member ${hintId} has an invalid Elation patient id.`);
-            }
-            return { elationPatientId: id };
-          })()
-        : {}),
+      ...(elationPatientId ? { elationPatientId } : {}),
     });
+
 
   }
   return out;
