@@ -211,8 +211,10 @@ export default function DependentMatches({ rows }: { rows: ReconRow[] }) {
   const visible = matches.filter((m) => {
     if (filter === "all") return true;
     if (filter === "confirmed") return Boolean(decisions[m.key]?.confirmed);
+    if (decisions[m.key]?.confirmed) return false;
     return m.confidence === filter;
   });
+
 
   const toggleGuardian = (m: DependentMatch, guardianKey: string) =>
     setDecisions((d) => {
