@@ -1,10 +1,11 @@
 import { useEffect, useMemo, useState } from "react";
-import { Baby, Check, Download, X } from "lucide-react";
+import { Baby, Check, Download, Search, UserPlus, X } from "lucide-react";
 
 import type { ReconRow } from "@/hooks/useMemberReconciliation";
 import {
   buildDependentMatches,
   CONFIDENCE_LABEL,
+  eligibleGuardianPool,
   linksToCsv,
   toConfirmedLink,
   type ConfirmedLink,
@@ -18,6 +19,8 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Checkbox } from "@/components/ui/checkbox";
+import { Input } from "@/components/ui/input";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import {
   Table,
   TableBody,
@@ -38,7 +41,83 @@ const TONE: Record<MatchConfidence, string> = {
   none: "bg-muted text-muted-foreground border-border",
 };
 
-type Decision = { guardianKeys: string[]; confirmed: boolean };
+type Decision = { guardianKeys: string[]; confirmed: boolean; manualKeys?: string[] };
+
+/** Searchable patient picker for minors the heuristics couldn't match. */
+function GuardianSearch({
+  pool,
+  exclude,
+  onPick,
+}: {
+  pool: GuardianCandidate[];
+  exclude: string[];
+  onPick: (candidate: GuardianCandidate) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const [q, setQ] = useState("");
+
+  const results = useMemo(() => {
+    const needle = q.trim().toLowerCase();
+    const base = pool.filter((c) => !exclude.includes(c.row.key));
+    if (!needle) return base.slice(0, 25);
+    return base
+      .filter((c) =>
+        [c.row.name, c.row.email, c.row.elationId, c.row.dob].some(
+          (v) => v && String(v).toLowerCase().includes(needle),
+        ),
+      )
+      .slice(0, 25);
+  }, [pool, exclude, q]);
+
+  return (
+    <Popover open={open} onOpenChange={setOpen}>
+      <PopoverTrigger asChild>
+        <Button variant="outline" size="sm" className="h-7 text-[11px]">
+          <UserPlus className="mr-1 h-3 w-3" />
+          Attach a patient
+        </Button>
+      </PopoverTrigger>
+      <PopoverContent align="start" className="w-80 p-2">
+        <div className="relative">
+          <Search className="absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
+          <Input
+            autoFocus
+            value={q}
+            onChange={(e) => setQ(e.target.value)}
+            placeholder="Search patients by name, email, DOB…"
+            className="h-8 pl-8 text-xs"
+          />
+        </div>
+        <div className="mt-2 max-h-64 space-y-0.5 overflow-y-auto">
+          {results.length === 0 ? (
+            <p className="px-2 py-3 text-xs text-muted-foreground">No matching adult patient.</p>
+          ) : (
+            results.map((c) => (
+              <button
+                key={c.row.key}
+                onClick={() => {
+                  onPick(c);
+                  setOpen(false);
+                  setQ("");
+                }}
+                className="w-full rounded px-2 py-1.5 text-left text-xs hover:bg-muted"
+              >
+                <span className="block text-foreground">
+                  {c.row.name}
+                  {c.age !== null ? ` · ${c.age}` : ""}
+                </span>
+                <span className="block font-mono text-[10px] text-muted-foreground">
+                  {c.row.dob ?? "no dob"}
+                  {c.row.email ? ` · ${c.row.email}` : ""}
+                </span>
+              </button>
+            ))
+          )}
+        </div>
+      </PopoverContent>
+    </Popover>
+  );
+}
 
 /**
  * Release 2b guardian matching — review surface.
@@ -76,12 +155,44 @@ export default function DependentMatches({ rows }: { rows: ReconRow[] }) {
     return c;
   }, [matches, decisions]);
 
+  /** Every adult who can be attached by hand from the patient search box. */
+  const pool = useMemo(() => eligibleGuardianPool(rows), [rows]);
+  const poolByKey = useMemo(
+    () => new Map(pool.map((c) => [c.row.key, c])),
+    [pool],
+  );
+
+  /** Proposed candidates plus any patient staff attached manually. */
+  const candidatesFor = (m: DependentMatch): GuardianCandidate[] => {
+    const manual = (decisions[m.key]?.manualKeys ?? [])
+      .filter((k) => !m.candidates.some((c) => c.row.key === k))
+      .map((k) => poolByKey.get(k))
+      .filter((c): c is GuardianCandidate => Boolean(c));
+    return [...m.candidates, ...manual];
+  };
+
   /** A minor can have several guardians — both parents usually want access. */
   const chosenFor = (m: DependentMatch): GuardianCandidate[] => {
     const picked = decisions[m.key]?.guardianKeys;
-    if (picked) return m.candidates.filter((c) => picked.includes(c.row.key));
+    if (picked) return candidatesFor(m).filter((c) => picked.includes(c.row.key));
     return m.suggested;
   };
+
+  const attachGuardian = (m: DependentMatch, candidate: GuardianCandidate) =>
+    setDecisions((d) => {
+      const current = d[m.key];
+      const manualKeys = Array.from(
+        new Set([...(current?.manualKeys ?? []), candidate.row.key]),
+      );
+      const guardianKeys = Array.from(
+        new Set([
+          ...(current?.guardianKeys ?? m.suggested.map((c) => c.row.key)),
+          candidate.row.key,
+        ]),
+      );
+      return { ...d, [m.key]: { guardianKeys, manualKeys, confirmed: false } };
+    });
+
 
   const confirmedLinks: ConfirmedLink[] = useMemo(
     () =>
@@ -101,11 +212,15 @@ export default function DependentMatches({ rows }: { rows: ReconRow[] }) {
 
   const toggleGuardian = (m: DependentMatch, guardianKey: string) =>
     setDecisions((d) => {
-      const current = d[m.key]?.guardianKeys ?? m.suggested.map((c) => c.row.key);
+      const prev = d[m.key];
+      const current = prev?.guardianKeys ?? m.suggested.map((c) => c.row.key);
       const guardianKeys = current.includes(guardianKey)
         ? current.filter((k) => k !== guardianKey)
         : [...current, guardianKey];
-      return { ...d, [m.key]: { guardianKeys, confirmed: false } };
+      return {
+        ...d,
+        [m.key]: { guardianKeys, manualKeys: prev?.manualKeys, confirmed: false },
+      };
     });
 
   const toggleConfirm = (m: DependentMatch) =>
@@ -113,7 +228,14 @@ export default function DependentMatches({ rows }: { rows: ReconRow[] }) {
       const current = d[m.key];
       const guardianKeys = current?.guardianKeys ?? m.suggested.map((c) => c.row.key);
       if (!guardianKeys.length) return d;
-      return { ...d, [m.key]: { guardianKeys, confirmed: !current?.confirmed } };
+      return {
+        ...d,
+        [m.key]: {
+          guardianKeys,
+          manualKeys: current?.manualKeys,
+          confirmed: !current?.confirmed,
+        },
+      };
     });
 
   const FILTERS: { id: typeof filter; label: string; n: number }[] = [
@@ -187,6 +309,7 @@ export default function DependentMatches({ rows }: { rows: ReconRow[] }) {
             </TableHeader>
             <TableBody>
               {visible.map((m) => {
+                const all = candidatesFor(m);
                 const chosen = chosenFor(m);
                 const chosenKeys = chosen.map((c) => c.row.key);
                 const confirmed = Boolean(decisions[m.key]?.confirmed);
@@ -201,9 +324,9 @@ export default function DependentMatches({ rows }: { rows: ReconRow[] }) {
                     </TableCell>
                     <TableCell className="font-mono text-xs">{m.age ?? "—"}</TableCell>
                     <TableCell>
-                      {m.candidates.length ? (
+                      {all.length ? (
                         <div className="space-y-1.5">
-                          {m.candidates.map((c) => (
+                          {all.map((c) => (
                             <label
                               key={c.row.key}
                               className="flex items-start gap-2 text-xs text-foreground"
@@ -228,6 +351,13 @@ export default function DependentMatches({ rows }: { rows: ReconRow[] }) {
                           {m.blocker ?? "No candidate"}
                         </span>
                       )}
+                      <div className="mt-2">
+                        <GuardianSearch
+                          pool={pool}
+                          exclude={[m.minor.key, ...all.map((c) => c.row.key)]}
+                          onPick={(candidate) => attachGuardian(m, candidate)}
+                        />
+                      </div>
                     </TableCell>
                     <TableCell>
                       <Badge variant="outline" className={cn("text-[10px]", TONE[m.confidence])}>
