@@ -75,3 +75,18 @@ the member app and Cloud Functions must implement.
 3. Smoke matrix, per case: guardian sees child's labs; guardian does **not**
    see a hidden child item; a revoked guardian sees nothing; a
    `pending_adult_consent` guardian sees an empty section.
+
+## Non-patient guardians (`email_on_file`)
+
+Some minors have no parent in Hint or Elation. Staff attach those guardians by
+email from the roster panel, and the export carries them with:
+
+- `match_source = email_on_file`
+- `guardian_email` = the address to invite (the contact email on the child's chart, or one typed by staff)
+- `guardian_elation_id` / `guardian_hint_id` = empty — there is no chart to point at
+
+The control plane must provision these as an email-identified proxy: issue a
+portal invite to `guardian_email`, and on claim bind that uid as a proxy on the
+minor's record. Everything else (revocation, module visibility, audit) is
+identical to a patient guardian. The CSV now always includes a
+`guardian_email` column, also populated for patient guardians.
