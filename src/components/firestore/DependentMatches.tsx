@@ -265,15 +265,59 @@ export default function DependentMatches({ rows }: { rows: ReconRow[] }) {
           candidate.row.key,
         ]),
       );
-      return { ...d, [m.key]: { guardianKeys, manualKeys, confirmed: false } };
+      return {
+        ...d,
+        [m.key]: { guardianKeys, manualKeys, externals: current?.externals, confirmed: false },
+      };
     });
 
+  /** Non-patient guardians attached to this minor by email. */
+  const externalsFor = (m: DependentMatch): ExternalGuardian[] =>
+    decisions[m.key]?.externals ?? [];
+
+  const addExternal = (m: DependentMatch, guardian: ExternalGuardian) =>
+    setDecisions((d) => {
+      const current = d[m.key];
+      const email = guardian.email.toLowerCase();
+      const externals = [
+        ...(current?.externals ?? []).filter((g) => g.email.toLowerCase() !== email),
+        guardian,
+      ];
+      return {
+        ...d,
+        [m.key]: {
+          guardianKeys: current?.guardianKeys ?? m.suggested.map((c) => c.row.key),
+          manualKeys: current?.manualKeys,
+          externals,
+          confirmed: false,
+        },
+      };
+    });
+
+  const removeExternal = (m: DependentMatch, email: string) =>
+    setDecisions((d) => {
+      const current = d[m.key];
+      return {
+        ...d,
+        [m.key]: {
+          guardianKeys: current?.guardianKeys ?? m.suggested.map((c) => c.row.key),
+          manualKeys: current?.manualKeys,
+          externals: (current?.externals ?? []).filter(
+            (g) => g.email.toLowerCase() !== email.toLowerCase(),
+          ),
+          confirmed: false,
+        },
+      };
+    });
 
   const confirmedLinks: ConfirmedLink[] = useMemo(
     () =>
       matches.flatMap((m) => {
         if (!decisions[m.key]?.confirmed) return [];
-        return chosenFor(m).map((candidate) => toConfirmedLink(m, candidate));
+        return [
+          ...chosenFor(m).map((candidate) => toConfirmedLink(m, candidate)),
+          ...externalsFor(m).map((g) => toExternalLink(m, g)),
+        ];
       }),
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [matches, decisions],
