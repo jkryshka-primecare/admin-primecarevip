@@ -484,9 +484,14 @@ export default function ProvisionMissingDialog({
               <Button
                 variant="outline"
                 onClick={() => {
+                  // Keep the unresolved members selected so a manual Elation id
+                  // can be typed and retried without hunting for them again.
+                  const retry = new Set(
+                    outcomes.filter((o) => o.status === "unresolved").map((o) => o.key),
+                  );
                   setResult(null);
                   setSubmitted([]);
-                  setSelectedKeys(new Set());
+                  setSelectedKeys(retry);
                 }}
               >
                 Provision another batch
