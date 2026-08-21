@@ -146,12 +146,13 @@ export function buildExceptionLists(
     },
     {
       id: "portal_no_membership",
-      label: "Portal record, no active membership",
+      label: "Former members (access retained)",
       description:
-        "Has a portal record but no active Hint membership — lapsed or ended. Review for access removal; nothing is changed automatically.",
+        "Has a portal record but no active Hint membership. By policy, former patients keep read-only access to their records — access is never removed on membership lapse. Listed for visibility only.",
       blocking: false,
       rows: lapsed,
     },
+
   ];
 }
 
