@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { Baby, Check, Download, Mail, Search, UserPlus, X } from "lucide-react";
+import { Baby, Check, Download, IdCard, Mail, Search, UserPlus, X } from "lucide-react";
 
 import type { ReconRow } from "@/hooks/useMemberReconciliation";
 import {
@@ -17,6 +17,7 @@ import {
   type MatchConfidence,
 } from "@/lib/portal/dependents";
 import { downloadCsv } from "@/lib/portal/exceptions";
+import { resolveElationIds } from "@/lib/portal/elationResolve";
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -35,6 +36,7 @@ import {
 import { cn } from "@/lib/utils";
 
 const STORAGE_KEY = "pcvip.dependents.decisions.v2";
+const ELATION_IDS_KEY = "pcvip.dependents.elationIds.v1";
 const stamp = () => new Date().toISOString().slice(0, 10);
 
 const TONE: Record<MatchConfidence, string> = {
@@ -199,7 +201,7 @@ function GuardianSearch({
  * from this panel.
  */
 export default function DependentMatches({ rows }: { rows: ReconRow[] }) {
-  const matches = useMemo(() => buildDependentMatches(rows), [rows]);
+  const rawMatches = useMemo(() => buildDependentMatches(rows), [rows]);
   const [filter, setFilter] = useState<"all" | MatchConfidence | "confirmed">("all");
   const [decisions, setDecisions] = useState<Record<string, Decision>>(() => {
     try {
@@ -209,6 +211,17 @@ export default function DependentMatches({ rows }: { rows: ReconRow[] }) {
     }
   });
 
+  /** Elation ids looked up from Elation for minors Firestore doesn't know yet. */
+  const [elationIds, setElationIds] = useState<Record<string, string>>(() => {
+    try {
+      return JSON.parse(localStorage.getItem(ELATION_IDS_KEY) ?? "{}");
+    } catch {
+      return {};
+    }
+  });
+  const [resolveNotes, setResolveNotes] = useState<Record<string, string>>({});
+  const [resolving, setResolving] = useState<{ done: number; total: number } | null>(null);
+
   useEffect(() => {
     try {
       localStorage.setItem(STORAGE_KEY, JSON.stringify(decisions));
@@ -216,6 +229,54 @@ export default function DependentMatches({ rows }: { rows: ReconRow[] }) {
       /* storage unavailable — keep in-memory only */
     }
   }, [decisions]);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem(ELATION_IDS_KEY, JSON.stringify(elationIds));
+    } catch {
+      /* storage unavailable — keep in-memory only */
+    }
+  }, [elationIds]);
+
+  /** Minors carry the resolved Elation id so the export and UI both see it. */
+  const matches = useMemo(
+    () =>
+      rawMatches.map((m) =>
+        !m.minor.elationId && elationIds[m.key]
+          ? { ...m, minor: { ...m.minor, elationId: elationIds[m.key] } }
+          : m,
+      ),
+    [rawMatches, elationIds],
+  );
+
+  const unresolved = useMemo(
+    () => matches.filter((m) => !m.minor.elationId && m.minor.dob),
+    [matches],
+  );
+
+  const runResolve = async () => {
+    if (!unresolved.length || resolving) return;
+    setResolving({ done: 0, total: unresolved.length });
+    const outcomes = await resolveElationIds(
+      unresolved.map((m) => ({
+        key: m.key,
+        firstName: m.minor.firstName,
+        lastName: m.minor.lastName,
+        dob: m.minor.dob,
+      })),
+      (done, total) => setResolving({ done, total }),
+    );
+    const ids: Record<string, string> = {};
+    const notes: Record<string, string> = {};
+    for (const [key, o] of Object.entries(outcomes)) {
+      if (o.status === "resolved") ids[key] = o.elationId;
+      else notes[key] = o.reason;
+    }
+    setElationIds((prev) => ({ ...prev, ...ids }));
+    setResolveNotes((prev) => ({ ...prev, ...notes }));
+    setResolving(null);
+  };
+
 
   const counts = useMemo(() => {
     const c = { high: 0, medium: 0, ambiguous: 0, none: 0, confirmed: 0 };
@@ -391,17 +452,32 @@ export default function DependentMatches({ rows }: { rows: ReconRow[] }) {
               a link becomes real once staff confirm it and the control plane applies it.
             </p>
           </div>
-          <Button
-            variant="outline"
-            size="sm"
-            disabled={!confirmedLinks.length}
-            onClick={() =>
-              downloadCsv(`guardian-links-${stamp()}.csv`, linksToCsv(confirmedLinks))
-            }
-          >
-            <Download className="mr-1 h-3.5 w-3.5" />
-            Export {confirmedLinks.length} confirmed
-          </Button>
+          <div className="flex flex-wrap items-center gap-2">
+            <Button
+              variant="outline"
+              size="sm"
+              disabled={!unresolved.length || Boolean(resolving)}
+              onClick={runResolve}
+              title="Looks up each minor's chart in Elation by first name + last name + DOB"
+            >
+              <IdCard className="mr-1 h-3.5 w-3.5" />
+              {resolving
+                ? `Resolving ${resolving.done}/${resolving.total}…`
+                : `Resolve ${unresolved.length} Elation IDs`}
+            </Button>
+            <Button
+              variant="outline"
+              size="sm"
+              disabled={!confirmedLinks.length}
+              onClick={() =>
+                downloadCsv(`guardian-links-${stamp()}.csv`, linksToCsv(confirmedLinks))
+              }
+            >
+              <Download className="mr-1 h-3.5 w-3.5" />
+              Export {confirmedLinks.length} confirmed
+            </Button>
+          </div>
+
         </div>
       </CardHeader>
 
@@ -451,6 +527,11 @@ export default function DependentMatches({ rows }: { rows: ReconRow[] }) {
                         {m.minor.dob ?? "no dob"}
                         {m.minor.elationId ? ` · ${m.minor.elationId}` : ""}
                       </p>
+                      {!m.minor.elationId && resolveNotes[m.key] ? (
+                        <p className="text-[11px] text-destructive">
+                          Elation: {resolveNotes[m.key]}
+                        </p>
+                      ) : null}
                     </TableCell>
                     <TableCell className="font-mono text-xs">{m.age ?? "—"}</TableCell>
                     <TableCell>
