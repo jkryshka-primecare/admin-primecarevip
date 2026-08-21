@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { AlertTriangle, Download, Loader2, UserPlus } from "lucide-react";
 
 import { useAuth } from "@/hooks/useAuth";
@@ -29,6 +29,7 @@ import { cn } from "@/lib/utils";
 
 /** Matches MAX_PROVISION_BATCH in the portal-admin edge function. */
 const MAX_BATCH = 300;
+const ELATION_ID_STORAGE_KEY = "pcvip.provision.elationIds";
 
 /** Size of the recommended first validation run against production. */
 const VALIDATION_BATCH = 5;
@@ -253,7 +254,6 @@ export default function ProvisionMissingDialog({
           setSubmitted([]);
           setReason("");
           setSelectedKeys(new Set());
-          setElationIds({});
 
         }
         onOpenChange(next);
