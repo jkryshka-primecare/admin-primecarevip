@@ -1,15 +1,18 @@
 import { useEffect, useMemo, useState } from "react";
-import { Baby, Check, Download, Search, UserPlus, X } from "lucide-react";
+import { Baby, Check, Download, Mail, Search, UserPlus, X } from "lucide-react";
 
 import type { ReconRow } from "@/hooks/useMemberReconciliation";
 import {
   buildDependentMatches,
   CONFIDENCE_LABEL,
   eligibleGuardianPool,
+  isValidEmail,
   linksToCsv,
   toConfirmedLink,
+  toExternalLink,
   type ConfirmedLink,
   type DependentMatch,
+  type ExternalGuardian,
   type GuardianCandidate,
   type MatchConfidence,
 } from "@/lib/portal/dependents";
