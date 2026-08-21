@@ -41,3 +41,12 @@ Every read page reaches one of these three shared surfaces (`ClinicalScreen`, `R
 - Row 5/6 (module off/on): the affected page shows the calm turned-off card; no red, no Try again.
 - Row 9 (suspend): full-screen "Portal access is paused"; other handlers' 403 `ACCESS_SUSPENDED` land on
   the same copy inside each page. Restore returns to normal on reload.
+
+## Cutover status (2026-08-21)
+
+Both patches are stacked and opened as **draft PR #437** — branch
+`portal-cutover/member-artifact-contract`. Only `artifacts/web-member/src` changes;
+backend, IAM, indexes and workflows untouched. `LabResults.jsx` and `Imaging.jsx`
+were hand-merged where the two patches overlap; all changed modules syntax-checked
+with esbuild. Ready for review → mark ready → merge → deploy, then run the smoke
+matrix in `artifact-read-contract.README.md` against the Test Kieffer fixture.
