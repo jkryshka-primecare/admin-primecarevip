@@ -26,6 +26,8 @@ export type HintMember = {
   membershipStatus: HintMemberStatus;
   /** "primary" | "spouse" | "child" … as reported by Hint. */
   memberType: string | null;
+  /** Hint membership (household) id — the contract a whole family shares. */
+  membershipId: string | null;
   planName: string | null;
   joinedPracticeDate: string | null;
 };
@@ -40,7 +42,11 @@ type HintPatient = {
   membership_status?: string | null;
   joined_practice_date?: string | null;
   phones?: { number?: string }[];
-  memberships?: { member_type?: string | null; plan?: { name?: string } | null }[];
+  memberships?: {
+    id?: string | number | null;
+    member_type?: string | null;
+    plan?: { name?: string } | null;
+  }[];
 };
 
 type HintEnvelope = {
@@ -90,6 +96,7 @@ function toMember(p: HintPatient): HintMember {
     phone: p.phones?.[0]?.number ?? null,
     membershipStatus: normalizeStatus(p.membership_status),
     memberType: membership?.member_type ?? null,
+    membershipId: membership?.id != null ? String(membership.id) : null,
     planName: membership?.plan?.name ?? null,
     joinedPracticeDate: p.joined_practice_date ?? null,
   };
