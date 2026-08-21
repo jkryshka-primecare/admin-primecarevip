@@ -235,6 +235,8 @@ export default function ProvisionMissingDialog({
           setSubmitted([]);
           setReason("");
           setSelectedKeys(new Set());
+          setElationIds({});
+
         }
         onOpenChange(next);
       }}
