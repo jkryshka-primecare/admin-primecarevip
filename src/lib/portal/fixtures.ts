@@ -15,7 +15,27 @@ export function isTestFixture(elationId: unknown): boolean {
   return id.length > 0 && TEST_FIXTURE_ELATION_IDS.has(id);
 }
 
+/**
+ * Staff-created probe records live in Hint under names that start with
+ * "Health check" (e.g. "Health check 08-19"). They are not people, so they are
+ * excluded from reconciliation counts and can never be provisioned.
+ */
+export function isTestFixtureName(...parts: Array<unknown>): boolean {
+  const name = parts
+    .map((p) => String(p ?? "").trim())
+    .filter(Boolean)
+    .join(" ")
+    .toLowerCase();
+  return name.startsWith("health check") || name.startsWith("healthcheck");
+}
+
 /** Firestore docs carry a `_testSeed` marker; trust it as well as the id list. */
 export function isFixtureDoc(doc: Record<string, unknown>): boolean {
-  return doc._testSeed === true || isTestFixture(doc.id);
+  return (
+    doc._testSeed === true ||
+    isTestFixture(doc.id) ||
+    isTestFixtureName(doc.firstName, doc.lastName) ||
+    isTestFixtureName(doc.name)
+  );
 }
+
