@@ -44,9 +44,12 @@ Every read page reaches one of these three shared surfaces (`ClinicalScreen`, `R
 
 ## Cutover status (2026-08-21)
 
-Both patches are stacked and opened as **draft PR #437** — branch
-`portal-cutover/member-artifact-contract`. Only `artifacts/web-member/src` changes;
+Both patches are stacked in **PR #437** — branch `portal-cutover/member-artifact-contract`,
+now **ready for review** (approved revision `dc99165`: `module_off` renders byte-identical to a
+genuinely empty section — no dedicated notice anywhere). Only `artifacts/web-member/src` changes;
 backend, IAM, indexes and workflows untouched. `LabResults.jsx` and `Imaging.jsx`
 were hand-merged where the two patches overlap; all changed modules syntax-checked
-with esbuild. Ready for review → mark ready → merge → deploy, then run the smoke
-matrix in `artifact-read-contract.README.md` against the Test Kieffer fixture.
+with esbuild.
+
+Next: merge → deploy, then run the smoke matrix in `artifact-read-contract.README.md`
+against the Test Kieffer fixture (suspend/restore, module off/on, hidden item, expired link).
