@@ -79,6 +79,9 @@ export default function ProvisionMissingDialog({
   const [reason, setReason] = useState("");
   const [adultsOnly, setAdultsOnly] = useState(true);
   const [selectedKeys, setSelectedKeys] = useState<Set<string>>(new Set());
+  /** Staff-entered Elation chart ids, keyed by roster row, for manual matches. */
+  const [elationIds, setElationIds] = useState<Record<string, string>>({});
+
   const [result, setResult] = useState<ProvisionResult | null>(null);
   const [submitted, setSubmitted] = useState<ReconRow[]>([]);
 
