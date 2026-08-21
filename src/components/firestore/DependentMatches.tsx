@@ -360,9 +360,19 @@ export default function DependentMatches({ rows }: { rows: ReconRow[] }) {
                       </div>
                     </TableCell>
                     <TableCell>
-                      <Badge variant="outline" className={cn("text-[10px]", TONE[m.confidence])}>
-                        {CONFIDENCE_LABEL[m.confidence]}
-                      </Badge>
+                      {confirmed ? (
+                        <Badge
+                          variant="outline"
+                          className="text-[10px] border-success/40 bg-success/10 text-success"
+                        >
+                          Confirmed
+                        </Badge>
+                      ) : (
+                        <Badge variant="outline" className={cn("text-[10px]", TONE[m.confidence])}>
+                          {CONFIDENCE_LABEL[m.confidence]}
+                        </Badge>
+                      )}
+
                       {chosen.length > 0 && (
                         <p className="mt-1 text-[11px] text-muted-foreground">
                           {chosen.length} guardian{chosen.length === 1 ? "" : "s"} selected
