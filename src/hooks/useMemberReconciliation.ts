@@ -1,7 +1,7 @@
 import { useMemo } from "react";
 import { useHintRoster, type HintMember } from "@/hooks/useHintRoster";
 import { useFirestoreList, type FirestoreDoc } from "@/hooks/useFirestore";
-import { isTestFixture } from "@/lib/portal/fixtures";
+import { isTestFixture, isFixtureDoc, isTestFixtureName } from "@/lib/portal/fixtures";
 
 /**
  * READ-ONLY reconciliation between the Hint membership roster (source of truth
@@ -129,7 +129,12 @@ export function useMemberReconciliation(enabled = true) {
     // Smoke-test fixtures are real documents in production. They must never
     // appear in a count that a bulk write is sized against.
     return out
-      .filter((r) => !isTestFixture(r.elationId))
+      .filter(
+        (r) =>
+          !isTestFixture(r.elationId) &&
+          !isTestFixtureName(r.firstName, r.lastName) &&
+          !isTestFixtureName(r.name),
+      )
       .sort((a, b) => a.name.localeCompare(b.name));
   }, [hint.members, firestore.docs]);
 
@@ -156,7 +161,7 @@ export function useMemberReconciliation(enabled = true) {
   const totals = useMemo(() => {
     const activeMembers =
       counts.member_active + counts.member_invited + counts.member_no_portal;
-    const fixtures = firestore.docs.filter((d) => isTestFixture(d.id)).length;
+    const fixtures = firestore.docs.filter((d) => isFixtureDoc(d as Record<string, unknown>)).length;
     return {
       activeMembers,
       withPortal: counts.member_active + counts.member_invited,
