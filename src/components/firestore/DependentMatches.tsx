@@ -149,11 +149,15 @@ export default function DependentMatches({ rows }: { rows: ReconRow[] }) {
   const counts = useMemo(() => {
     const c = { high: 0, medium: 0, ambiguous: 0, none: 0, confirmed: 0 };
     for (const m of matches) {
+      if (decisions[m.key]?.confirmed) {
+        c.confirmed += 1;
+        continue; // a confirmed minor no longer needs a decision
+      }
       c[m.confidence] += 1;
-      if (decisions[m.key]?.confirmed) c.confirmed += 1;
     }
     return c;
   }, [matches, decisions]);
+
 
   /** Every adult who can be attached by hand from the patient search box. */
   const pool = useMemo(() => eligibleGuardianPool(rows), [rows]);
@@ -207,8 +211,10 @@ export default function DependentMatches({ rows }: { rows: ReconRow[] }) {
   const visible = matches.filter((m) => {
     if (filter === "all") return true;
     if (filter === "confirmed") return Boolean(decisions[m.key]?.confirmed);
+    if (decisions[m.key]?.confirmed) return false;
     return m.confidence === filter;
   });
+
 
   const toggleGuardian = (m: DependentMatch, guardianKey: string) =>
     setDecisions((d) => {
@@ -360,9 +366,19 @@ export default function DependentMatches({ rows }: { rows: ReconRow[] }) {
                       </div>
                     </TableCell>
                     <TableCell>
-                      <Badge variant="outline" className={cn("text-[10px]", TONE[m.confidence])}>
-                        {CONFIDENCE_LABEL[m.confidence]}
-                      </Badge>
+                      {confirmed ? (
+                        <Badge
+                          variant="outline"
+                          className="text-[10px] border-success/40 bg-success/10 text-success"
+                        >
+                          Confirmed
+                        </Badge>
+                      ) : (
+                        <Badge variant="outline" className={cn("text-[10px]", TONE[m.confidence])}>
+                          {CONFIDENCE_LABEL[m.confidence]}
+                        </Badge>
+                      )}
+
                       {chosen.length > 0 && (
                         <p className="mt-1 text-[11px] text-muted-foreground">
                           {chosen.length} guardian{chosen.length === 1 ? "" : "s"} selected
