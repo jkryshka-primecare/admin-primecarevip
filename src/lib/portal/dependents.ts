@@ -19,7 +19,7 @@ import type { ReconRow } from "@/hooks/useMemberReconciliation";
 import { ADULT_AGE, ageFromDob } from "@/lib/portal/exceptions";
 import { isTestFixture, isTestFixtureName } from "@/lib/portal/fixtures";
 
-export type MatchSource = "hint_household" | "inferred_email_name";
+export type MatchSource = "hint_household" | "inferred_email_name" | "manual_search";
 
 export type MatchConfidence =
   | "high" // adult(s) on the same Hint household
