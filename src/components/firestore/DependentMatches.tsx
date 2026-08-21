@@ -481,11 +481,42 @@ export default function DependentMatches({ rows }: { rows: ReconRow[] }) {
                           {m.blocker ?? "No candidate"}
                         </span>
                       )}
-                      <div className="mt-2">
+
+                      {externals.length > 0 && (
+                        <div className="mt-1.5 space-y-1">
+                          {externals.map((g) => (
+                            <div
+                              key={g.email}
+                              className="flex items-start gap-2 text-xs text-foreground"
+                            >
+                              <Mail className="mt-0.5 h-3 w-3 shrink-0 text-accent" />
+                              <span className="min-w-0">
+                                {g.name || g.email}
+                                <span className="block truncate text-[11px] text-muted-foreground">
+                                  Non-patient guardian · invited at {g.email}
+                                </span>
+                              </span>
+                              <button
+                                onClick={() => removeExternal(m, g.email)}
+                                className="text-muted-foreground hover:text-destructive"
+                                aria-label={`Remove ${g.email}`}
+                              >
+                                <X className="h-3 w-3" />
+                              </button>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+
+                      <div className="mt-2 flex flex-wrap gap-1.5">
                         <GuardianSearch
                           pool={pool}
                           exclude={[m.minor.key, ...all.map((c) => c.row.key)]}
                           onPick={(candidate) => attachGuardian(m, candidate)}
+                        />
+                        <EmailGuardianAttach
+                          defaultEmail={m.minor.email}
+                          onAdd={(guardian) => addExternal(m, guardian)}
                         />
                       </div>
                     </TableCell>
