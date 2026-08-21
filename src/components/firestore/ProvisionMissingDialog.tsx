@@ -173,14 +173,31 @@ export default function ProvisionMissingDialog({
       return;
     }
     const batch = selected;
-    const members: ProvisionMember[] = batch.map((r) => ({
-      hintId: r.hintId as string,
-      firstName: r.firstName,
-      lastName: r.lastName,
-      email: r.email,
-      dob: r.dob as string,
-      phone: r.phone,
-    }));
+    const bad = batch.find((r) => {
+      const id = (elationIds[r.key] ?? "").trim();
+      return id.length > 0 && !/^\d{6,25}$/.test(id);
+    });
+    if (bad) {
+      toast({
+        title: "Invalid Elation patient id",
+        description: `${bad.name}: the Elation Patient ID must be digits only, copied from the chart.`,
+        variant: "destructive",
+      });
+      return;
+    }
+    const members: ProvisionMember[] = batch.map((r) => {
+      const id = (elationIds[r.key] ?? "").trim();
+      return {
+        hintId: r.hintId as string,
+        firstName: r.firstName,
+        lastName: r.lastName,
+        email: r.email,
+        dob: r.dob as string,
+        phone: r.phone,
+        ...(id ? { elationPatientId: id } : {}),
+      };
+    });
+
 
     provision
       .mutateAsync({ members, reason: reason.trim() })
