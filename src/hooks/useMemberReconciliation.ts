@@ -125,6 +125,7 @@ export function useMemberReconciliation(enabled = true) {
         membershipStatus: "none",
         portalStatus: String(doc.status ?? "unknown"),
         memberType: null,
+        membershipId: null,
         bucket: "portal_no_membership",
       });
     }
