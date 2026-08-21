@@ -19,7 +19,23 @@ import type { ReconRow } from "@/hooks/useMemberReconciliation";
 import { ADULT_AGE, ageFromDob } from "@/lib/portal/exceptions";
 import { isTestFixture, isTestFixtureName } from "@/lib/portal/fixtures";
 
-export type MatchSource = "hint_household" | "inferred_email_name" | "manual_search";
+export type MatchSource =
+  | "hint_household"
+  | "inferred_email_name"
+  | "manual_search"
+  /** Guardian isn't a patient — identified only by the email on the child's chart. */
+  | "email_on_file";
+
+/**
+ * A guardian who exists nowhere in Hint or Elation. Some children's parents
+ * never joined the practice, so the only handle we have on them is the contact
+ * email on the child's record. The portal invites that address directly.
+ */
+export type ExternalGuardian = {
+  email: string;
+  /** Optional display name staff can type in; falls back to the email. */
+  name?: string;
+};
 
 export type MatchConfidence =
   | "high" // adult(s) on the same Hint household
@@ -221,6 +237,7 @@ export type ConfirmedLink = {
   minorElationId: string | null;
   minorHintId: string | null;
   guardianName: string;
+  guardianEmail: string | null;
   guardianElationId: string | null;
   guardianHintId: string | null;
   source: MatchSource;
@@ -238,11 +255,39 @@ export function toConfirmedLink(
     minorElationId: match.minor.elationId,
     minorHintId: match.minor.hintId,
     guardianName: candidate.row.name,
+    guardianEmail: candidate.row.email,
     guardianElationId: candidate.row.elationId,
     guardianHintId: candidate.row.hintId,
     source: candidate.source,
     confirmedAt: new Date().toISOString(),
   };
+}
+
+/**
+ * Link for a guardian who has no chart anywhere. The portal provisions the
+ * proxy against the email address alone — there is no patient to point at.
+ */
+export function toExternalLink(
+  match: DependentMatch,
+  guardian: ExternalGuardian,
+): ConfirmedLink {
+  return {
+    minorKey: match.key,
+    minorName: match.minor.name,
+    minorDob: match.minor.dob,
+    minorElationId: match.minor.elationId,
+    minorHintId: match.minor.hintId,
+    guardianName: guardian.name?.trim() || guardian.email,
+    guardianEmail: guardian.email,
+    guardianElationId: null,
+    guardianHintId: null,
+    source: "email_on_file",
+    confirmedAt: new Date().toISOString(),
+  };
+}
+
+export function isValidEmail(v: string): boolean {
+  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(v.trim());
 }
 
 export function linksToCsv(links: ConfirmedLink[]): string {
@@ -252,6 +297,7 @@ export function linksToCsv(links: ConfirmedLink[]): string {
     "minor_elation_id",
     "minor_hint_id",
     "guardian_name",
+    "guardian_email",
     "guardian_elation_id",
     "guardian_hint_id",
     "match_source",
@@ -267,6 +313,7 @@ export function linksToCsv(links: ConfirmedLink[]): string {
         l.minorElationId,
         l.minorHintId,
         l.guardianName,
+        l.guardianEmail,
         l.guardianElationId,
         l.guardianHintId,
         l.source,

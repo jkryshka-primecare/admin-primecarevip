@@ -1,15 +1,18 @@
 import { useEffect, useMemo, useState } from "react";
-import { Baby, Check, Download, Search, UserPlus, X } from "lucide-react";
+import { Baby, Check, Download, Mail, Search, UserPlus, X } from "lucide-react";
 
 import type { ReconRow } from "@/hooks/useMemberReconciliation";
 import {
   buildDependentMatches,
   CONFIDENCE_LABEL,
   eligibleGuardianPool,
+  isValidEmail,
   linksToCsv,
   toConfirmedLink,
+  toExternalLink,
   type ConfirmedLink,
   type DependentMatch,
+  type ExternalGuardian,
   type GuardianCandidate,
   type MatchConfidence,
 } from "@/lib/portal/dependents";
@@ -41,7 +44,75 @@ const TONE: Record<MatchConfidence, string> = {
   none: "bg-muted text-muted-foreground border-border",
 };
 
-type Decision = { guardianKeys: string[]; confirmed: boolean; manualKeys?: string[] };
+type Decision = {
+  guardianKeys: string[];
+  confirmed: boolean;
+  manualKeys?: string[];
+  /** Guardians who aren't patients — invited by email address only. */
+  externals?: ExternalGuardian[];
+};
+
+/** Attach a guardian who has no chart: parent email on the child's record. */
+function EmailGuardianAttach({
+  defaultEmail,
+  onAdd,
+}: {
+  defaultEmail: string | null;
+  onAdd: (guardian: ExternalGuardian) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const [email, setEmail] = useState(defaultEmail ?? "");
+  const [name, setName] = useState("");
+  const valid = isValidEmail(email);
+
+  return (
+    <Popover
+      open={open}
+      onOpenChange={(o) => {
+        setOpen(o);
+        if (o) setEmail(defaultEmail ?? "");
+      }}
+    >
+      <PopoverTrigger asChild>
+        <Button variant="outline" size="sm" className="h-7 text-[11px]">
+          <Mail className="mr-1 h-3 w-3" />
+          Attach by email
+        </Button>
+      </PopoverTrigger>
+      <PopoverContent align="start" className="w-80 space-y-2 p-3">
+        <p className="text-[11px] text-muted-foreground">
+          Use when the parent isn't a patient. The portal invites this address and proxies it
+          into the child's record.
+        </p>
+        <Input
+          autoFocus
+          value={email}
+          onChange={(e) => setEmail(e.target.value)}
+          placeholder="parent@example.com"
+          className="h-8 text-xs"
+        />
+        <Input
+          value={name}
+          onChange={(e) => setName(e.target.value)}
+          placeholder="Guardian name (optional)"
+          className="h-8 text-xs"
+        />
+        <Button
+          size="sm"
+          className="w-full"
+          disabled={!valid}
+          onClick={() => {
+            onAdd({ email: email.trim(), name: name.trim() || undefined });
+            setOpen(false);
+            setName("");
+          }}
+        >
+          Attach guardian
+        </Button>
+      </PopoverContent>
+    </Popover>
+  );
+}
 
 /** Searchable patient picker for minors the heuristics couldn't match. */
 function GuardianSearch({
@@ -194,15 +265,59 @@ export default function DependentMatches({ rows }: { rows: ReconRow[] }) {
           candidate.row.key,
         ]),
       );
-      return { ...d, [m.key]: { guardianKeys, manualKeys, confirmed: false } };
+      return {
+        ...d,
+        [m.key]: { guardianKeys, manualKeys, externals: current?.externals, confirmed: false },
+      };
     });
 
+  /** Non-patient guardians attached to this minor by email. */
+  const externalsFor = (m: DependentMatch): ExternalGuardian[] =>
+    decisions[m.key]?.externals ?? [];
+
+  const addExternal = (m: DependentMatch, guardian: ExternalGuardian) =>
+    setDecisions((d) => {
+      const current = d[m.key];
+      const email = guardian.email.toLowerCase();
+      const externals = [
+        ...(current?.externals ?? []).filter((g) => g.email.toLowerCase() !== email),
+        guardian,
+      ];
+      return {
+        ...d,
+        [m.key]: {
+          guardianKeys: current?.guardianKeys ?? m.suggested.map((c) => c.row.key),
+          manualKeys: current?.manualKeys,
+          externals,
+          confirmed: false,
+        },
+      };
+    });
+
+  const removeExternal = (m: DependentMatch, email: string) =>
+    setDecisions((d) => {
+      const current = d[m.key];
+      return {
+        ...d,
+        [m.key]: {
+          guardianKeys: current?.guardianKeys ?? m.suggested.map((c) => c.row.key),
+          manualKeys: current?.manualKeys,
+          externals: (current?.externals ?? []).filter(
+            (g) => g.email.toLowerCase() !== email.toLowerCase(),
+          ),
+          confirmed: false,
+        },
+      };
+    });
 
   const confirmedLinks: ConfirmedLink[] = useMemo(
     () =>
       matches.flatMap((m) => {
         if (!decisions[m.key]?.confirmed) return [];
-        return chosenFor(m).map((candidate) => toConfirmedLink(m, candidate));
+        return [
+          ...chosenFor(m).map((candidate) => toConfirmedLink(m, candidate)),
+          ...externalsFor(m).map((g) => toExternalLink(m, g)),
+        ];
       }),
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [matches, decisions],
@@ -225,7 +340,12 @@ export default function DependentMatches({ rows }: { rows: ReconRow[] }) {
         : [...current, guardianKey];
       return {
         ...d,
-        [m.key]: { guardianKeys, manualKeys: prev?.manualKeys, confirmed: false },
+        [m.key]: {
+          guardianKeys,
+          manualKeys: prev?.manualKeys,
+          externals: prev?.externals,
+          confirmed: false,
+        },
       };
     });
 
@@ -233,12 +353,14 @@ export default function DependentMatches({ rows }: { rows: ReconRow[] }) {
     setDecisions((d) => {
       const current = d[m.key];
       const guardianKeys = current?.guardianKeys ?? m.suggested.map((c) => c.row.key);
-      if (!guardianKeys.length) return d;
+      const externals = current?.externals ?? [];
+      if (!guardianKeys.length && !externals.length) return d;
       return {
         ...d,
         [m.key]: {
           guardianKeys,
           manualKeys: current?.manualKeys,
+          externals,
           confirmed: !current?.confirmed,
         },
       };
@@ -319,6 +441,8 @@ export default function DependentMatches({ rows }: { rows: ReconRow[] }) {
                 const chosen = chosenFor(m);
                 const chosenKeys = chosen.map((c) => c.row.key);
                 const confirmed = Boolean(decisions[m.key]?.confirmed);
+                const externals = externalsFor(m);
+                const totalGuardians = chosen.length + externals.length;
                 return (
                   <TableRow key={m.key} className={cn(confirmed && "bg-success/5")}>
                     <TableCell>
@@ -357,11 +481,42 @@ export default function DependentMatches({ rows }: { rows: ReconRow[] }) {
                           {m.blocker ?? "No candidate"}
                         </span>
                       )}
-                      <div className="mt-2">
+
+                      {externals.length > 0 && (
+                        <div className="mt-1.5 space-y-1">
+                          {externals.map((g) => (
+                            <div
+                              key={g.email}
+                              className="flex items-start gap-2 text-xs text-foreground"
+                            >
+                              <Mail className="mt-0.5 h-3 w-3 shrink-0 text-accent" />
+                              <span className="min-w-0">
+                                {g.name || g.email}
+                                <span className="block truncate text-[11px] text-muted-foreground">
+                                  Non-patient guardian · invited at {g.email}
+                                </span>
+                              </span>
+                              <button
+                                onClick={() => removeExternal(m, g.email)}
+                                className="text-muted-foreground hover:text-destructive"
+                                aria-label={`Remove ${g.email}`}
+                              >
+                                <X className="h-3 w-3" />
+                              </button>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+
+                      <div className="mt-2 flex flex-wrap gap-1.5">
                         <GuardianSearch
                           pool={pool}
                           exclude={[m.minor.key, ...all.map((c) => c.row.key)]}
                           onPick={(candidate) => attachGuardian(m, candidate)}
+                        />
+                        <EmailGuardianAttach
+                          defaultEmail={m.minor.email}
+                          onAdd={(guardian) => addExternal(m, guardian)}
                         />
                       </div>
                     </TableCell>
@@ -379,9 +534,9 @@ export default function DependentMatches({ rows }: { rows: ReconRow[] }) {
                         </Badge>
                       )}
 
-                      {chosen.length > 0 && (
+                      {totalGuardians > 0 && (
                         <p className="mt-1 text-[11px] text-muted-foreground">
-                          {chosen.length} guardian{chosen.length === 1 ? "" : "s"} selected
+                          {totalGuardians} guardian{totalGuardians === 1 ? "" : "s"} selected
                         </p>
                       )}
                     </TableCell>
@@ -389,7 +544,7 @@ export default function DependentMatches({ rows }: { rows: ReconRow[] }) {
                       <Button
                         variant={confirmed ? "secondary" : "outline"}
                         size="sm"
-                        disabled={!chosen.length}
+                        disabled={!totalGuardians}
                         onClick={() => toggleConfirm(m)}
                       >
                         {confirmed ? (
