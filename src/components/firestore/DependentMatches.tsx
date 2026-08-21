@@ -212,11 +212,15 @@ export default function DependentMatches({ rows }: { rows: ReconRow[] }) {
 
   const toggleGuardian = (m: DependentMatch, guardianKey: string) =>
     setDecisions((d) => {
-      const current = d[m.key]?.guardianKeys ?? m.suggested.map((c) => c.row.key);
+      const prev = d[m.key];
+      const current = prev?.guardianKeys ?? m.suggested.map((c) => c.row.key);
       const guardianKeys = current.includes(guardianKey)
         ? current.filter((k) => k !== guardianKey)
         : [...current, guardianKey];
-      return { ...d, [m.key]: { guardianKeys, confirmed: false } };
+      return {
+        ...d,
+        [m.key]: { guardianKeys, manualKeys: prev?.manualKeys, confirmed: false },
+      };
     });
 
   const toggleConfirm = (m: DependentMatch) =>
@@ -224,7 +228,14 @@ export default function DependentMatches({ rows }: { rows: ReconRow[] }) {
       const current = d[m.key];
       const guardianKeys = current?.guardianKeys ?? m.suggested.map((c) => c.row.key);
       if (!guardianKeys.length) return d;
-      return { ...d, [m.key]: { guardianKeys, confirmed: !current?.confirmed } };
+      return {
+        ...d,
+        [m.key]: {
+          guardianKeys,
+          manualKeys: current?.manualKeys,
+          confirmed: !current?.confirmed,
+        },
+      };
     });
 
   const FILTERS: { id: typeof filter; label: string; n: number }[] = [
