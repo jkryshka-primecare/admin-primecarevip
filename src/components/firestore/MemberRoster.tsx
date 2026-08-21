@@ -33,7 +33,7 @@ const FILTERS: { id: Filter; label: string }[] = [
   { id: "member_active", label: "Portal active" },
   { id: "member_invited", label: "Invited" },
   { id: "member_no_portal", label: "No portal record" },
-  { id: "portal_no_membership", label: "No active membership" },
+  { id: "portal_no_membership", label: "Former member" },
 ];
 
 const BUCKET_TONE: Record<ReconBucket, string> = {
