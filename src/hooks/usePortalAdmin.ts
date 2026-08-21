@@ -265,7 +265,10 @@ export type ProvisionMember = {
   email: string | null;
   dob: string;
   phone: string | null;
+  /** Manual Elation chart id, supplied when automatic matching is inconclusive. */
+  elationPatientId?: string;
 };
+
 
 export type ProvisionResult = {
   created: { hintId: string; elationPatientId: string; name?: string }[];

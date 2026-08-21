@@ -20,7 +20,9 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
+import { Input } from "@/components/ui/input";
 import { Switch } from "@/components/ui/switch";
+
 import { Textarea } from "@/components/ui/textarea";
 import { toast } from "@/hooks/use-toast";
 import { cn } from "@/lib/utils";
@@ -79,6 +81,9 @@ export default function ProvisionMissingDialog({
   const [reason, setReason] = useState("");
   const [adultsOnly, setAdultsOnly] = useState(true);
   const [selectedKeys, setSelectedKeys] = useState<Set<string>>(new Set());
+  /** Staff-entered Elation chart ids, keyed by roster row, for manual matches. */
+  const [elationIds, setElationIds] = useState<Record<string, string>>({});
+
   const [result, setResult] = useState<ProvisionResult | null>(null);
   const [submitted, setSubmitted] = useState<ReconRow[]>([]);
 
@@ -173,14 +178,31 @@ export default function ProvisionMissingDialog({
       return;
     }
     const batch = selected;
-    const members: ProvisionMember[] = batch.map((r) => ({
-      hintId: r.hintId as string,
-      firstName: r.firstName,
-      lastName: r.lastName,
-      email: r.email,
-      dob: r.dob as string,
-      phone: r.phone,
-    }));
+    const bad = batch.find((r) => {
+      const id = (elationIds[r.key] ?? "").trim();
+      return id.length > 0 && !/^\d{6,25}$/.test(id);
+    });
+    if (bad) {
+      toast({
+        title: "Invalid Elation patient id",
+        description: `${bad.name}: the Elation Patient ID must be digits only, copied from the chart.`,
+        variant: "destructive",
+      });
+      return;
+    }
+    const members: ProvisionMember[] = batch.map((r) => {
+      const id = (elationIds[r.key] ?? "").trim();
+      return {
+        hintId: r.hintId as string,
+        firstName: r.firstName,
+        lastName: r.lastName,
+        email: r.email,
+        dob: r.dob as string,
+        phone: r.phone,
+        ...(id ? { elationPatientId: id } : {}),
+      };
+    });
+
 
     provision
       .mutateAsync({ members, reason: reason.trim() })
@@ -213,6 +235,8 @@ export default function ProvisionMissingDialog({
           setSubmitted([]);
           setReason("");
           setSelectedKeys(new Set());
+          setElationIds({});
+
         }
         onOpenChange(next);
       }}
@@ -332,6 +356,13 @@ export default function ProvisionMissingDialog({
               </span>
             </div>
 
+            <p className="text-xs text-muted-foreground">
+              For anyone that comes back <span className="font-medium">unresolved</span>, open the
+              chart in Elation, copy the Elation Patient ID from the header, and paste it into that
+              member&apos;s row below. A pasted id is used exactly as given — verify the name and
+              date of birth on the chart match the row first.
+            </p>
+
 
             {selected.length === 0 && (
               <p className="text-xs text-muted-foreground">
@@ -385,6 +416,22 @@ export default function ProvisionMissingDialog({
                         <td className="p-2 text-right text-[10px] uppercase tracking-wide text-muted-foreground">
                           {e.ok ? (r.memberType ?? "") : e.why}
                         </td>
+                        <td className="w-40 p-2">
+                          <Input
+                            value={elationIds[r.key] ?? ""}
+                            inputMode="numeric"
+                            placeholder="Elation ID (optional)"
+                            className="h-7 font-mono text-[11px]"
+                            disabled={!e.ok || !isAdmin || provision.isPending}
+                            onChange={(ev) =>
+                              setElationIds((prev) => ({
+                                ...prev,
+                                [r.key]: ev.target.value.replace(/\D/g, ""),
+                              }))
+                            }
+                          />
+                        </td>
+
 
                       </tr>
                     );
