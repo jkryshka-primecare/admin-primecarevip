@@ -149,11 +149,15 @@ export default function DependentMatches({ rows }: { rows: ReconRow[] }) {
   const counts = useMemo(() => {
     const c = { high: 0, medium: 0, ambiguous: 0, none: 0, confirmed: 0 };
     for (const m of matches) {
+      if (decisions[m.key]?.confirmed) {
+        c.confirmed += 1;
+        continue; // a confirmed minor no longer needs a decision
+      }
       c[m.confidence] += 1;
-      if (decisions[m.key]?.confirmed) c.confirmed += 1;
     }
     return c;
   }, [matches, decisions]);
+
 
   /** Every adult who can be attached by hand from the patient search box. */
   const pool = useMemo(() => eligibleGuardianPool(rows), [rows]);
