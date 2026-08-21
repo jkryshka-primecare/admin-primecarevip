@@ -309,6 +309,7 @@ export default function DependentMatches({ rows }: { rows: ReconRow[] }) {
             </TableHeader>
             <TableBody>
               {visible.map((m) => {
+                const all = candidatesFor(m);
                 const chosen = chosenFor(m);
                 const chosenKeys = chosen.map((c) => c.row.key);
                 const confirmed = Boolean(decisions[m.key]?.confirmed);
