@@ -19,7 +19,23 @@ import type { ReconRow } from "@/hooks/useMemberReconciliation";
 import { ADULT_AGE, ageFromDob } from "@/lib/portal/exceptions";
 import { isTestFixture, isTestFixtureName } from "@/lib/portal/fixtures";
 
-export type MatchSource = "hint_household" | "inferred_email_name" | "manual_search";
+export type MatchSource =
+  | "hint_household"
+  | "inferred_email_name"
+  | "manual_search"
+  /** Guardian isn't a patient — identified only by the email on the child's chart. */
+  | "email_on_file";
+
+/**
+ * A guardian who exists nowhere in Hint or Elation. Some children's parents
+ * never joined the practice, so the only handle we have on them is the contact
+ * email on the child's record. The portal invites that address directly.
+ */
+export type ExternalGuardian = {
+  email: string;
+  /** Optional display name staff can type in; falls back to the email. */
+  name?: string;
+};
 
 export type MatchConfidence =
   | "high" // adult(s) on the same Hint household
