@@ -323,9 +323,9 @@ export default function DependentMatches({ rows }: { rows: ReconRow[] }) {
                     </TableCell>
                     <TableCell className="font-mono text-xs">{m.age ?? "—"}</TableCell>
                     <TableCell>
-                      {m.candidates.length ? (
+                      {all.length ? (
                         <div className="space-y-1.5">
-                          {m.candidates.map((c) => (
+                          {all.map((c) => (
                             <label
                               key={c.row.key}
                               className="flex items-start gap-2 text-xs text-foreground"
@@ -350,6 +350,13 @@ export default function DependentMatches({ rows }: { rows: ReconRow[] }) {
                           {m.blocker ?? "No candidate"}
                         </span>
                       )}
+                      <div className="mt-2">
+                        <GuardianSearch
+                          pool={pool}
+                          exclude={[m.minor.key, ...all.map((c) => c.row.key)]}
+                          onPick={(candidate) => attachGuardian(m, candidate)}
+                        />
+                      </div>
                     </TableCell>
                     <TableCell>
                       <Badge variant="outline" className={cn("text-[10px]", TONE[m.confidence])}>
