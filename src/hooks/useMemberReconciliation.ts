@@ -39,7 +39,7 @@ export const BUCKET_LABELS: Record<ReconBucket, string> = {
   member_active: "Member · portal active",
   member_invited: "Member · invited",
   member_no_portal: "Member · no portal record",
-  portal_no_membership: "Portal · no active membership",
+  portal_no_membership: "Former member · access retained",
 };
 
 const norm = (v: unknown) => String(v ?? "").trim().toLowerCase();
