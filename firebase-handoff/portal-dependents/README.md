@@ -11,6 +11,9 @@ the member app and Cloud Functions must implement.
 - **At 18 the child converts** to an independent account. On first sign-in the
   now-adult is asked whether to keep sharing with the guardian; the guardian's
   proxy is **suspended until they answer**.
+- **A child may have more than one guardian.** Both parents on a household can
+  each hold an independent, separately revocable proxy; `guardians[]` is a list
+  and every entry is confirmed and audited on its own.
 - **Guardian sees everything the child has** — same modules, same artifacts.
   No category-level withholding in 2b.
 - **Link sources:** Hint household (same membership/contract id) is
@@ -54,8 +57,8 @@ the member app and Cloud Functions must implement.
 
 ## Functions to add
 
-- `adminLinkGuardian` — admin-only, requires reason, writes one guardian entry,
-  audited. Rejects a link where the child is 18+.
+- `adminLinkGuardian` — admin-only, requires reason, writes one guardian entry
+  (idempotent per guardian; called once per parent), audited. Rejects a link where the child is 18+.
 - `adminRevokeGuardian` — same shape, sets `status: "revoked"`.
 - `dependentBirthdaySweep` — scheduled daily. For each child hitting 18:
   flips `dependent.isMinor` false, moves guardian entries to

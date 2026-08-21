@@ -22,9 +22,9 @@ import { isTestFixture, isTestFixtureName } from "@/lib/portal/fixtures";
 export type MatchSource = "hint_household" | "inferred_email_name";
 
 export type MatchConfidence =
-  | "high" // single adult on the same Hint household
-  | "medium" // single adult by shared email + last name
-  | "ambiguous" // more than one plausible guardian
+  | "high" // adult(s) on the same Hint household
+  | "medium" // adult(s) by shared email + last name only
+  | "ambiguous" // only weak evidence, more than one plausible guardian
   | "none"; // no adult candidate at all
 
 export type GuardianCandidate = {
@@ -41,8 +41,11 @@ export type DependentMatch = {
   age: number | null;
   confidence: MatchConfidence;
   candidates: GuardianCandidate[];
-  /** The candidate to show pre-selected; null when ambiguous or none. */
-  suggested: GuardianCandidate | null;
+  /**
+   * Candidates to show pre-selected. A child can have more than one guardian
+   * (both parents), so every adult on the household is suggested.
+   */
+  suggested: GuardianCandidate[];
   /** Set when the minor can't be matched at all yet. */
   blocker?: string;
 };
@@ -99,7 +102,7 @@ export function buildDependentMatches(rows: ReconRow[]): DependentMatch[] {
         age,
         confidence: "none",
         candidates: [],
-        suggested: null,
+        suggested: [],
         blocker: "No date of birth — identity can't be confirmed",
       });
       continue;
@@ -147,17 +150,17 @@ export function buildDependentMatches(rows: ReconRow[]): DependentMatch[] {
 
     const householdCandidates = candidates.filter((c) => c.source === "hint_household");
     let confidence: MatchConfidence;
-    let suggested: GuardianCandidate | null = null;
+    let suggested: GuardianCandidate[] = [];
 
-    if (householdCandidates.length === 1) {
+    if (householdCandidates.length) {
+      // Both parents on a contract are both legitimate proxies.
       confidence = "high";
-      suggested = householdCandidates[0];
-    } else if (householdCandidates.length > 1) {
-      confidence = "ambiguous";
+      suggested = householdCandidates;
     } else if (candidates.length === 1) {
       confidence = "medium";
-      suggested = candidates[0];
+      suggested = candidates;
     } else if (candidates.length > 1) {
+      // Shared email + surname alone isn't enough to hand out several proxies.
       confidence = "ambiguous";
     } else {
       confidence = "none";
