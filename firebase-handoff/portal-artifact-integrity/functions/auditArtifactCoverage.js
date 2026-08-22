@@ -259,6 +259,7 @@ async function runAudit() {
     // full set always lives in artifact_repair_queue.
     missing: missing.slice(0, 500),
     missingTruncated: missingCount > 500,
+    bySegment,
   };
 
   await db.collection('artifact_coverage_reports').doc(runId).set(report);
