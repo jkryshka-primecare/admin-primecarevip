@@ -19,7 +19,9 @@
  */
 
 const { readArtifact, mintSignedUrl } = require('./helpers/portalRead');
-const { seedPatient, seedDocument, healArtifact, accessLogRows, cleanup } = require('./helpers/seed');
+const {
+  seedPatient, seedDocument, healArtifact, accessLogRows, cleanup, seedGuardianOnlyAccount,
+} = require('./helpers/seed');
 
 jest.setTimeout(120000);
 
@@ -280,6 +282,129 @@ describe('[2b] guardian proxy access', () => {
     expect(row.actingUid).toBe(guardian.firebaseUid);
     expect(row.subjectElationId).toBe(child.patientId);
     expect(row.subjectUid).toBe(child.internalUid);
+  });
+});
+
+/**
+ * Release 2b PHASE 1 — chart-backed guardian authorization.
+ *
+ * Production guardian links all carry `guardianUid: null` (nothing ever bound
+ * them), so these cases seed with `bindUid: false` and prove the resolver
+ * authorizes off the CHART (caller's own elationId === entry's
+ * guardianElationId), lazily binds exactly one entry, and — the fence that
+ * matters most — never lets a null caller id match a null guardianElationId.
+ */
+describe('[2b-phase1] chart-backed guardian authorization', () => {
+  const priorFlag = process.env.GUARDIAN_READS_ENABLED;
+  beforeAll(() => { process.env.GUARDIAN_READS_ENABLED = 'true'; });
+  afterAll(() => { process.env.GUARDIAN_READS_ENABLED = priorFlag; });
+
+  test('authorizes an unbound guardian and binds exactly one entry', async () => {
+    const guardian = await seedPatient();
+    const child = await seedPatient({ minor: true });
+    await child.linkGuardian(guardian, { bindUid: false });
+    const doc = await seedDocument(child, { module: 'labs' });
+
+    const res = await readArtifact({ as: guardian, of: child, doc });
+    expect(res.status).toBe(200);
+
+    const entries = await child.guardianEntries();
+    const bound = entries.filter((g) => g.guardianUid === guardian.firebaseUid);
+    expect(bound).toHaveLength(1);
+    expect(bound[0].guardianElationId).toBe(guardian.patientId);
+  });
+
+  test('NULL FENCE: an account with no owned record never matches a null-guardianElationId entry', async () => {
+    const child = await seedPatient({ minor: true });
+    // email_on_file entry: guardianElationId === null, unbound.
+    await child.linkGuardian({ patientId: 'someone', firebaseUid: null }, { emailOnly: true });
+    const doc = await seedDocument(child, { module: 'labs' });
+
+    const ghost = await seedGuardianOnlyAccount();
+    const res = await readArtifact({ as: ghost, of: child, doc });
+    expect(res.status).toBe(404);
+    expect(res.signedUrl).toBeUndefined();
+    // And nothing was bound as a side effect.
+    const entries = await child.guardianEntries();
+    expect(entries.every((g) => !g.guardianUid)).toBe(true);
+  });
+
+  test('a chart-backed guardian does NOT match an email_on_file entry on another child', async () => {
+    const guardian = await seedPatient();
+    const other = await seedPatient({ minor: true });
+    await other.linkGuardian(guardian, { emailOnly: true });
+    const doc = await seedDocument(other, { module: 'labs' });
+    expect((await readArtifact({ as: guardian, of: other, doc })).status).toBe(404);
+  });
+
+  test('sibling children bind independently', async () => {
+    const guardian = await seedPatient();
+    const a = await seedPatient({ minor: true });
+    const b = await seedPatient({ minor: true });
+    await a.linkGuardian(guardian, { bindUid: false });
+    await b.linkGuardian(guardian, { bindUid: false });
+    const docA = await seedDocument(a, { module: 'labs' });
+    const docB = await seedDocument(b, { module: 'labs' });
+
+    expect((await readArtifact({ as: guardian, of: a, doc: docA })).status).toBe(200);
+    expect((await a.guardianEntries()).filter((g) => g.guardianUid).length).toBe(1);
+    // b is untouched until it is itself read.
+    expect((await b.guardianEntries()).every((g) => !g.guardianUid)).toBe(true);
+    expect((await readArtifact({ as: guardian, of: b, doc: docB })).status).toBe(200);
+    expect((await b.guardianEntries()).filter((g) => g.guardianUid).length).toBe(1);
+  });
+
+  test('a revoked entry never authorizes and never binds', async () => {
+    const guardian = await seedPatient();
+    const child = await seedPatient({ minor: true });
+    await child.linkGuardian(guardian, { bindUid: false, status: 'revoked' });
+    const doc = await seedDocument(child, { module: 'labs' });
+
+    expect((await readArtifact({ as: guardian, of: child, doc })).status).toBe(404);
+    expect((await child.guardianEntries()).every((g) => !g.guardianUid)).toBe(true);
+  });
+
+  test('a pending_adult_consent entry never authorizes and never binds', async () => {
+    const guardian = await seedPatient();
+    const child = await seedPatient({ minor: true });
+    await child.linkGuardian(guardian, { bindUid: false, status: 'pending_adult_consent' });
+    const doc = await seedDocument(child, { module: 'labs' });
+
+    expect((await readArtifact({ as: guardian, of: child, doc })).status).toBe(404);
+    expect((await child.guardianEntries()).every((g) => !g.guardianUid)).toBe(true);
+  });
+
+  test('two guardians sharing an email but with distinct charts bind separately', async () => {
+    const greg = await seedPatient();
+    const jill = await seedPatient();
+    const child = await seedPatient({ minor: true });
+    await child.linkGuardian(greg, { bindUid: false });
+    await child.linkGuardian(jill, { bindUid: false });
+    const doc = await seedDocument(child, { module: 'labs' });
+
+    expect((await readArtifact({ as: greg, of: child, doc })).status).toBe(200);
+    expect((await readArtifact({ as: jill, of: child, doc })).status).toBe(200);
+
+    const entries = await child.guardianEntries();
+    const byGreg = entries.find((g) => g.guardianElationId === greg.patientId);
+    const byJill = entries.find((g) => g.guardianElationId === jill.patientId);
+    expect(byGreg.guardianUid).toBe(greg.firebaseUid);
+    expect(byJill.guardianUid).toBe(jill.firebaseUid);
+    expect(byGreg.guardianUid).not.toBe(byJill.guardianUid);
+  });
+
+  test('the lazy bind is audited with both identities', async () => {
+    const guardian = await seedPatient();
+    const child = await seedPatient({ minor: true });
+    await child.linkGuardian(guardian, { bindUid: false });
+    const doc = await seedDocument(child, { module: 'labs' });
+    await readArtifact({ as: guardian, of: child, doc });
+
+    const rows = await accessLogRows({ reportId: doc.documentId });
+    const bindRow = rows.find((r) => r.outcome === 'guardian_uid_bound');
+    expect(bindRow).toBeDefined();
+    expect(bindRow.actingUid).toBe(guardian.firebaseUid);
+    expect(bindRow.subjectElationId).toBe(child.patientId);
   });
 });
 
