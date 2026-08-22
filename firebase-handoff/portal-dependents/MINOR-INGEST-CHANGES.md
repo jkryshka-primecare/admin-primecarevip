@@ -154,10 +154,63 @@ one new skip: a status-less minor with no active guardian.
 ```
 
 Everything inside the `else` after `objectPath` (the `/printable` fetch, the
-`%PDF-` download-back self-check, the `artifact-failed` flip) is **unchanged**.
+`%PDF-` download-back self-check) is otherwise unchanged **except** the
+`artifact-failed` flip — see 2c.
 `counters.artifactSkippedUnclaimed` and `pc.artifactSkippedUnclaimed` (lines 80,
 and their declarations) become dead and can be dropped in the same PR, or left at
 0 if you prefer the run-stats shape frozen.
+
+### 2c. Artifact FAILURE handling: stop flipping `hasArtifact:false` (~287–288)
+
+The failure flip is counterproductive in the coverage-gate era. Flipping
+`hasArtifact:false` on a `/printable` failure removes the report from the audit
+denominator **and** from the repair queue: a persistently-failing report silently
+vanishes from the gate (dashboard can read 100% while the PDF is actually
+missing) and only comes back on a manual re-run. Worse, on a `%PDF-` self-check
+failure the object was already `save()`d with bad bytes and left in place, so
+`exists()` would count it **present** — a false green on corrupt content.
+
+```js
+// BEFORE (~287–288)
+        } catch (artErr) {
+          try {
+            await db.collection('patients').doc(pid).collection('labs').doc(reportId)
+              .set({ hasArtifact: false }, { merge: true });
+          } catch (flipErr) { ... }
+          pc.artifactErrors += 1; counters.artifactErrors += 1;
+          log('backfillElationReports', 'artifact-failed', { elationPatientId: pid, reportId, error: artErr.message });
+        }
+```
+
+```js
+// AFTER — leave hasArtifact:true and remove any partial/corrupt object, so the
+// audit sees an honest MISS and sweepArtifactRepairs heals it (or parks + alerts
+// after MAX_FAILURES). No other hasArtifact write remains in this function.
+        } catch (artErr) {
+          try {
+            await bucket.file(objectPath).delete({ ignoreNotFound: true });
+          } catch (delErr) {
+            log('backfillElationReports', 'artifact-cleanup-failed', {
+              elationPatientId: pid, reportId, error: delErr.message,
+            });
+          }
+          pc.artifactErrors += 1; counters.artifactErrors += 1;
+          log('backfillElationReports', 'artifact-failed-left-open', {
+            elationPatientId: pid, reportId, error: artErr.message,
+          });
+        }
+```
+
+Notes:
+
+- The `%PDF-` self-check must throw **inside** this `try` (it already does), so
+  the bad object is deleted by the same handler — never left for `exists()`.
+- After this change the ONLY `hasArtifact` writes in the backfill are the
+  success-path `true` and `ingestElationReports`' own metadata write.
+- Pre-existing behaviour, so a fast-follow PR is acceptable — but it MUST land
+  before `auditArtifactCoverage` is used as the go/no-go gate, otherwise the gate
+  is measuring a denominator that failures can shrink.
+
 
 ## PR note — removing the `hasArtifact:false` unclaimed flip is minor-only
 
