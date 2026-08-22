@@ -60,7 +60,7 @@ Notes:
 
 ```js
 const { ensureInternalUid, objectPathFor } = require('./core/services/patient/internalUid');
-const { ingestEligibility } = require('./core/services/patient/ingestEligibility');
+const { ingestEligibility, isMinorRecord } = require('./core/services/patient/ingestEligibility');
 ```
 
 ### 2a. Correction — this gate is SOFT (D-080), not the poller's hard gate
