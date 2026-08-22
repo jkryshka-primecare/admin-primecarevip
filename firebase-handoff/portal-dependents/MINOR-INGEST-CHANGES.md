@@ -60,7 +60,7 @@ Notes:
 
 ```js
 const { ensureInternalUid, objectPathFor } = require('./core/services/patient/internalUid');
-const { ingestEligibility } = require('./core/services/patient/ingestEligibility');
+const { ingestEligibility, isMinorRecord } = require('./core/services/patient/ingestEligibility');
 ```
 
 ### 2a. Correction — this gate is SOFT (D-080), not the poller's hard gate
@@ -82,12 +82,13 @@ const { ingestEligibility } = require('./core/services/patient/ingestEligibility
 ```
 
 ```js
-// AFTER — D-080 soft posture preserved exactly: a MISSING doc still proceeds.
-// Only the "doc exists but is not active" branch consults the 2b exception.
+// AFTER — D-080 soft posture preserved for ADULTS exactly: a MISSING doc still
+// proceeds, and an existing doc with no `status` field still proceeds.
+// MINORS are ALWAYS subject to the guardian check, regardless of `status`.
   if (pSnap.exists) {
     const data = pSnap.data() || {};
     const gate = ingestEligibility(data);
-    if (!gate.eligible && data.status !== undefined) {
+    if (!gate.eligible && (data.status !== undefined || isMinorRecord(data))) {
       counters.patientsSkippedNonActive += 1;
       pc.skippedNonActive = true;
       log('backfillElationReports', gate.reason, { elationPatientId: pid, status: data.status, cohort: gate.cohort });
@@ -99,10 +100,26 @@ const { ingestEligibility } = require('./core/services/patient/ingestEligibility
   }
 ```
 
-The `data.status !== undefined` conjunct is what keeps D-080 soft: a doc with no
-`status` field at all proceeds today and must keep proceeding. Net effect of the
-change is one new admission — a doc whose `status` is set to something other than
-`active` but which is a minor with an active guardian.
+Why the `|| isMinorRecord(data)` conjunct matters: without it, a minor doc whose
+`status` is unset slips through D-080 without ever consulting
+`ingestEligibility`, so "guardian-proxied minors only" would be enforced by the
+input list rather than by the code — a guardian revoked between the batch load
+and the backfill run would still get their child's PHI stored. With it, a
+guardian-less minor is skipped as `skip-minor-no-active-guardian` on every path.
+
+**What status does a minor's doc actually carry?** Verified in the repo:
+`adminProvisionPatients.js` writes `status: 'not_invited'` on creation (line
+224), and `adminLinkGuardian.js` never writes `status` at all. So today a
+provisioned minor's `status` is **defined** (`'not_invited'`) and already routes
+through the eligibility path — the extra conjunct is a belt-and-braces guard for
+docs created by other/legacy writers, not a behaviour change for the 175.
+
+The `data.status !== undefined` conjunct is what keeps D-080 soft **for adults**:
+an adult doc with no `status` field proceeds today and must keep proceeding. Net
+effect of the change is one new admission — a doc whose `status` is set to
+something other than `active` but which is a minor with an active guardian — and
+one new skip: a status-less minor with no active guardian.
+
 
 ### 2b. Artifact key: `firebaseUid` → `internalUid` (245–296)
 
@@ -137,10 +154,63 @@ change is one new admission — a doc whose `status` is set to something other t
 ```
 
 Everything inside the `else` after `objectPath` (the `/printable` fetch, the
-`%PDF-` download-back self-check, the `artifact-failed` flip) is **unchanged**.
+`%PDF-` download-back self-check) is otherwise unchanged **except** the
+`artifact-failed` flip — see 2c.
 `counters.artifactSkippedUnclaimed` and `pc.artifactSkippedUnclaimed` (lines 80,
 and their declarations) become dead and can be dropped in the same PR, or left at
 0 if you prefer the run-stats shape frozen.
+
+### 2c. Artifact FAILURE handling: stop flipping `hasArtifact:false` (~287–288)
+
+The failure flip is counterproductive in the coverage-gate era. Flipping
+`hasArtifact:false` on a `/printable` failure removes the report from the audit
+denominator **and** from the repair queue: a persistently-failing report silently
+vanishes from the gate (dashboard can read 100% while the PDF is actually
+missing) and only comes back on a manual re-run. Worse, on a `%PDF-` self-check
+failure the object was already `save()`d with bad bytes and left in place, so
+`exists()` would count it **present** — a false green on corrupt content.
+
+```js
+// BEFORE (~287–288)
+        } catch (artErr) {
+          try {
+            await db.collection('patients').doc(pid).collection('labs').doc(reportId)
+              .set({ hasArtifact: false }, { merge: true });
+          } catch (flipErr) { ... }
+          pc.artifactErrors += 1; counters.artifactErrors += 1;
+          log('backfillElationReports', 'artifact-failed', { elationPatientId: pid, reportId, error: artErr.message });
+        }
+```
+
+```js
+// AFTER — leave hasArtifact:true and remove any partial/corrupt object, so the
+// audit sees an honest MISS and sweepArtifactRepairs heals it (or parks + alerts
+// after MAX_FAILURES). No other hasArtifact write remains in this function.
+        } catch (artErr) {
+          try {
+            await bucket.file(objectPath).delete({ ignoreNotFound: true });
+          } catch (delErr) {
+            log('backfillElationReports', 'artifact-cleanup-failed', {
+              elationPatientId: pid, reportId, error: delErr.message,
+            });
+          }
+          pc.artifactErrors += 1; counters.artifactErrors += 1;
+          log('backfillElationReports', 'artifact-failed-left-open', {
+            elationPatientId: pid, reportId, error: artErr.message,
+          });
+        }
+```
+
+Notes:
+
+- The `%PDF-` self-check must throw **inside** this `try` (it already does), so
+  the bad object is deleted by the same handler — never left for `exists()`.
+- After this change the ONLY `hasArtifact` writes in the backfill are the
+  success-path `true` and `ingestElationReports`' own metadata write.
+- Pre-existing behaviour, so a fast-follow PR is acceptable — but it MUST land
+  before `auditArtifactCoverage` is used as the go/no-go gate, otherwise the gate
+  is measuring a denominator that failures can shrink.
+
 
 ## PR note — removing the `hasArtifact:false` unclaimed flip is minor-only
 
