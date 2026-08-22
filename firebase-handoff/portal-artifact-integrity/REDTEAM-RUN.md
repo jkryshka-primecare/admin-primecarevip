@@ -82,6 +82,28 @@ Paste **both** outputs here. Cases expected to flip red under the mutation:
 - `a hidden lab cannot be laundered through another wrapper (cross-calling)`
 - `a visible lab is still not servable through the imaging wrapper`
 
+## Run 2b — the guardian mutation check (phase 1)
+
+Point a second mutation at `resolveGuardianAccess` in
+`functions/core/services/patient/guardians.js` — it, not `isActiveGuardian`, is
+what `readArtifact` now calls. Short-circuit the null fence:
+
+```diff
+-  if (!callerId) return { authorized: false, reason: 'NO_CALLER_RECORD' };
++  // MUTATION CHECK ONLY — never commit this.
++  // (also relax the match to a bare `g.guardianElationId === callerElationId`)
+```
+
+```bash
+GUARDIAN_READS_ENABLED=true npm run test:redteam
+git checkout -- functions/core/services/patient/guardians.js
+```
+
+Cases expected to flip red under this mutation:
+
+- `NULL FENCE: an account with no owned record never matches a null-guardianElationId entry`
+- `a chart-backed guardian does NOT match an email_on_file entry on another child`
+
 ## Post-merge smoke test (production, read-only)
 
 - `adminRunArtifactAudit` is private: no `allUsers`, `portal-admin` invoker only,
