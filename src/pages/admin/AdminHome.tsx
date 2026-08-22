@@ -5,6 +5,7 @@ import PhiAuditLog from "@/components/admin/PhiAuditLog";
 import IntegrationsAdmin from "@/components/admin/IntegrationsAdmin";
 import SeedDataPanel from "@/components/admin/SeedDataPanel";
 import ArtifactCoveragePanel from "@/components/admin/ArtifactCoveragePanel";
+import UnclaimedGuardiansPanel from "@/components/admin/UnclaimedGuardiansPanel";
 import MemberBillingPanel from "@/components/firestore/MemberBillingPanel";
 import MemberAppExplorer from "@/components/firestore/MemberAppExplorer";
 import { cn } from "@/lib/utils";
@@ -15,6 +16,7 @@ const tabs = [
   { id: "member-billing", label: "Member Billing" },
   { id: "member-data", label: "Member App Data" },
   { id: "artifacts", label: "Artifact Coverage" },
+  { id: "guardians", label: "Guardian Links" },
   { id: "seed", label: "Data Seeding" },
   { id: "audit", label: "PHI Audit Log" },
 ] as const;
@@ -49,6 +51,7 @@ export default function AdminHome() {
         {tab === "member-billing" && <MemberBillingPanel />}
         {tab === "member-data" && <MemberAppExplorer />}
         {tab === "artifacts" && <ArtifactCoveragePanel />}
+        {tab === "guardians" && <UnclaimedGuardiansPanel />}
         {tab === "seed" && <SeedDataPanel />}
         {tab === "audit" && <PhiAuditLog />}
       </div>
