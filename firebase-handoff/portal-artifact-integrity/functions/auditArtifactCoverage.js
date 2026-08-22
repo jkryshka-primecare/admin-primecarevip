@@ -166,16 +166,20 @@ async function runAudit() {
       const patientId = doc.ref.parent.parent ? doc.ref.parent.parent.id : null;
       // eslint-disable-next-line no-await-in-loop
       const keys = await uidFor(patientId);
+      const cohort = keys && keys.isMinor ? 'minor' : 'adult';
+      bump(cohort, 'referenced');
       const path = expectedPath(doc, keys);
       if (!path) {
+        bump(cohort, 'unpathed');
         unpathed.push({
           patientId,
           documentId: doc.id,
+          cohort,
           reason: 'no artifactPath and patient has no internalUid (or legacy uid)',
         });
         continue;
       }
-      pathed.push({ patientId, documentId: doc.id, path });
+      pathed.push({ patientId, documentId: doc.id, path, cohort });
     }
 
 
@@ -184,16 +188,19 @@ async function runAudit() {
       const probe = probes[i] || { state: 'error', status: null, message: 'no probe result' };
       if (probe.state === 'present') {
         presentCount += 1;
+        bump(p.cohort, 'present');
         return;
       }
       if (probe.state === 'error') {
         // "Couldn't check" is NOT "absent". Never queued for repair.
         const key = String(probe.status || 'unknown');
         errorStatusCounts[key] = (errorStatusCounts[key] || 0) + 1;
+        bump(p.cohort, 'errored');
         errored.push({ ...p, status: probe.status, message: probe.message });
         return;
       }
       const known = prior.get(`${p.patientId}:${p.documentId}`) || {};
+      bump(p.cohort, 'missing');
       missing.push({
         ...p,
         firstSeenAt: known.firstSeenAt || new Date().toISOString(),
