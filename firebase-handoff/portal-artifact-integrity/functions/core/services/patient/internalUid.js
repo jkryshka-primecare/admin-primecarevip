@@ -42,23 +42,38 @@ function legacyUidOf(snapOrData) {
   return raw ? String(raw).toLowerCase() : null;
 }
 
+/** True when >= 1 ACTIVE guardian entry carries a non-empty guardianElationId. */
+function hasChartBackedGuardian(snapOrData) {
+  const get = (k) =>
+    snapOrData && typeof snapOrData.get === 'function' ? snapOrData.get(k) : (snapOrData || {})[k];
+  const guardians = get('guardians');
+  if (!Array.isArray(guardians)) return false;
+  return guardians.some(
+    (g) => g && g.status === 'active' && g.guardianElationId && String(g.guardianElationId).trim() !== ''
+  );
+}
+
 /**
  * Read the record's internalUid. Read-only: it does NOT mint.
- * Returns `{ internalUid, legacyUid, isMinor }`; uids may be null.
+ * Returns `{ internalUid, legacyUid, isMinor, chartBacked }`; uids may be null.
  * `isMinor` lets callers (the coverage audit) split adult vs minor cohorts
- * without a second read of the same patient doc.
+ * without a second read of the same patient doc; `chartBacked` splits the minor
+ * cohort into the phase-1 readable set vs the `email_on_file` deferred set.
  */
 async function getInternalUid(elationPatientId, db = admin.firestore()) {
-  if (!elationPatientId) return { internalUid: null, legacyUid: null, isMinor: false };
+  const EMPTY = { internalUid: null, legacyUid: null, isMinor: false, chartBacked: false };
+  if (!elationPatientId) return EMPTY;
   const snap = await db.collection('patients').doc(String(elationPatientId)).get();
-  if (!snap.exists) return { internalUid: null, legacyUid: null, isMinor: false };
+  if (!snap.exists) return EMPTY;
   const value = snap.get(FIELD);
   return {
     internalUid: value ? String(value) : null,
     legacyUid: legacyUidOf(snap),
     isMinor: snap.get('dependent.isMinor') === true,
+    chartBacked: hasChartBackedGuardian(snap),
   };
 }
+
 
 /**
  * Idempotently mint. A record that already has one is left UNTOUCHED — the
@@ -102,20 +117,22 @@ function legacyFallbackEnabled() {
 /** Per-request memo so one read never fetches the same patient doc twice. */
 function makeInternalUidResolver(db = admin.firestore()) {
   const cache = new Map();
+  const EMPTY = { internalUid: null, legacyUid: null, isMinor: false, chartBacked: false };
   return async function resolve(elationPatientId) {
-    if (!elationPatientId) return { internalUid: null, legacyUid: null, isMinor: false };
+    if (!elationPatientId) return EMPTY;
     const key = String(elationPatientId);
     if (cache.has(key)) return cache.get(key);
     let value;
     try {
       value = await getInternalUid(key, db);
     } catch (_e) {
-      value = { internalUid: null, legacyUid: null, isMinor: false };
+      value = EMPTY;
     }
     cache.set(key, value);
     return value;
   };
 }
+
 
 module.exports = {
   FIELD,
