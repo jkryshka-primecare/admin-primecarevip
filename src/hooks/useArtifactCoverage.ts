@@ -68,6 +68,12 @@ export type CoverageReport = {
   status: string;
   /** True when the walk hit its per-run cap: the number is partial. */
   truncatedWalk: boolean;
+  /**
+   * True only when the run executed with `ARTIFACT_LEGACY_UID_FALLBACK`
+   * DISABLED. A fallback-ON run counts legacy-path objects as present, so it is
+   * NOT a valid gate run and can never be shown as a pass.
+   */
+  legacyFallbackDisabled: boolean;
   coveragePct: number | null;
   adult: SegmentCounts;
   minor: SegmentCounts;
