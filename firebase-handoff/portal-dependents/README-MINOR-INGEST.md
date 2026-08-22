@@ -68,5 +68,8 @@ runs are all done.
 - `MINOR-INGEST-CHANGES.md` — the two portal-repo function changes for review,
   with the PR notes proving the `hasArtifact:false` removal is minor-only and
   that `ensureInternalUid()` in the upload can only ever be a fallback.
-- `auditArtifactCoverage.js` now reports `bySegment.adult` / `bySegment.minor`.
+- `auditArtifactCoverage.js` now reports `bySegment.adult` / `bySegment.minor`, and
+  `bySegment.minor.byLinkage.chartBacked` / `.emailOnFile` so the 40 email-only
+  children are a visible line in the report. Scope decision (ingest all 175) and
+  the join-gate addendum live in `README-PART-B-RUNBOOK.md`.
 
