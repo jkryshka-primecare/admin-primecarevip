@@ -312,6 +312,7 @@ exports.auditArtifactCoverageScheduled = functions
       coveragePct: out.coveragePct,
       missingCount: out.missingCount,
       erroredCount: out.erroredCount,
+      bySegment: out.bySegment,
       status: out.status,
       truncatedWalk: out.truncatedWalk,
     });
@@ -343,6 +344,7 @@ exports.auditArtifactCoverageOnDemand = functions
       coveragePct: out.coveragePct,
       missingCount: out.missingCount,
       erroredCount: out.erroredCount,
+      bySegment: out.bySegment,
       status: out.status,
       truncatedWalk: out.truncatedWalk,
     });
