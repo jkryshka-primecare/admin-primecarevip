@@ -28,7 +28,7 @@ const BATCH_LIMIT = 200;
 async function convertOne(doc, now) {
   const db = admin.firestore();
   const data = doc.data() || {};
-  const dob = String(data.dob || data.dateOfBirth || (data.dependent && data.dependent.dob) || '').trim();
+  const dob = String((data.dependent && data.dependent.dob) || data.dob || data.dateOfBirth || '').trim();
   const converts = eighteenthBirthday(dob);
   if (!converts || now.getTime() < converts.getTime()) return { skipped: 'not_yet' };
 
