@@ -99,10 +99,14 @@ GUARDIAN_READS_ENABLED=true npm run test:redteam
 git checkout -- functions/core/services/patient/guardians.js
 ```
 
-Cases expected to flip red under this mutation:
+Case expected to flip red under this mutation:
 
 - `NULL FENCE: an account with no owned record never matches a null-guardianElationId entry`
-- `a chart-backed guardian does NOT match an email_on_file entry on another child`
+
+Do NOT expect `a chart-backed guardian does NOT match an email_on_file entry on
+another child` to flip: a real `callerElationId` compared with a null
+`guardianElationId` is still `false` under a bare `===`, so that case stays green
+under the mutation and is not evidence of a failed check.
 
 ## Post-merge smoke test (production, read-only)
 
