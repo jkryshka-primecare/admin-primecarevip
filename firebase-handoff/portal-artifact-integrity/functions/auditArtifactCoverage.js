@@ -143,10 +143,20 @@ async function runAudit() {
     adult: { referenced: 0, present: 0, missing: 0, unpathed: 0, errored: 0 },
     minor: { referenced: 0, present: 0, missing: 0, unpathed: 0, errored: 0 },
   };
-  const bump = (cohort, field) => {
-    const s = splits[cohort === 'minor' ? 'minor' : 'adult'];
-    s[field] += 1;
+  // Minor sub-split on readability, not on age: `chartBacked` = >= 1 ACTIVE
+  // guardian with a guardianElationId (phase-1 readable); `emailOnFile` = the
+  // rest (guardians cannot read until phase 2). Reported so the 40 email-only
+  // children are a visible line, never a hidden gap inside a rounded 100%.
+  const minorLinkage = {
+    chartBacked: { referenced: 0, present: 0, missing: 0, unpathed: 0, errored: 0 },
+    emailOnFile: { referenced: 0, present: 0, missing: 0, unpathed: 0, errored: 0 },
   };
+  const bump = (cohort, field, chartBacked) => {
+    const minor = cohort === 'minor';
+    splits[minor ? 'minor' : 'adult'][field] += 1;
+    if (minor) minorLinkage[chartBacked ? 'chartBacked' : 'emailOnFile'][field] += 1;
+  };
+
 
   const priorSnap = await db
     .collection('artifact_repair_queue')
