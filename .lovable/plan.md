@@ -44,9 +44,19 @@ An **Operator Console** under Admin, driving the existing `portal-admin` edge fu
 
 Backfill runner + go-live checklist first, guardian-link review second, minor-track runner last since it needs the portal-repo wrapper.
 
-## Two calls you asked me for
+## Reconciler split (agreed)
 
-- **Reconciler + paired sweep invite-state stamp: fast-follow, not this deploy.** It is not on the guardian-read critical path, and adding it widens the Phase 0 export list and the invoker-lock array in the same deploy that carries the ingest and re-key changes. Keep this deploy to the gate-critical set; land the reconciler on its own PR once the gate is green.
-- **Read-path reason enumeration:** I will produce the canonical `reason` constant list from `src/lib/portal/exceptions.ts` and the nine read handlers as a short reference doc in the handoff bundle, so the portal side can diff its 403 family against it. Included in this pass.
+- **Reconciler: fast-follow.** Lands on its own PR once the gate is green; it is not on the guardian-read critical path.
+- **`dependentBirthdaySweep` stays in this deploy**, and the go-live checklist gets a new hard precondition line: the sweep must have **deployed, run at least once, and converted every already-18 dependent** before `GUARDIAN_READS_ENABLED` is flipped. Until that line is green the checklist shows an explicit NO-GO — otherwise a guardian could read a now-adult's record (e.g. Ross, Sept 4) with no consent gate the moment reads go live. The checklist reads the sweep's last-run stamp and remaining `convertsAt <= today` count.
+- **Interim alert while the reconciler is pending:** the handoff bundle adds a Cloud Logging alert policy on the sweep's invite-failed log line, so a silently-orphaned now-adult surfaces for a manual re-invite instead of sitting unclaimed.
+
+## Read-path reason enumeration
+
+Included in this pass: a canonical `reason` reference doc built from the shared read-artifact handler and the nine read handlers, so the portal side can diff its 403 family against it.
+
+## Review before real data
+
+The new `portal-admin` actions, the `backfillElationReports` HTTP wrapper, and the reason doc are delivered for your agent's review first — nothing runs against production until that review clears.
+
 
 
