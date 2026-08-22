@@ -234,13 +234,28 @@ export type GateVerdict = {
   lines: GateLine[];
   /** Run-level conditions that must also hold. */
   checks: { key: string; label: string; pass: boolean; detail: string }[];
+  /**
+   * False when the run cannot be used to decide anything — today that means a
+   * run with the legacy uid fallback still ON, which counts legacy-path objects
+   * as present and would otherwise render a false green.
+   */
+  validGateRun: boolean;
   pass: boolean;
 };
 
 /** The full go/no-go verdict for flipping GUARDIAN_READS_ENABLED. */
 export function evaluateGate(report: CoverageReport): GateVerdict {
   const lines = gateLines(report);
+  const validGateRun = report.legacyFallbackDisabled;
   const checks = [
+    {
+      key: "legacy-fallback",
+      label: "Legacy uid fallback disabled",
+      pass: validGateRun,
+      detail: validGateRun
+        ? "Run probed uid-keyed paths only."
+        : "Fallback was ON (or unrecorded) — legacy-path objects counted as present. Re-run with the fallback disabled to evaluate the gate.",
+    },
     {
       key: "unpathed",
       label: "No unpathed references",
@@ -271,7 +286,8 @@ export function evaluateGate(report: CoverageReport): GateVerdict {
   return {
     lines,
     checks,
-    pass: lines.every((l) => l.pass) && checks.every((c) => c.pass),
+    validGateRun,
+    pass: validGateRun && lines.every((l) => l.pass) && checks.every((c) => c.pass),
   };
 }
 
