@@ -6,6 +6,8 @@ import IntegrationsAdmin from "@/components/admin/IntegrationsAdmin";
 import SeedDataPanel from "@/components/admin/SeedDataPanel";
 import ArtifactCoveragePanel from "@/components/admin/ArtifactCoveragePanel";
 import UnclaimedGuardiansPanel from "@/components/admin/UnclaimedGuardiansPanel";
+import BackfillRunner from "@/components/admin/BackfillRunner";
+import GoLiveChecklist from "@/components/admin/GoLiveChecklist";
 import MemberBillingPanel from "@/components/firestore/MemberBillingPanel";
 import MemberAppExplorer from "@/components/firestore/MemberAppExplorer";
 import { cn } from "@/lib/utils";
@@ -17,9 +19,12 @@ const tabs = [
   { id: "member-data", label: "Member App Data" },
   { id: "artifacts", label: "Artifact Coverage" },
   { id: "guardians", label: "Guardian Links" },
+  { id: "backfills", label: "Migration & Backfills" },
+  { id: "go-live", label: "Go-Live Checklist" },
   { id: "seed", label: "Data Seeding" },
   { id: "audit", label: "PHI Audit Log" },
 ] as const;
+
 
 type TabId = (typeof tabs)[number]["id"];
 
