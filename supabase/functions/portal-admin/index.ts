@@ -528,10 +528,46 @@ Deno.serve(async (req) => {
     // refuses to send anything; this makes the intent explicit on the wire.
     upstreamPayload.sendInvite = false;
   }
+  if (isBulk) {
+    // Dry run unless the caller explicitly asked to apply AND cleared the
+    // super-admin gate above.
+    upstreamPayload.apply = bulkApply;
+    const limit = Number(body.limit);
+    if (Number.isFinite(limit) && limit > 0) upstreamPayload.limit = Math.floor(limit);
+    if (typeof body.cursor === "string" && body.cursor) upstreamPayload.cursor = body.cursor;
+    if (action === "backfillMinorReports") upstreamPayload.patientIds = minorIds;
+  }
 
   const fnName = FUNCTION_BY_ACTION[action];
   const url = `${FUNCTIONS_BASE}/${fnName}`;
   const started = Date.now();
+
+  // GUARDRAIL 3 — attribution before action. A bulk apply does not happen
+  // unless the human is on the record first.
+  if (bulkApply) {
+    const attributed = await recordActionStrict(ctx, {
+      action: `${action}:apply`,
+      reason,
+      after: {
+        limit: upstreamPayload.limit ?? null,
+        cursor: upstreamPayload.cursor ?? null,
+        patientIds: action === "backfillMinorReports" ? minorIds : undefined,
+        patientCount: action === "backfillMinorReports" ? minorIds.length : undefined,
+      },
+    });
+    if (!attributed) {
+      return new Response(
+        JSON.stringify({
+          ok: false,
+          status: 503,
+          error:
+            "The attribution record could not be written, so the migration was not run. Try again.",
+        }),
+        { status: 503, headers: { ...corsHeaders, "Content-Type": "application/json" } },
+      );
+    }
+  }
+
 
   const useWif = wifConfigured();
   let sa: ServiceAccount | null = null;
