@@ -256,6 +256,11 @@ async function runAudit() {
   const report = {
     generatedAt: new Date().toISOString(),
     scope: 'referenced',
+    // Gate validity flag. With ARTIFACT_LEGACY_UID_FALLBACK ON, a legacy-path
+    // object counts as present, so a routine nightly run can read 100% while
+    // the uid-keyed path is still empty. Only a run with the fallback DISABLED
+    // is a valid go/no-go input for GUARDIAN_READS_ENABLED.
+    legacyFallbackDisabled: !legacyFallbackEnabled(),
     elapsedMs: Date.now() - started,
     walked: seen,
     // A partial walk can never be read as complete coverage.
