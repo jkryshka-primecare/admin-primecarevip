@@ -388,4 +388,5 @@ module.exports = {
   revokeGuardian,
   isActiveGuardian,
   bindGuardianUid,
+  resolveGuardianAccess,
 };
