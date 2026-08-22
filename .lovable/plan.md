@@ -27,14 +27,26 @@ An **Operator Console** under Admin, driving the existing `portal-admin` edge fu
 3. **Attribution is non-skippable.** Because the Cloud Function only ever sees `portal-admin`, every bulk `apply` writes a `portal_admin_actions` row with the acting staff email and reason *before* the upstream call; if that write fails, the call does not happen. Treated as a hard invariant, same as the existing per-patient mutations.
 4. **The console shows readiness, never flips it.** No go-live button, no env-flag control, nothing that can enable a guardian read. `GUARDIAN_READS_ENABLED`, `ARTIFACT_LEGACY_UID_FALLBACK` and the allowlist stay deliberate GCP actions; the checklist displays their state as reported by the audit and marks them "yours".
 
+## Two confirmations folded in
+
+- **Tier is resolved server-side only.** The edge function derives the acting user from the verified JWT and checks `super_admin` against `user_roles` in the database (same pattern as the existing `is_hr_admin` check). `isSuperAdmin` in the client only hides UI; it grants nothing. No role, tier, or actor field is ever read from the request body.
+- **The minor id list is validated in the wrapper too.** The `backfillElationReports` HTTP wrapper independently loads each id's patient doc and rejects anything without `dependent.isMinor === true`, returning the rejected ids. The edge function and UI validate as well, but the wrapper is the authority.
+- **Review before real data.** The new `portal-admin` actions and the wrapper are delivered for your agent's review first; nothing runs against production until that review clears.
+
 ## Technical notes
 
-- New actions go in `supabase/functions/portal-admin/index.ts`: added to `FUNCTION_BY_ACTION` and `BATCH_ACTIONS`; dry-runs are `ADMIN_ONLY`, applies go through a new `SUPER_ADMIN_ONLY` list with a mandatory reason and an audit-row-first write.
-- Client work: extend `src/hooks/usePortalAdmin.ts` (using `isSuperAdmin` from `useAuth`), add `src/components/admin/BackfillRunner.tsx`, `GuardianLinkReview.tsx`, `GoLiveChecklist.tsx`, and new tabs in `src/pages/admin/AdminHome.tsx`.
-- Handoff bundle gets the `backfillElationReports` HTTP wrapper plus its `lock-admin-invokers.yml` entry for your agent to land in the portal repo.
-- No change to any read path, no change to the flags.
+- New actions in `supabase/functions/portal-admin/index.ts`: `backfillUids`, `backfillArtifacts`, `backfillMinorReports` added to `FUNCTION_BY_ACTION` and `BATCH_ACTIONS`. Dry-run (`apply` absent/false) requires admin; `apply: true` requires `super_admin` plus a reason, and writes the `portal_admin_actions` row before the upstream call — a failed audit write returns 503 and makes no call.
+- Client work: extend `src/hooks/usePortalAdmin.ts` (using `isSuperAdmin` from `useAuth` for display only), add `src/components/admin/BackfillRunner.tsx`, `GoLiveChecklist.tsx`, later `GuardianLinkReview.tsx`, and new tabs in `src/pages/admin/AdminHome.tsx`.
+- Handoff bundle gets the `backfillElationReports` HTTP wrapper (`requireAdminCaller` + minor-set validation) plus its `lock-admin-invokers.yml` entry.
+- No change to any read path, no change to any flag.
 
-## Suggested scope for this pass
+## Scope for this pass
 
-Backfill runner + go-live checklist first (they remove the most Cloud Shell), guardian-link review second, minor-track runner last since it needs the portal-repo wrapper.
+Backfill runner + go-live checklist first, guardian-link review second, minor-track runner last since it needs the portal-repo wrapper.
+
+## Two calls you asked me for
+
+- **Reconciler + paired sweep invite-state stamp: fast-follow, not this deploy.** It is not on the guardian-read critical path, and adding it widens the Phase 0 export list and the invoker-lock array in the same deploy that carries the ingest and re-key changes. Keep this deploy to the gate-critical set; land the reconciler on its own PR once the gate is green.
+- **Read-path reason enumeration:** I will produce the canonical `reason` constant list from `src/lib/portal/exceptions.ts` and the nine read handlers as a short reference doc in the handoff bundle, so the portal side can diff its 403 family against it. Included in this pass.
+
 
