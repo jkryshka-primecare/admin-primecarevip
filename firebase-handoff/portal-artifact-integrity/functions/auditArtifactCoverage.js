@@ -136,6 +136,17 @@ async function runAudit() {
   const unpathed = [];
   const errored = [];
   const errorStatusCounts = {};
+  // Release 2b Part B: adult and minor are reported SEPARATELY. A single
+  // rounded "100%" must never be able to hide a cohort the minor-ingest track
+  // never populated.
+  const splits = {
+    adult: { referenced: 0, present: 0, missing: 0, unpathed: 0, errored: 0 },
+    minor: { referenced: 0, present: 0, missing: 0, unpathed: 0, errored: 0 },
+  };
+  const bump = (cohort, field) => {
+    const s = splits[cohort === 'minor' ? 'minor' : 'adult'];
+    s[field] += 1;
+  };
 
   const priorSnap = await db
     .collection('artifact_repair_queue')
