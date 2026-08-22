@@ -26,7 +26,16 @@
 const admin = require('firebase-admin');
 
 const SOURCES = ['hint_household', 'inferred_email_name', 'manual', 'email_on_file'];
+// The admin CSV export writes 'manual_search'; the loader remaps it, but accept
+// the alias here too so a direct API caller can never wedge on vocabulary drift.
+const SOURCE_ALIASES = { manual_search: 'manual' };
 const STATUSES = ['active', 'pending_adult_consent', 'revoked'];
+
+function normalizeSource(source) {
+  const s = String(source || '').trim();
+  return SOURCE_ALIASES[s] || s;
+}
+
 
 /** Identity of a guardian entry: elation id when we have a chart, else email. */
 function guardianKey(entry) {
