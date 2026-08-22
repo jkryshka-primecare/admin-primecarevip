@@ -297,8 +297,19 @@ async function cleanup() {
   await writableBucket().deleteFiles({ prefix: 'elation-artifacts/redteam-', force: true });
 }
 
+/**
+ * An authenticated account with NO patient record of its own — the phase-2
+ * "guardian-only" account type, seeded here in phase 1 purely as a regression
+ * fence: it must never authorize against a null-`guardianElationId` entry.
+ */
+async function seedGuardianOnlyAccount() {
+  const uid = `${uniqueId('guardianonly')}-uid`.toLowerCase();
+  return { patientId: null, firebaseUid: uid, token: await mintPatientToken(uid) };
+}
+
 module.exports = {
   seedPatient,
+  seedGuardianOnlyAccount,
   seedDocument,
   healArtifact,
   accessLogRows,
