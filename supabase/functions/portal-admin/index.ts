@@ -30,7 +30,10 @@ type Action =
   | "provision"
   | "runAudit"
   | "smoke"
-  | "unclaimedGuardians";
+  | "unclaimedGuardians"
+  | "backfillUids"
+  | "backfillArtifacts"
+  | "backfillMinorReports";
 
 const FUNCTION_BY_ACTION: Record<Action, string> = {
   get: "adminGetPortalAccess",
@@ -41,6 +44,9 @@ const FUNCTION_BY_ACTION: Record<Action, string> = {
   runAudit: "adminRunArtifactAudit",
   smoke: "adminRunReadPathSmoke",
   unclaimedGuardians: "adminUnclaimedGuardiansReport",
+  backfillUids: "backfillInternalUids",
+  backfillArtifacts: "backfillArtifactObjects",
+  backfillMinorReports: "backfillElationReports",
 };
 
 const MUTATIONS: Action[] = ["invite", "revoke", "setAccess", "provision"];
@@ -51,8 +57,55 @@ const MUTATIONS: Action[] = ["invite", "revoke", "setAccess", "provision"];
  */
 const ADMIN_ONLY: Action[] = ["runAudit", "smoke", "unclaimedGuardians"];
 
+/**
+ * Release 2b Part B bulk migrations. Blast radius is bulk PHI, not one record:
+ *   - a DRY RUN (`apply` absent/false) needs admin, like any other check;
+ *   - an APPLY needs the narrowest tier, `super_admin`, resolved server-side
+ *     from the verified session — never from anything the client sends;
+ *   - an APPLY writes its `portal_admin_actions` row BEFORE the upstream call
+ *     and refuses to call if that write fails. The Cloud Function only ever
+ *     sees `portal-admin`, so this row is the sole human-attribution record
+ *     for a PHI migration.
+ */
+const BULK_MIGRATIONS: Action[] = ["backfillUids", "backfillArtifacts", "backfillMinorReports"];
+
 /** Actions that act on a set of members rather than a single patient. */
-const BATCH_ACTIONS: Action[] = ["provision", "runAudit", "smoke", "unclaimedGuardians"];
+const BATCH_ACTIONS: Action[] = [
+  "provision",
+  "runAudit",
+  "smoke",
+  "unclaimedGuardians",
+  ...BULK_MIGRATIONS,
+];
+
+/** Upper bound on one minor-track ingest call. The 2b cohort is ~175. */
+const MAX_MINOR_IDS = 500;
+
+/**
+ * Elation chart ids for the minor-track ingest. Shape-validated here and
+ * re-validated against the real `dependent.isMinor` set inside the
+ * `backfillElationReports` HTTP wrapper — that wrapper is the authority; this
+ * list is a convenience and a fast failure.
+ */
+function parseMinorIds(raw: unknown): string[] | string {
+  if (!Array.isArray(raw) || raw.length === 0) {
+    return "Provide at least one minor Elation patient id.";
+  }
+  if (raw.length > MAX_MINOR_IDS) {
+    return `Ingest at most ${MAX_MINOR_IDS} patients at a time (received ${raw.length}).`;
+  }
+  const out: string[] = [];
+  const seen = new Set<string>();
+  for (const item of raw) {
+    const id = String(item ?? "").trim();
+    if (!/^\d{6,25}$/.test(id)) return `"${id.slice(0, 40)}" is not a valid Elation patient id.`;
+    if (seen.has(id)) return `Patient ${id} appears twice in the list.`;
+    seen.add(id);
+    out.push(id);
+  }
+  return out;
+}
+
 
 
 /**
@@ -310,6 +363,21 @@ async function isAdmin(ctx: AuthContext): Promise<boolean> {
   return Boolean(data);
 }
 
+/**
+ * The narrowest tier, resolved from the DATABASE against the uid in the
+ * verified session. Nothing in the request body can influence it — the client
+ * only ever hides buttons, it never grants anything.
+ */
+async function isSuperAdmin(ctx: AuthContext): Promise<boolean> {
+  const { data, error } = await ctx.supabase.rpc("has_role", {
+    _user_id: ctx.user.id,
+    _role: "super_admin",
+  });
+  if (error) return false;
+  return Boolean(data);
+}
+
+
 async function recordAction(
   ctx: AuthContext,
   entry: {
@@ -341,6 +409,32 @@ async function recordAction(
     // phi_access_log write below is the second, independent trail.
   }
 }
+
+/**
+ * Attribution-first audit write for bulk PHI migrations. Unlike recordAction
+ * this FAILS CLOSED: the caller must not touch the upstream function if this
+ * returns false. Upstream only ever sees `portal-admin`, so if this row is
+ * missing there is no record anywhere of which human ran the migration.
+ */
+async function recordActionStrict(
+  ctx: AuthContext,
+  entry: { action: string; reason: string; after?: unknown },
+): Promise<boolean> {
+  const { error } = await ctx.supabase.from("portal_admin_actions").insert({
+    actor_user_id: ctx.user.id,
+    actor_email: ctx.user.email ?? null,
+    elation_patient_id: null,
+    action: entry.action,
+    reason: entry.reason,
+    before_state: null as never,
+    after_state: (entry.after ?? null) as never,
+    ok: false,
+    http_status: null,
+    error_message: "started — awaiting upstream result",
+  });
+  return !error;
+}
+
 
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: corsHeaders });
@@ -380,6 +474,29 @@ Deno.serve(async (req) => {
     return deny(403, "Only administrators can run coverage and read-path checks.");
   }
 
+  const isBulk = BULK_MIGRATIONS.includes(action);
+  const bulkApply = isBulk && body.apply === true;
+  let minorIds: string[] = [];
+
+  if (isBulk) {
+    if (!(await isAdmin(ctx))) {
+      return deny(403, "Only administrators can run migration checks.");
+    }
+    if (bulkApply) {
+      // Tier resolved server-side from the verified session only.
+      if (!(await isSuperAdmin(ctx))) {
+        return deny(403, "Only a super administrator can apply a bulk migration.");
+      }
+      if (!reason) {
+        return deny(400, "A written reason is required to apply a bulk migration.");
+      }
+    }
+    if (action === "backfillMinorReports") {
+      const parsed = parseMinorIds(body.patientIds);
+      if (typeof parsed === "string") return deny(400, parsed);
+      minorIds = parsed;
+    }
+  }
 
   let provisionMembers: ProvisionMember[] = [];
   if (action === "provision") {
@@ -387,6 +504,7 @@ Deno.serve(async (req) => {
     if (typeof parsed === "string") return deny(400, parsed);
     provisionMembers = parsed;
   }
+
 
   // The acting person is taken from the verified session, never from the
   // client payload — the service account identifies the system, this
@@ -410,10 +528,46 @@ Deno.serve(async (req) => {
     // refuses to send anything; this makes the intent explicit on the wire.
     upstreamPayload.sendInvite = false;
   }
+  if (isBulk) {
+    // Dry run unless the caller explicitly asked to apply AND cleared the
+    // super-admin gate above.
+    upstreamPayload.apply = bulkApply;
+    const limit = Number(body.limit);
+    if (Number.isFinite(limit) && limit > 0) upstreamPayload.limit = Math.floor(limit);
+    if (typeof body.cursor === "string" && body.cursor) upstreamPayload.cursor = body.cursor;
+    if (action === "backfillMinorReports") upstreamPayload.patientIds = minorIds;
+  }
 
   const fnName = FUNCTION_BY_ACTION[action];
   const url = `${FUNCTIONS_BASE}/${fnName}`;
   const started = Date.now();
+
+  // GUARDRAIL 3 — attribution before action. A bulk apply does not happen
+  // unless the human is on the record first.
+  if (bulkApply) {
+    const attributed = await recordActionStrict(ctx, {
+      action: `${action}:apply`,
+      reason,
+      after: {
+        limit: upstreamPayload.limit ?? null,
+        cursor: upstreamPayload.cursor ?? null,
+        patientIds: action === "backfillMinorReports" ? minorIds : undefined,
+        patientCount: action === "backfillMinorReports" ? minorIds.length : undefined,
+      },
+    });
+    if (!attributed) {
+      return new Response(
+        JSON.stringify({
+          ok: false,
+          status: 503,
+          error:
+            "The attribution record could not be written, so the migration was not run. Try again.",
+        }),
+        { status: 503, headers: { ...corsHeaders, "Content-Type": "application/json" } },
+      );
+    }
+  }
+
 
   const useWif = wifConfigured();
   let sa: ServiceAccount | null = null;
@@ -525,17 +679,34 @@ Deno.serve(async (req) => {
       httpStatus: status,
       errorMessage,
     });
+  } else if (isBulk) {
+    // Outcome row. For an apply this pairs with the pre-call attribution row
+    // written above, so an aborted run still leaves the human on the record.
+    await recordAction(ctx, {
+      elationPatientId: null,
+      action: `${action}:${bulkApply ? "apply-result" : "dry-run"}`,
+      reason: reason || null,
+      after: payload,
+      ok,
+      httpStatus: status,
+      errorMessage,
+    });
   }
 
 
   await logPhiAccess(ctx, req, {
     source: "portal.admin",
     resource: fnName,
-    scope: action,
+    scope: `${action}${isBulk ? (bulkApply ? ":apply" : ":dry-run") : ""}`,
     resource_id: isBatch ? null : elationPatientId,
     http_status: status,
-    row_count: isBatch ? provisionMembers.length : null,
+    row_count: action === "backfillMinorReports"
+      ? minorIds.length
+      : isBatch
+        ? provisionMembers.length
+        : null,
   });
+
 
   return new Response(
     JSON.stringify({

@@ -391,3 +391,57 @@ export function useRunReadPathSmoke() {
     },
   });
 }
+
+// --- Release 2b Part B — bulk migration runners -----------------------------
+//
+// Dry run is the default everywhere. `apply: true` is refused server-side for
+// anyone below super_admin, requires a written reason, and only runs after the
+// attribution row is on the record. `isSuperAdmin` on the client hides the
+// button; it grants nothing.
+
+export type BackfillAction = "backfillUids" | "backfillArtifacts" | "backfillMinorReports";
+
+export type BackfillReport = {
+  apply?: boolean;
+  scanned?: number;
+  alreadyPresent?: number;
+  minted?: number;
+  wouldMint?: number;
+  copied?: number;
+  wouldCopy?: number;
+  noInternalUid?: unknown[];
+  noLegacyObject?: number;
+  failed?: unknown[];
+  remaining?: number;
+  nextCursor?: string | null;
+  done?: boolean;
+  /** Minor-track wrapper: ids the wrapper refused because they are not minors. */
+  rejected?: { patientId: string; reason: string }[];
+  ingested?: number;
+  skipped?: number;
+};
+
+export type BackfillVars = {
+  apply?: boolean;
+  reason?: string;
+  limit?: number;
+  cursor?: string | null;
+  /** Minor-track only. Re-validated against `dependent.isMinor` in the wrapper. */
+  patientIds?: string[];
+};
+
+export function useBackfillRunner(action: BackfillAction) {
+  return useMutation({
+    mutationFn: async (vars: BackfillVars = {}) => {
+      const res = await callPortalAdmin<BackfillReport>({
+        action,
+        apply: vars.apply === true,
+        reason: vars.reason ?? "",
+        ...(vars.limit ? { limit: vars.limit } : {}),
+        ...(vars.cursor ? { cursor: vars.cursor } : {}),
+        ...(vars.patientIds ? { patientIds: vars.patientIds } : {}),
+      });
+      return res.data ?? ({} as BackfillReport);
+    },
+  });
+}
