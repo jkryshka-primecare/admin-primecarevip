@@ -99,14 +99,22 @@ async function seedPatient({ id, suspended = false, bound = true, minor = false 
     minor,
     token,
     /** Attach `guardian` (a seedPatient handle) as a proxy on THIS record. */
-    async linkGuardian(guardian, { status = 'active' } = {}) {
+    /**
+     * Attach `guardian` (a seedPatient handle) as a proxy on THIS record.
+     * `bindUid: false` mirrors PRODUCTION reality — every loaded guardian link
+     * has `guardianUid: null` because nothing ever bound it — which is what the
+     * phase-1 chart-backed resolver has to authorize.
+     * `emailOnly: true` seeds an `email_on_file` entry with a NULL
+     * guardianElationId, the shape the null-equality fence must never match.
+     */
+    async linkGuardian(guardian, { status = 'active', bindUid = true, emailOnly = false } = {}) {
       await db().collection('patients').doc(patientId).set(
         {
           guardians: admin.firestore.FieldValue.arrayUnion({
-            guardianElationId: guardian.patientId,
+            guardianElationId: emailOnly ? null : guardian.patientId,
             guardianEmail: `${guardian.patientId}@example.test`,
-            guardianUid: guardian.firebaseUid,
-            source: 'manual',
+            guardianUid: bindUid && !emailOnly ? guardian.firebaseUid : null,
+            source: emailOnly ? 'email_on_file' : 'manual',
             status,
             confirmedBy: 'redteam',
             reason: 'redteam',
@@ -114,6 +122,11 @@ async function seedPatient({ id, suspended = false, bound = true, minor = false 
         },
         { merge: true },
       );
+    },
+    /** Raw guardian entries, so a test can assert exactly which one got bound. */
+    async guardianEntries() {
+      const snap = await db().collection('patients').doc(patientId).get();
+      return snap.get('guardians') || [];
     },
     /** Flip one guardian entry's status (revoked / pending_adult_consent). */
     async setGuardianStatus(guardian, status) {
