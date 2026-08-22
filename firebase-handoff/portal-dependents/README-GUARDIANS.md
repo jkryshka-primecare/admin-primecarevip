@@ -209,3 +209,13 @@ reference in `reason` + `portalAdminAudit`:
 - **"Withhold category X from parent A only"** (per-guardian *and* per-category)
   → not expressible today. Fall back to revoking parent A entirely; escalate to
   counsel.
+
+## Blocker before the flag flips — minor ingest
+
+Guardian authorization is inert until minors actually have artifacts. See
+`README-MINOR-INGEST.md`: minors carry **no** `labs` documents today (provisioning
+writes none; ingest is gated on `status === 'active'`, which minors never reach;
+object upload is keyed on `firebaseUid`, which minors never have). The 2a
+self-heal machinery cannot close this on its own — minors are outside the
+coverage audit's denominator. A minor-ingest change in the portal repo is
+required, sequenced in that file.
