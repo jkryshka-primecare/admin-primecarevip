@@ -136,6 +136,17 @@ async function runAudit() {
   const unpathed = [];
   const errored = [];
   const errorStatusCounts = {};
+  // Release 2b Part B: adult and minor are reported SEPARATELY. A single
+  // rounded "100%" must never be able to hide a cohort the minor-ingest track
+  // never populated.
+  const splits = {
+    adult: { referenced: 0, present: 0, missing: 0, unpathed: 0, errored: 0 },
+    minor: { referenced: 0, present: 0, missing: 0, unpathed: 0, errored: 0 },
+  };
+  const bump = (cohort, field) => {
+    const s = splits[cohort === 'minor' ? 'minor' : 'adult'];
+    s[field] += 1;
+  };
 
   const priorSnap = await db
     .collection('artifact_repair_queue')
@@ -155,16 +166,20 @@ async function runAudit() {
       const patientId = doc.ref.parent.parent ? doc.ref.parent.parent.id : null;
       // eslint-disable-next-line no-await-in-loop
       const keys = await uidFor(patientId);
+      const cohort = keys && keys.isMinor ? 'minor' : 'adult';
+      bump(cohort, 'referenced');
       const path = expectedPath(doc, keys);
       if (!path) {
+        bump(cohort, 'unpathed');
         unpathed.push({
           patientId,
           documentId: doc.id,
+          cohort,
           reason: 'no artifactPath and patient has no internalUid (or legacy uid)',
         });
         continue;
       }
-      pathed.push({ patientId, documentId: doc.id, path });
+      pathed.push({ patientId, documentId: doc.id, path, cohort });
     }
 
 
@@ -173,16 +188,19 @@ async function runAudit() {
       const probe = probes[i] || { state: 'error', status: null, message: 'no probe result' };
       if (probe.state === 'present') {
         presentCount += 1;
+        bump(p.cohort, 'present');
         return;
       }
       if (probe.state === 'error') {
         // "Couldn't check" is NOT "absent". Never queued for repair.
         const key = String(probe.status || 'unknown');
         errorStatusCounts[key] = (errorStatusCounts[key] || 0) + 1;
+        bump(p.cohort, 'errored');
         errored.push({ ...p, status: probe.status, message: probe.message });
         return;
       }
       const known = prior.get(`${p.patientId}:${p.documentId}`) || {};
+      bump(p.cohort, 'missing');
       missing.push({
         ...p,
         firstSeenAt: known.firstSeenAt || new Date().toISOString(),
@@ -199,6 +217,19 @@ async function runAudit() {
   // A systemic storage failure (IAM denial, bucket gone) must fail the run, not
   // be laundered into a coverage number or a repair queue full of ghosts.
   const systemicStorageFailure = probed > 0 && erroredCount / probed >= 0.25;
+
+  // Per-cohort coverage. `null` means "nothing referenced in this cohort" —
+  // which for `minor` before the minor-ingest deploy is the EXPECTED value and
+  // is NOT a pass. The Part B join gate requires both splits at 100 with a
+  // non-zero denominator.
+  const pct = (s) => {
+    const c = s.present + s.missing;
+    return systemicStorageFailure || c === 0 ? null : (s.present / c) * 100;
+  };
+  const bySegment = {
+    adult: { ...splits.adult, coveragePct: pct(splits.adult) },
+    minor: { ...splits.minor, coveragePct: pct(splits.minor) },
+  };
 
   const report = {
     generatedAt: new Date().toISOString(),
@@ -228,6 +259,7 @@ async function runAudit() {
     // full set always lives in artifact_repair_queue.
     missing: missing.slice(0, 500),
     missingTruncated: missingCount > 500,
+    bySegment,
   };
 
   await db.collection('artifact_coverage_reports').doc(runId).set(report);
@@ -280,6 +312,7 @@ exports.auditArtifactCoverageScheduled = functions
       coveragePct: out.coveragePct,
       missingCount: out.missingCount,
       erroredCount: out.erroredCount,
+      bySegment: out.bySegment,
       status: out.status,
       truncatedWalk: out.truncatedWalk,
     });
@@ -311,6 +344,7 @@ exports.auditArtifactCoverageOnDemand = functions
       coveragePct: out.coveragePct,
       missingCount: out.missingCount,
       erroredCount: out.erroredCount,
+      bySegment: out.bySegment,
       status: out.status,
       truncatedWalk: out.truncatedWalk,
     });

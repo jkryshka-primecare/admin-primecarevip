@@ -51,17 +51,22 @@ A **minor-ingest** change in the portal repo's ingest path, not in this bundle:
   and the sweep heals them from `/printable`. Report coverage split adult/minor so
   a minor gap can't hide inside a rounded 100%.
 
-## Sequencing this into the Part B runbook
+## Sequencing
 
-```
-backfillInternalUids (adults + minors)
-  -> minor-ingest change deployed (ingest gate + internalUid-keyed upload)
-  -> minors added to ELATION_READ_ALLOWLIST
-  -> backfillElationReports over the 175 minor ids
-  -> auditArtifactCoverage 100% with minors IN the denominator
-  -> one real guardian resolves one real child PDF end to end  (Condition 1)
-  -> red-team Run 1 / 2 / 2b green + mutation
-  -> GUARDIAN_READS_ENABLED = true
-```
+Superseded by the merged runbook: **`README-PART-B-RUNBOOK.md`** — one order for
+the adult (re-key) and minor (ingest) tracks, with a single join gate:
+`auditArtifactCoverage` at 100% on **both** `bySegment.adult` and
+`bySegment.minor`, each with a non-zero denominator. `GUARDIAN_READS_ENABLED`
+stays OFF until that gate, one real end-to-end guardian read, and the red-team
+runs are all done.
 
-`GUARDIAN_READS_ENABLED` stays **OFF** until every line above is done.
+## Built
+
+- `functions/core/services/patient/ingestEligibility.js` — the shared gate.
+  Admits an unclaimed record only when `dependent.isMinor === true` **and** at
+  least one guardian entry is `active`; D-068 allowlist still checked first.
+- `MINOR-INGEST-CHANGES.md` — the two portal-repo function changes for review,
+  with the PR notes proving the `hasArtifact:false` removal is minor-only and
+  that `ensureInternalUid()` in the upload can only ever be a fallback.
+- `auditArtifactCoverage.js` now reports `bySegment.adult` / `bySegment.minor`.
+

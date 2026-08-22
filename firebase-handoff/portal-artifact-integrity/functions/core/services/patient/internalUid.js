@@ -44,16 +44,19 @@ function legacyUidOf(snapOrData) {
 
 /**
  * Read the record's internalUid. Read-only: it does NOT mint.
- * Returns `{ internalUid, legacyUid }`; either may be null.
+ * Returns `{ internalUid, legacyUid, isMinor }`; uids may be null.
+ * `isMinor` lets callers (the coverage audit) split adult vs minor cohorts
+ * without a second read of the same patient doc.
  */
 async function getInternalUid(elationPatientId, db = admin.firestore()) {
-  if (!elationPatientId) return { internalUid: null, legacyUid: null };
+  if (!elationPatientId) return { internalUid: null, legacyUid: null, isMinor: false };
   const snap = await db.collection('patients').doc(String(elationPatientId)).get();
-  if (!snap.exists) return { internalUid: null, legacyUid: null };
+  if (!snap.exists) return { internalUid: null, legacyUid: null, isMinor: false };
   const value = snap.get(FIELD);
   return {
     internalUid: value ? String(value) : null,
     legacyUid: legacyUidOf(snap),
+    isMinor: snap.get('dependent.isMinor') === true,
   };
 }
 
@@ -100,14 +103,14 @@ function legacyFallbackEnabled() {
 function makeInternalUidResolver(db = admin.firestore()) {
   const cache = new Map();
   return async function resolve(elationPatientId) {
-    if (!elationPatientId) return { internalUid: null, legacyUid: null };
+    if (!elationPatientId) return { internalUid: null, legacyUid: null, isMinor: false };
     const key = String(elationPatientId);
     if (cache.has(key)) return cache.get(key);
     let value;
     try {
       value = await getInternalUid(key, db);
     } catch (_e) {
-      value = { internalUid: null, legacyUid: null };
+      value = { internalUid: null, legacyUid: null, isMinor: false };
     }
     cache.set(key, value);
     return value;
