@@ -285,8 +285,11 @@ async function bindGuardianUid(childElationId, selector, uid) {
 
 module.exports = {
   SOURCES,
+  SOURCE_ALIASES,
+  normalizeSource,
   STATUSES,
   guardianKey,
+
   eighteenthBirthday,
   isMinorOn,
   linkGuardian,
