@@ -177,19 +177,21 @@ async function runAudit() {
       // eslint-disable-next-line no-await-in-loop
       const keys = await uidFor(patientId);
       const cohort = keys && keys.isMinor ? 'minor' : 'adult';
-      bump(cohort, 'referenced');
+      const chartBacked = Boolean(keys && keys.chartBacked);
+      bump(cohort, 'referenced', chartBacked);
       const path = expectedPath(doc, keys);
       if (!path) {
-        bump(cohort, 'unpathed');
+        bump(cohort, 'unpathed', chartBacked);
         unpathed.push({
           patientId,
           documentId: doc.id,
           cohort,
+          chartBacked,
           reason: 'no artifactPath and patient has no internalUid (or legacy uid)',
         });
         continue;
       }
-      pathed.push({ patientId, documentId: doc.id, path, cohort });
+      pathed.push({ patientId, documentId: doc.id, path, cohort, chartBacked });
     }
 
 
@@ -198,19 +200,19 @@ async function runAudit() {
       const probe = probes[i] || { state: 'error', status: null, message: 'no probe result' };
       if (probe.state === 'present') {
         presentCount += 1;
-        bump(p.cohort, 'present');
+        bump(p.cohort, 'present', p.chartBacked);
         return;
       }
       if (probe.state === 'error') {
         // "Couldn't check" is NOT "absent". Never queued for repair.
         const key = String(probe.status || 'unknown');
         errorStatusCounts[key] = (errorStatusCounts[key] || 0) + 1;
-        bump(p.cohort, 'errored');
+        bump(p.cohort, 'errored', p.chartBacked);
         errored.push({ ...p, status: probe.status, message: probe.message });
         return;
       }
       const known = prior.get(`${p.patientId}:${p.documentId}`) || {};
-      bump(p.cohort, 'missing');
+      bump(p.cohort, 'missing', p.chartBacked);
       missing.push({
         ...p,
         firstSeenAt: known.firstSeenAt || new Date().toISOString(),
@@ -238,7 +240,17 @@ async function runAudit() {
   };
   const bySegment = {
     adult: { ...splits.adult, coveragePct: pct(splits.adult) },
-    minor: { ...splits.minor, coveragePct: pct(splits.minor) },
+    minor: {
+      ...splits.minor,
+      coveragePct: pct(splits.minor),
+      // Sub-split so "minor at 100%" can be read honestly: phase 1 ingests the
+      // chart-backed set; `emailOnFile` is expected to be 0-denominator until
+      // phase 2 and its `coveragePct: null` is not a pass, just not yet in scope.
+      byLinkage: {
+        chartBacked: { ...minorLinkage.chartBacked, coveragePct: pct(minorLinkage.chartBacked) },
+        emailOnFile: { ...minorLinkage.emailOnFile, coveragePct: pct(minorLinkage.emailOnFile) },
+      },
+    },
   };
 
   const report = {
