@@ -186,9 +186,9 @@ async function handleArtifactRead(req, params = {}) {
   }
   const selfElationId = doc && doc.id ? String(doc.id) : null;
 
-  // The caller MAY name a child. That id is untrusted until isActiveGuardian
-  // passes: no internalUid resolution, no Storage touch, no signed URL and no
-  // repair enqueue happen before authorization succeeds.
+  // The caller MAY name a child. That id is untrusted until
+  // resolveGuardianAccess passes: no internalUid resolution, no Storage touch,
+  // no signed URL and no repair enqueue happen before authorization succeeds.
   const requestedChildId = String(
     (params && params.childElationId) || (req && req.body && req.body.childElationId) || '',
   ).trim();
@@ -198,13 +198,21 @@ async function handleArtifactRead(req, params = {}) {
   }
 
   let mode = null;
+  let guardianAccess = null;
   if (selfElationId && selfElationId === elationPatientId) {
     mode = 'self';
-  } else if (guardianReadsEnabled() && (await isActiveGuardian(elationPatientId, uid))) {
-    // isActiveGuardian fails CLOSED: it requires status === 'active' and a
-    // strict guardianUid === uid match, and denies on any error. A revoked or
-    // pending_adult_consent entry is not active, so it lands in the else below.
-    mode = 'guardian';
+  } else if (guardianReadsEnabled()) {
+    // Phase 1 (chart-backed): authorization is the strict, both-non-empty match
+    // of the caller's OWN elation record id against the entry's
+    // guardianElationId, plus status === 'active'. A caller with no owned
+    // record (selfElationId null) is denied before any comparison, so a
+    // null-guardianElationId (email_on_file) entry can never be matched.
+    // Fails CLOSED; the uid bind inside is best-effort only.
+    guardianAccess = await resolveGuardianAccess(elationPatientId, {
+      uid,
+      callerElationId: selfElationId,
+    });
+    if (guardianAccess && guardianAccess.authorized) mode = 'guardian';
   }
   if (!mode) {
     // Absence-never-forbidden: an unlinked, revoked or pending target answers
@@ -212,6 +220,14 @@ async function handleArtifactRead(req, params = {}) {
     await logAccess({ actingUid: uid, subjectElationId: null, reportId, moduleKey, mode: 'denied', outcome: 'unauthorized' });
     throw notSynced();
   }
+  if (guardianAccess && guardianAccess.bound && guardianAccess.reason === 'CHART_MATCH') {
+    // Audit the bind itself with both uids, as with the read.
+    await logAccess({
+      actingUid: uid, subjectUid: null, subjectElationId: elationPatientId,
+      reportId, moduleKey, mode: 'guardian', outcome: 'guardian_uid_bound',
+    });
+  }
+
 
   // 3. Pre-G9 allowlist gate — fail closed, on the SUBJECT's record.
   if (!isReadAllowed(elationPatientId)) {
