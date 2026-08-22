@@ -344,6 +344,42 @@ export type SmokeReport = {
  * fixture's portalAccess to prove hidden/suspended behaviour and restores it
  * verbatim — no real member is touched.
  */
+export type UnclaimedGuardianRow = {
+  childElationId: string;
+  guardianElationId: string | null;
+  guardianEmail: string | null;
+  guardianName: string | null;
+  source: string | null;
+  blocker: "GUARDIAN_HAS_NO_PORTAL_ACCOUNT" | "EMAIL_ONLY_PHASE_2" | string;
+};
+
+export type UnclaimedGuardiansReport = {
+  generatedAt?: string;
+  summary?: { minors: number; activeLinks: number; claimed: number; unclaimed: number };
+  rows: UnclaimedGuardianRow[];
+};
+
+/**
+ * Release 2b phase 1 — active guardian links that cannot authorize a read yet.
+ *
+ * Read-only upstream (`adminUnclaimedGuardiansReport`), admin-only, and the
+ * call itself is audited by the bridge. Deliberately a mutation, not a query:
+ * it returns guardian PHI, so it must never fire on render — only when staff
+ * ask for it.
+ */
+export function useUnclaimedGuardians() {
+  return useMutation({
+    mutationFn: async (vars?: { reason?: string }) => {
+      const res = await callPortalAdmin<UnclaimedGuardiansReport>({
+        action: "unclaimedGuardians",
+        reason: vars?.reason ?? "Guardian link review from the admin OS",
+      });
+      const data = res.data ?? ({} as UnclaimedGuardiansReport);
+      return { ...data, rows: Array.isArray(data.rows) ? data.rows : [] };
+    },
+  });
+}
+
 export function useRunReadPathSmoke() {
   return useMutation({
     mutationFn: async (vars?: { reason?: string }) => {
