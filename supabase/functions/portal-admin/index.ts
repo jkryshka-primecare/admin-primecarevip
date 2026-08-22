@@ -679,17 +679,34 @@ Deno.serve(async (req) => {
       httpStatus: status,
       errorMessage,
     });
+  } else if (isBulk) {
+    // Outcome row. For an apply this pairs with the pre-call attribution row
+    // written above, so an aborted run still leaves the human on the record.
+    await recordAction(ctx, {
+      elationPatientId: null,
+      action: `${action}:${bulkApply ? "apply-result" : "dry-run"}`,
+      reason: reason || null,
+      after: payload,
+      ok,
+      httpStatus: status,
+      errorMessage,
+    });
   }
 
 
   await logPhiAccess(ctx, req, {
     source: "portal.admin",
     resource: fnName,
-    scope: action,
+    scope: `${action}${isBulk ? (bulkApply ? ":apply" : ":dry-run") : ""}`,
     resource_id: isBatch ? null : elationPatientId,
     http_status: status,
-    row_count: isBatch ? provisionMembers.length : null,
+    row_count: action === "backfillMinorReports"
+      ? minorIds.length
+      : isBatch
+        ? provisionMembers.length
+        : null,
   });
+
 
   return new Response(
     JSON.stringify({
