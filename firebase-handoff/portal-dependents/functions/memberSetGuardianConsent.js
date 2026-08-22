@@ -3,8 +3,9 @@
 // member answers "keep sharing with your guardian?".
 //
 // This is the ONLY endpoint in 2b that a patient token may call. It can act on
-// exactly one record — the caller's own — and can only move entries between
-// 'active' and 'revoked'. It can never create a guardian.
+// exactly one record — the caller's own — and can only resolve entries that are
+// already 'pending_adult_consent' into 'active' or 'revoked'. It can never
+// create a guardian, and never touches an already-revoked entry.
 
 const functions = require('firebase-functions');
 const admin = require('firebase-admin');

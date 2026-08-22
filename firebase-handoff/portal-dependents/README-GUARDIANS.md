@@ -57,6 +57,15 @@ the member app and Cloud Functions must implement.
 
 ## Functions (source in `functions/`, ready to commit)
 
+Both admin functions are listed in `lock-admin-invokers.yml` — the post-deploy
+step strips the public `allUsers` invoker so `portal-admin` is the only caller.
+Run the batch loader as that service account (impersonated ADC); a plain user
+ADC gets 403 at IAM before `requireAdminCaller` runs.
+
+Merge — do not replace — the composite index below into the *complete*
+`firestore.indexes.json`; the deploy runs `--force`, which deletes any index not
+in the file.
+
 - `adminLinkGuardian` — admin-only, requires reason, writes one guardian entry
   (idempotent per guardian; called once per parent), audited. Rejects a link where the child is 18+.
 - `adminRevokeGuardian` — same shape, sets `status: "revoked"`. The entry is kept, never deleted.
@@ -67,6 +76,16 @@ the member app and Cloud Functions must implement.
   sets each `pending_adult_consent` entry to `active` or `revoked`.
 
 Shared model: `core/services/patient/guardians.js`.
+
+`bindGuardianUid(childElationId, selector, uid)` binds **one** entry, selected by
+`guardianKey` (pass the key the invite token was issued for). Email-only binding
+is unsafe: two parents can share one address, and binding both entries to the
+first claimer fuses the proxies and breaks per-parent revocation. Only `active`
+or `pending_adult_consent` entries are bindable; log `actingUid` + `subjectUid`
+on every bind.
+
+Note: re-running the loader over a manually revoked entry re-activates it
+(`linkGuardian` is idempotent by design). Revoke after any replay, not before.
 
 ### Install
 
@@ -151,15 +170,14 @@ identical to a patient guardian. The CSV now always includes a
 ## Final export (2026-08-22)
 
 `guardian-links-final-2026-08-22.csv` — staff-finalized, this is the batch to
-load. 194 links across 176 minors (18 children with two guardians):
+load. 194 links across 175 minors (19 children with two guardians):
 
 - 119 `inferred_email_name`
 - 40 `email_on_file` (invite the address, bind proxy on claim)
 - 35 `manual_search`
 
 Validated: every row has a guardian email, no duplicate (minor, guardian) pairs,
-no malformed addresses. `minor_elation_id` is populated for every minor except
-one — **vivienn Schwab (`pat-SIz4AU3unU2i`)**, whose Elation chart did not
-resolve; hold that row until the chart id is supplied manually. For 30
+no malformed addresses. `minor_elation_id` is populated for every minor (the last holdout chart was
+resolved in the admin panel). For 30
 `email_on_file` rows staff left the guardian name as the email address; the
 invite should fall back to the email for display.

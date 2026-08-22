@@ -26,7 +26,16 @@
 const admin = require('firebase-admin');
 
 const SOURCES = ['hint_household', 'inferred_email_name', 'manual', 'email_on_file'];
+// The admin CSV export writes 'manual_search'; the loader remaps it, but accept
+// the alias here too so a direct API caller can never wedge on vocabulary drift.
+const SOURCE_ALIASES = { manual_search: 'manual' };
 const STATUSES = ['active', 'pending_adult_consent', 'revoked'];
+
+function normalizeSource(source) {
+  const s = String(source || '').trim();
+  return SOURCE_ALIASES[s] || s;
+}
+
 
 /** Identity of a guardian entry: elation id when we have a chart, else email. */
 function guardianKey(entry) {
@@ -77,9 +86,10 @@ function sanitizeEntry(entry) {
  *
  * Throws Error with .reason set to a stable code for the HTTP layer.
  */
-async function linkGuardian(childElationId, entry, actor, reason) {
+async function linkGuardian(childElationId, rawEntry, actor, reason) {
   const db = admin.firestore();
   const ref = db.collection('patients').doc(String(childElationId));
+  const entry = { ...rawEntry, source: normalizeSource(rawEntry.source) };
 
   if (!SOURCES.includes(entry.source)) {
     const e = new Error('unknown source');
@@ -91,6 +101,7 @@ async function linkGuardian(childElationId, entry, actor, reason) {
     e.reason = 'GUARDIAN_IDENTITY_REQUIRED';
     throw e;
   }
+
 
   return db.runTransaction(async (tx) => {
     const snap = await tx.get(ref);
@@ -114,11 +125,17 @@ async function linkGuardian(childElationId, entry, actor, reason) {
       e.reason = 'CHILD_IS_ADULT';
       throw e;
     }
-    if (String(childElationId) === String(entry.guardianElationId || '')) {
+    const childEmail = String(data.email || data.contactEmail || '').trim().toLowerCase();
+    const guardianEmail = String(entry.guardianEmail || '').trim().toLowerCase();
+    const selfById =
+      entry.guardianElationId && String(childElationId) === String(entry.guardianElationId);
+    const selfByEmail = guardianEmail && childEmail && guardianEmail === childEmail;
+    if (selfById || selfByEmail) {
       const e = new Error('self link');
       e.reason = 'SELF_LINK_REJECTED';
       throw e;
     }
+
 
     const now = admin.firestore.Timestamp.now();
     const existing = Array.isArray(data.guardians) ? data.guardians.slice() : [];
@@ -220,33 +237,59 @@ async function isActiveGuardian(childElationId, uid) {
   }
 }
 
-/** Bind a uid to a guardian entry the first time that guardian claims/proxies. */
-async function bindGuardianUid(childElationId, email, uid) {
+/**
+ * Bind a uid to exactly ONE guardian entry, the first time that guardian
+ * claims/proxies.
+ *
+ * `selector` must identify a single entry — pass the `guardianKey` the invite
+ * token was issued for (preferred), or `{ guardianElationId }` / `{ guardianEmail }`
+ * which are reduced to the same key. Binding by email alone is NOT safe: two
+ * distinct guardians (both parents) can share one email, and binding both
+ * entries to the first claimer fuses the proxies and breaks per-parent
+ * revocation.
+ *
+ * Only 'active' or 'pending_adult_consent' entries are bindable; a revoked
+ * entry never gains a uid.
+ */
+async function bindGuardianUid(childElationId, selector, uid) {
   const db = admin.firestore();
   const ref = db.collection('patients').doc(String(childElationId));
-  const target = String(email || '').trim().toLowerCase();
+  const key = typeof selector === 'string' ? selector : guardianKey(selector || {});
+  if (!key || key === 'email:' || !uid) return { bound: false, reason: 'SELECTOR_REQUIRED' };
+
   return db.runTransaction(async (tx) => {
     const snap = await tx.get(ref);
-    if (!snap.exists) return { bound: false };
+    if (!snap.exists) return { bound: false, reason: 'CHILD_NOT_FOUND' };
     const guardians = Array.isArray(snap.data().guardians) ? snap.data().guardians.slice() : [];
-    let bound = false;
-    for (let i = 0; i < guardians.length; i += 1) {
-      const g = guardians[i];
-      if (!g || g.guardianUid) continue;
-      if (String(g.guardianEmail || '').toLowerCase() === target) {
-        guardians[i] = { ...g, guardianUid: uid };
-        bound = true;
-      }
+
+    const matches = guardians
+      .map((g, i) => ({ g, i }))
+      .filter(({ g }) => g && guardianKey(g) === key);
+    if (matches.length === 0) return { bound: false, reason: 'GUARDIAN_NOT_FOUND' };
+    if (matches.length > 1) return { bound: false, reason: 'AMBIGUOUS_SELECTOR' };
+
+    const { g, i } = matches[0];
+    if (g.status !== 'active' && g.status !== 'pending_adult_consent') {
+      return { bound: false, reason: 'GUARDIAN_NOT_BINDABLE' };
     }
-    if (bound) tx.set(ref, { guardians }, { merge: true });
-    return { bound };
+    if (g.guardianUid) {
+      return { bound: g.guardianUid === uid, reason: g.guardianUid === uid ? null : 'ALREADY_BOUND' };
+    }
+
+    guardians[i] = { ...g, guardianUid: String(uid) };
+    tx.set(ref, { guardians }, { merge: true });
+    return { bound: true, guardianKey: key };
   });
 }
 
+
 module.exports = {
   SOURCES,
+  SOURCE_ALIASES,
+  normalizeSource,
   STATUSES,
   guardianKey,
+
   eighteenthBirthday,
   isMinorOn,
   linkGuardian,
