@@ -91,18 +91,18 @@ minor's record. Everything else (revocation, module visibility, audit) is
 identical to a patient guardian. The CSV now always includes a
 `guardian_email` column, also populated for patient guardians.
 
-## Final export (2026-08-21)
+## Final export (2026-08-22)
 
-`guardian-links-final-2026-08-21.csv` — staff-finalized, this is the batch to
-load. 193 links across 176 minors (18 children with two guardians):
+`guardian-links-final-2026-08-22.csv` — staff-finalized, this is the batch to
+load. 194 links across 176 minors (18 children with two guardians):
 
 - 119 `inferred_email_name`
 - 40 `email_on_file` (invite the address, bind proxy on claim)
-- 34 `manual_search`
+- 35 `manual_search`
 
 Validated: every row has a guardian email, no duplicate (minor, guardian) pairs,
-no malformed addresses. Minors are identified by `minor_hint_id` (Elation ids are
-blank for these records) — resolve to the Elation chart before writing
-`patients/<childElationId>.guardians[]`. For 30 `email_on_file` rows staff left
-the guardian name as the email address; the invite should fall back to the email
-for display.
+no malformed addresses. `minor_elation_id` is populated for every minor except
+one — **vivienn Schwab (`pat-SIz4AU3unU2i`)**, whose Elation chart did not
+resolve; hold that row until the chart id is supplied manually. For 30
+`email_on_file` rows staff left the guardian name as the email address; the
+invite should fall back to the email for display.
