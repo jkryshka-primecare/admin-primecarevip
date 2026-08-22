@@ -173,6 +173,9 @@ function toReport(doc: FirestoreDoc): CoverageReport {
     systemicStorageFailure: doc.systemicStorageFailure === true,
     status: String(doc.status ?? "ok"),
     truncatedWalk: doc.truncatedWalk === true,
+    // Absent on reports written before the flag existed — those predate the
+    // gate and must not be trusted as fallback-off runs.
+    legacyFallbackDisabled: doc.legacyFallbackDisabled === true,
     coveragePct:
       doc.coveragePct !== undefined && doc.coveragePct !== null
         ? num(doc.coveragePct)
