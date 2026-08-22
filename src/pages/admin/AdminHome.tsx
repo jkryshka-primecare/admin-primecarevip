@@ -59,6 +59,7 @@ export default function AdminHome() {
         {tab === "guardians" && <UnclaimedGuardiansPanel />}
         {tab === "backfills" && <BackfillRunner />}
         {tab === "go-live" && <GoLiveChecklist />}
+        {tab === "seed" && <SeedDataPanel />}
 
         {tab === "audit" && <PhiAuditLog />}
       </div>
