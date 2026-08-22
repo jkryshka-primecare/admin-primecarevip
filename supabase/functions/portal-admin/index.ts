@@ -474,6 +474,29 @@ Deno.serve(async (req) => {
     return deny(403, "Only administrators can run coverage and read-path checks.");
   }
 
+  const isBulk = BULK_MIGRATIONS.includes(action);
+  const bulkApply = isBulk && body.apply === true;
+  let minorIds: string[] = [];
+
+  if (isBulk) {
+    if (!(await isAdmin(ctx))) {
+      return deny(403, "Only administrators can run migration checks.");
+    }
+    if (bulkApply) {
+      // Tier resolved server-side from the verified session only.
+      if (!(await isSuperAdmin(ctx))) {
+        return deny(403, "Only a super administrator can apply a bulk migration.");
+      }
+      if (!reason) {
+        return deny(400, "A written reason is required to apply a bulk migration.");
+      }
+    }
+    if (action === "backfillMinorReports") {
+      const parsed = parseMinorIds(body.patientIds);
+      if (typeof parsed === "string") return deny(400, parsed);
+      minorIds = parsed;
+    }
+  }
 
   let provisionMembers: ProvisionMember[] = [];
   if (action === "provision") {
@@ -481,6 +504,7 @@ Deno.serve(async (req) => {
     if (typeof parsed === "string") return deny(400, parsed);
     provisionMembers = parsed;
   }
+
 
   // The acting person is taken from the verified session, never from the
   // client payload — the service account identifies the system, this
