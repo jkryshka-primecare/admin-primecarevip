@@ -29,13 +29,27 @@ export default function CoverageGate({ report }: { report: CoverageReport }) {
             <ShieldAlert className="h-4 w-4 text-warning" />
           )}
           <p className="text-sm font-medium text-foreground">
-            Guardian-read join gate — {verdict.pass ? "all conditions met" : "not met"}
+            {!verdict.validGateRun
+              ? "Not a valid gate run — legacy uid fallback was ON"
+              : `Guardian-read join gate — ${verdict.pass ? "all conditions met" : "not met"}`}
           </p>
         </div>
         <p className="text-xs text-muted-foreground">
-          Pass requires 100% over a non-zero denominator on every line.
+          {!verdict.validGateRun
+            ? "Re-run with the fallback disabled to evaluate the gate."
+            : "Pass requires 100% over a non-zero denominator on every line."}
         </p>
       </div>
+
+      {!verdict.validGateRun && (
+        <div className="border-t border-border bg-destructive/10 px-4 py-3 text-xs text-destructive">
+          This report was produced with <span className="font-mono">ARTIFACT_LEGACY_UID_FALLBACK</span>{" "}
+          enabled (or the run predates the flag). Legacy-path objects were counted as present, so
+          the cohort figures below can read green while the uid-keyed path is still empty. They
+          cannot be used to flip <span className="font-mono">GUARDIAN_READS_ENABLED</span>.
+        </div>
+      )}
+
 
       <table className="w-full text-left text-xs">
         <thead className="bg-muted/60 text-muted-foreground">
