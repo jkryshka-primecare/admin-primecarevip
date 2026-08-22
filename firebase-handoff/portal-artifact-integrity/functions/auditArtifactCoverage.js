@@ -29,6 +29,12 @@
 const functions = require('firebase-functions');
 const admin = require('firebase-admin');
 const { artifactBucketName } = require('./core/config/artifactBucket');
+const {
+  makeInternalUidResolver,
+  objectPathFor: internalPathFor,
+  legacyObjectPathFor: legacyPathFor,
+  legacyFallbackEnabled,
+} = require('./core/services/patient/internalUid');
 
 const REGION = 'us-central1';
 const PAGE_SIZE = 500;
@@ -43,40 +49,28 @@ function bucket() {
 }
 
 /**
- * The current (pre-2b) artifact path. Re-keying is deliberately out of 2a.
+ * The artifact path, Release 2b Part B: keyed on the RECORD's `internalUid`,
+ * never on a Firebase Auth uid. Minors have no auth uid at all, so the old
+ * uid-keyed scheme could not express a dependent's artifact.
  *
- * The uid does NOT live on the lab doc — it lives on the PARENT patient doc
- * (`firebaseUid`, falling back to `authUid`) and is LOWERCASED, exactly like the
- * read path (`readArtifact.js`) and the writer (`backfillElationReports.js`).
- * Resolving it off the lab doc classified every artifact as `unpathed`.
- *
- * Review item 4: a doc that resolves to no uid must stay `unpathed` — reported
- * separately, never queued for repair, so the sweep can never "heal" junk at
- * `elation-artifacts/null/...`.
+ * During the dual-read window a record with no `internalUid` yet falls back to
+ * the legacy `firebaseUid`; a record with neither stays `unpathed` — reported
+ * separately, never queued, so the sweep can never "heal" junk at
+ * `elation-artifacts/null/...`. Coverage must reach 100% with the fallback
+ * DISABLED (`ARTIFACT_LEGACY_UID_FALLBACK=false`) before the legacy branch is
+ * deleted from the read path.
  */
-function expectedPath(doc, patientUid) {
+function expectedPath(doc, keys) {
   if (doc.artifactPath) return doc.artifactPath;
-  if (!patientUid) return null;
-  return `elation-artifacts/${patientUid}/${doc.id}/report.pdf`;
+  const k = keys || {};
+  if (k.internalUid) return internalPathFor(k.internalUid, doc.id);
+  if (legacyFallbackEnabled() && k.legacyUid) return legacyPathFor(k.legacyUid, doc.id);
+  return null;
 }
 
-/** patientId -> lowercased uid (or null). One patient doc read per patient. */
+/** patientId -> { internalUid, legacyUid }. One patient doc read per patient. */
 function makeUidResolver(db) {
-  const cache = new Map();
-  return async function uidFor(patientId) {
-    if (!patientId) return null;
-    if (cache.has(patientId)) return cache.get(patientId);
-    let uid = null;
-    try {
-      const snap = await db.collection('patients').doc(patientId).get();
-      const raw = snap.exists ? snap.get('firebaseUid') || snap.get('authUid') : null;
-      uid = raw ? String(raw).toLowerCase() : null;
-    } catch (_e) {
-      uid = null;
-    }
-    cache.set(patientId, uid);
-    return uid;
-  };
+  return makeInternalUidResolver(db);
 }
 
 
@@ -160,13 +154,13 @@ async function runAudit() {
       // from anything a caller supplied.
       const patientId = doc.ref.parent.parent ? doc.ref.parent.parent.id : null;
       // eslint-disable-next-line no-await-in-loop
-      const uid = await uidFor(patientId);
-      const path = expectedPath(doc, uid);
+      const keys = await uidFor(patientId);
+      const path = expectedPath(doc, keys);
       if (!path) {
         unpathed.push({
           patientId,
           documentId: doc.id,
-          reason: 'no artifactPath and patient has no firebaseUid/authUid',
+          reason: 'no artifactPath and patient has no internalUid (or legacy uid)',
         });
         continue;
       }

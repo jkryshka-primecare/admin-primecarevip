@@ -19,7 +19,7 @@
  */
 
 const { readArtifact, mintSignedUrl } = require('./helpers/portalRead');
-const { seedPatient, seedDocument, healArtifact, cleanup } = require('./helpers/seed');
+const { seedPatient, seedDocument, healArtifact, accessLogRows, cleanup } = require('./helpers/seed');
 
 jest.setTimeout(120000);
 
@@ -173,16 +173,141 @@ describe('repair queue cannot be steered', () => {
 });
 
 /**
- * FORWARD SCAFFOLDING FOR 2b — intentionally skipped.
+ * RELEASE 2b — guardian proxy access. LIVE, not scaffolding.
  *
- * Grants do not exist yet. These must not report green and must not be part of
- * the 2a go/no-go; a no-op test passing would imply coverage we do not have.
+ * A minor never logs in; a guardian reads the child's record through the same
+ * shared handler. Storage is keyed on the record's `internalUid` (Part B), so a
+ * child with no Firebase uid is still addressable and a heal can never land the
+ * child's PDF under the guardian's prefix.
+ *
+ * Guardian reads are behind `GUARDIAN_READS_ENABLED`; the flag is forced ON for
+ * this block only, so a production default of OFF cannot make the gate green by
+ * accident.
  */
-describe.skip('[2b] grant-scoped access', () => {
-  test('a revoked grant immediately loses access to the dependent artifact', () => {});
-  test('a guardian sees exactly their own record plus active-grant dependents', () => {});
-  test('module-off on a child applies to every linked guardian', () => {});
+describe('[2b] guardian proxy access', () => {
+  const priorFlag = process.env.GUARDIAN_READS_ENABLED;
+  beforeAll(() => { process.env.GUARDIAN_READS_ENABLED = 'true'; });
+  afterAll(() => { process.env.GUARDIAN_READS_ENABLED = priorFlag; });
+
+  async function family({ status = 'active' } = {}) {
+    const guardian = await seedPatient();
+    const child = await seedPatient({ minor: true });
+    await child.linkGuardian(guardian, { status });
+    const doc = await seedDocument(child, { module: 'labs' });
+    return { guardian, child, doc };
+  }
+
+  test('an active guardian reads the linked child artifact', async () => {
+    const { guardian, child, doc } = await family();
+    const res = await readArtifact({ as: guardian, of: child, doc });
+    expect(res.status).toBe(200);
+    expect(res.signedUrl).toEqual(expect.any(String));
+  });
+
+  test('a revoked guardian reads exactly like a stranger', async () => {
+    const { guardian, child, doc } = await family();
+    await child.setGuardianStatus(guardian, 'revoked');
+    const revoked = await readArtifact({ as: guardian, of: child, doc });
+
+    const stranger = await seedPatient();
+    const unlinked = await readArtifact({ as: stranger, of: child, doc });
+
+    expect(revoked.status).toBe(404);
+    expect(revoked.signedUrl).toBeUndefined();
+    // Indistinguishable: same status, same reason, no "was removed" signal.
+    expect(revoked.status).toBe(unlinked.status);
+    expect(revoked.body.reason).toBe(unlinked.body.reason);
+  });
+
+  test('a pending_adult_consent guardian is denied', async () => {
+    const { guardian, child, doc } = await family({ status: 'pending_adult_consent' });
+    const res = await readArtifact({ as: guardian, of: child, doc });
+    expect(res.status).toBe(404);
+    expect(res.signedUrl).toBeUndefined();
+  });
+
+  test('a guardian of child A cannot read child B, and queues no repair', async () => {
+    const { guardian } = await family();
+    const other = await seedPatient({ minor: true });
+    const otherDoc = await seedDocument(other, { module: 'labs', missingObject: true });
+
+    const res = await readArtifact({ as: guardian, of: other, doc: otherDoc });
+    expect(res.status).toBe(404);
+    expect(res.signedUrl).toBeUndefined();
+    // No existence leak and, critically, no repair the healer could follow.
+    expect(await other.repairQueueRows()).toHaveLength(0);
+  });
+
+  test('shared-email guardians revoke independently (entry-scoped binding)', async () => {
+    // Greg and Jill share one household email; each entry is its own proxy.
+    const greg = await seedPatient();
+    const jill = await seedPatient();
+    const child = await seedPatient({ minor: true });
+    await child.linkGuardian(greg);
+    await child.linkGuardian(jill);
+    const doc = await seedDocument(child, { module: 'labs' });
+
+    await child.setGuardianStatus(greg, 'revoked');
+
+    expect((await readArtifact({ as: greg, of: child, doc })).status).toBe(404);
+    expect((await readArtifact({ as: jill, of: child, doc })).status).toBe(200);
+  });
+
+  test('suppression on the child applies identically to the guardian', async () => {
+    const { guardian, child } = await family();
+    const hidden = await seedDocument(child, { module: 'labs', hidden: true });
+    const res = await readArtifact({ as: guardian, of: child, doc: hidden });
+    expect(res.status).toBe(404);
+    expect(res.body.reason).toBe('ARTIFACT_NOT_SYNCED');
+  });
+
+  test('a module toggled off on the child hides it from the guardian', async () => {
+    const { guardian, child } = await family();
+    const doc = await seedDocument(child, { module: 'imaging' });
+    await child.setModule('imaging', false);
+    const res = await readArtifact({ as: guardian, of: child, doc });
+    expect(res.status).toBe(404);
+    expect(res.signedUrl).toBeUndefined();
+  });
+
+  test('a proxy read logs BOTH uids', async () => {
+    const { guardian, child, doc } = await family();
+    await readArtifact({ as: guardian, of: child, doc });
+    const rows = await accessLogRows({ reportId: doc.documentId });
+    expect(rows.length).toBeGreaterThan(0);
+    const row = rows.find((r) => r.mode === 'guardian');
+    expect(row).toBeDefined();
+    expect(row.actingUid).toBe(guardian.firebaseUid);
+    expect(row.subjectElationId).toBe(child.patientId);
+    expect(row.subjectUid).toBe(child.internalUid);
+  });
 });
+
+describe('[2b] internal-UID storage re-key', () => {
+  test('an authorized read resolves the object at the internalUid path', async () => {
+    const p = await seedPatient();
+    const doc = await seedDocument(p);
+    expect(doc.path).toBe(`elation-artifacts/${p.internalUid}/${doc.documentId}/report.pdf`);
+    const res = await readArtifact({ as: p, doc });
+    expect(res.status).toBe(200);
+    expect(res.signedUrl).toEqual(expect.any(String));
+  });
+
+  test('a guessed cross-subject path is still not fetchable (2a privacy preserved)', async () => {
+    const b = await seedPatient();
+    const docB = await seedDocument(b);
+    const direct = await fetch(`https://storage.googleapis.com/${docB.bucket}/${docB.path}`);
+    expect(direct.status).toBeGreaterThanOrEqual(400);
+  });
+
+  test('claiming a login does NOT change the record internalUid', async () => {
+    const p = await seedPatient({ minor: true });
+    const before = p.internalUid;
+    await p.claimLogin(`${p.patientId}-claimed-uid`);
+    expect(await p.readInternalUid()).toBe(before);
+  });
+});
+
 
 describe('coverage audit resolves the uid from the parent patient doc', () => {
   // Production lab docs carry no `artifactPath` and no `firebaseUid`; the uid
