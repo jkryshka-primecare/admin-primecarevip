@@ -181,3 +181,28 @@ no malformed addresses. `minor_elation_id` is populated for every minor (the las
 resolved in the admin panel). For 30
 `email_on_file` rows staff left the guardian name as the email address; the
 invite should fall back to the email for display.
+
+## Guardian reads (Release 2b, Part A + B)
+
+Guardian *matching* is this document; guardian *reading* is
+[`README-INTERNAL-UID.md`](./README-INTERNAL-UID.md). Storage is re-keyed onto a
+per-record `internalUid` first (minors have no Firebase uid), then
+`readArtifact.js` authorizes a named `childElationId` via `isActiveGuardian`.
+Guardian reads stay behind `GUARDIAN_READS_ENABLED`, default OFF, until both
+land and the red-team is green.
+
+## Appendix — order-response runbook
+
+Default: a guardian sees everything of their child.
+
+On a court order or documented instruction, staff act and record the order
+reference in `reason` + `portalAdminAudit`:
+
+- **"Parent X is barred from the records"** → `adminRevokeGuardian` on that one
+  guardian entry. Per-guardian; a revoked guardian reads like a stranger.
+- **"This category/record is confidential — withhold from parents"** → hide the
+  item (`hiddenItems`) or toggle the module off on the **child's** record. Every
+  guardian inherits it; it reads as "not available," indistinguishable from absent.
+- **"Withhold category X from parent A only"** (per-guardian *and* per-category)
+  → not expressible today. Fall back to revoking parent A entirely; escalate to
+  counsel.
