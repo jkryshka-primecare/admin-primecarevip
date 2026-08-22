@@ -363,6 +363,21 @@ async function isAdmin(ctx: AuthContext): Promise<boolean> {
   return Boolean(data);
 }
 
+/**
+ * The narrowest tier, resolved from the DATABASE against the uid in the
+ * verified session. Nothing in the request body can influence it — the client
+ * only ever hides buttons, it never grants anything.
+ */
+async function isSuperAdmin(ctx: AuthContext): Promise<boolean> {
+  const { data, error } = await ctx.supabase.rpc("has_role", {
+    _user_id: ctx.user.id,
+    _role: "super_admin",
+  });
+  if (error) return false;
+  return Boolean(data);
+}
+
+
 async function recordAction(
   ctx: AuthContext,
   entry: {
