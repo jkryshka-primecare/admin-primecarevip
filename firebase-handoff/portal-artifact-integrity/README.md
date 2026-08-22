@@ -191,3 +191,17 @@ watched fail is not yet a gate.
 - Zero active **adult** Hint members without a portal record, with minors,
   `NO_MATCH` and `AMBIGUOUS_MATCH` published as tracked, intentional exceptions —
   not counted as failures.
+
+## Sweep self-check (companion to minor-ingest §2c)
+
+`sweepArtifactRepairs.repairOne` now downloads back what it just saved and
+requires a `%PDF-` magic prefix before writing `repairedAt`. On mismatch the
+object is deleted (`ignoreNotFound`) and `ARTIFACT_NOT_PDF` is thrown with no
+`.status`, so it falls through to the existing `failures++` path and parks +
+alerts after `MAX_FAILURES`.
+
+Why it is required: minor-ingest §2c routes corrupt-bytes cases into the
+audit → sweep heal loop. Without validation here the sweep would re-fetch the
+same corrupt bytes, save them, mark healed, and the next audit would count the
+object present — the gate reads 100% over a corrupt artifact. Must land before
+`auditArtifactCoverage` is used as the go/no-go gate.
