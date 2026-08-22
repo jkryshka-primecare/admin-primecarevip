@@ -30,7 +30,10 @@ type Action =
   | "provision"
   | "runAudit"
   | "smoke"
-  | "unclaimedGuardians";
+  | "unclaimedGuardians"
+  | "backfillUids"
+  | "backfillArtifacts"
+  | "backfillMinorReports";
 
 const FUNCTION_BY_ACTION: Record<Action, string> = {
   get: "adminGetPortalAccess",
@@ -41,6 +44,9 @@ const FUNCTION_BY_ACTION: Record<Action, string> = {
   runAudit: "adminRunArtifactAudit",
   smoke: "adminRunReadPathSmoke",
   unclaimedGuardians: "adminUnclaimedGuardiansReport",
+  backfillUids: "backfillInternalUids",
+  backfillArtifacts: "backfillArtifactObjects",
+  backfillMinorReports: "backfillElationReports",
 };
 
 const MUTATIONS: Action[] = ["invite", "revoke", "setAccess", "provision"];
@@ -51,8 +57,55 @@ const MUTATIONS: Action[] = ["invite", "revoke", "setAccess", "provision"];
  */
 const ADMIN_ONLY: Action[] = ["runAudit", "smoke", "unclaimedGuardians"];
 
+/**
+ * Release 2b Part B bulk migrations. Blast radius is bulk PHI, not one record:
+ *   - a DRY RUN (`apply` absent/false) needs admin, like any other check;
+ *   - an APPLY needs the narrowest tier, `super_admin`, resolved server-side
+ *     from the verified session — never from anything the client sends;
+ *   - an APPLY writes its `portal_admin_actions` row BEFORE the upstream call
+ *     and refuses to call if that write fails. The Cloud Function only ever
+ *     sees `portal-admin`, so this row is the sole human-attribution record
+ *     for a PHI migration.
+ */
+const BULK_MIGRATIONS: Action[] = ["backfillUids", "backfillArtifacts", "backfillMinorReports"];
+
 /** Actions that act on a set of members rather than a single patient. */
-const BATCH_ACTIONS: Action[] = ["provision", "runAudit", "smoke", "unclaimedGuardians"];
+const BATCH_ACTIONS: Action[] = [
+  "provision",
+  "runAudit",
+  "smoke",
+  "unclaimedGuardians",
+  ...BULK_MIGRATIONS,
+];
+
+/** Upper bound on one minor-track ingest call. The 2b cohort is ~175. */
+const MAX_MINOR_IDS = 500;
+
+/**
+ * Elation chart ids for the minor-track ingest. Shape-validated here and
+ * re-validated against the real `dependent.isMinor` set inside the
+ * `backfillElationReports` HTTP wrapper — that wrapper is the authority; this
+ * list is a convenience and a fast failure.
+ */
+function parseMinorIds(raw: unknown): string[] | string {
+  if (!Array.isArray(raw) || raw.length === 0) {
+    return "Provide at least one minor Elation patient id.";
+  }
+  if (raw.length > MAX_MINOR_IDS) {
+    return `Ingest at most ${MAX_MINOR_IDS} patients at a time (received ${raw.length}).`;
+  }
+  const out: string[] = [];
+  const seen = new Set<string>();
+  for (const item of raw) {
+    const id = String(item ?? "").trim();
+    if (!/^\d{6,25}$/.test(id)) return `"${id.slice(0, 40)}" is not a valid Elation patient id.`;
+    if (seen.has(id)) return `Patient ${id} appears twice in the list.`;
+    seen.add(id);
+    out.push(id);
+  }
+  return out;
+}
+
 
 
 /**
