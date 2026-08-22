@@ -55,16 +55,73 @@ the member app and Cloud Functions must implement.
 4. Proxy reads log to the PHI access log with both uids
    (`actingUid`, `subjectUid`).
 
-## Functions to add
+## Functions (source in `functions/`, ready to commit)
 
 - `adminLinkGuardian` — admin-only, requires reason, writes one guardian entry
   (idempotent per guardian; called once per parent), audited. Rejects a link where the child is 18+.
-- `adminRevokeGuardian` — same shape, sets `status: "revoked"`.
-- `dependentBirthdaySweep` — scheduled daily. For each child hitting 18:
-  flips `dependent.isMinor` false, moves guardian entries to
+- `adminRevokeGuardian` — same shape, sets `status: "revoked"`. The entry is kept, never deleted.
+- `dependentBirthdaySweep` — scheduled daily (07:15 America/New_York). For each
+  child hitting 18: flips `dependent.isMinor` false, moves guardian entries to
   `pending_adult_consent`, provisions the now-adult's own invite.
-- `memberSetGuardianConsent` — called by the member app after the new adult
-  answers; sets each guardian entry to `active` or `revoked`.
+- `memberSetGuardianConsent` — member-facing (patient token, own record only);
+  sets each `pending_adult_consent` entry to `active` or `revoked`.
+
+Shared model: `core/services/patient/guardians.js`.
+
+### Install
+
+Copy into the Firebase repo:
+
+```
+functions/adminLinkGuardian.js
+functions/adminRevokeGuardian.js
+functions/dependentBirthdaySweep.js
+functions/memberSetGuardianConsent.js
+functions/core/services/patient/guardians.js
+```
+
+Export from `functions/index.js`:
+
+```js
+exports.adminLinkGuardian          = require('./adminLinkGuardian').adminLinkGuardian;
+exports.adminRevokeGuardian        = require('./adminRevokeGuardian').adminRevokeGuardian;
+exports.dependentBirthdaySweep     = require('./dependentBirthdaySweep').dependentBirthdaySweep;
+exports.memberSetGuardianConsent   = require('./memberSetGuardianConsent').memberSetGuardianConsent;
+```
+
+Two things to confirm on your side before deploy:
+
+1. `dependentBirthdaySweep.js` imports the existing invite path
+   (`core/services/patient/claimTokens` → `issueClaimToken`, and
+   `core/services/email/sendInviteEmail`). Adjust those two paths/names to match
+   the repo if they differ — the rest of the file is self-contained.
+2. `memberSetGuardianConsent.js` uses `middleware/requireAuth`; the two admin
+   functions use `middleware/requireAdminCaller` (already in the repo from the
+   portal-admin handoff). Add the two new admin functions to the
+   `lock-admin-invokers.yml` list and grant the `portal-admin` SA invoke rights.
+
+Composite index required by the sweep:
+
+```json
+{ "collectionGroup": "patients", "queryScope": "COLLECTION",
+  "fields": [ { "fieldPath": "dependent.isMinor", "order": "ASCENDING" },
+              { "fieldPath": "dependent.convertsAt", "order": "ASCENDING" } ] }
+```
+
+### Batch loader
+
+`scripts/load-guardian-links.js` walks the finalized CSV and calls
+`adminLinkGuardian` once per row. Dry-run by default:
+
+```bash
+node scripts/load-guardian-links.js --csv ../guardian-links-final-2026-08-22.csv \
+  --actor you@primecarevip.com --only-minor <fixtureChildElationId>        # dry run
+node scripts/load-guardian-links.js ... --only-minor <id> --apply          # fixture
+node scripts/load-guardian-links.js --csv ... --actor ... --apply          # full batch
+```
+
+Rows with an empty `minor_elation_id` are skipped and listed, so the one
+unresolved child never silently drops out of the batch.
 
 ## Rollout
 
