@@ -44,16 +44,19 @@ function legacyUidOf(snapOrData) {
 
 /**
  * Read the record's internalUid. Read-only: it does NOT mint.
- * Returns `{ internalUid, legacyUid }`; either may be null.
+ * Returns `{ internalUid, legacyUid, isMinor }`; uids may be null.
+ * `isMinor` lets callers (the coverage audit) split adult vs minor cohorts
+ * without a second read of the same patient doc.
  */
 async function getInternalUid(elationPatientId, db = admin.firestore()) {
-  if (!elationPatientId) return { internalUid: null, legacyUid: null };
+  if (!elationPatientId) return { internalUid: null, legacyUid: null, isMinor: false };
   const snap = await db.collection('patients').doc(String(elationPatientId)).get();
-  if (!snap.exists) return { internalUid: null, legacyUid: null };
+  if (!snap.exists) return { internalUid: null, legacyUid: null, isMinor: false };
   const value = snap.get(FIELD);
   return {
     internalUid: value ? String(value) : null,
     legacyUid: legacyUidOf(snap),
+    isMinor: snap.get('dependent.isMinor') === true,
   };
 }
 
