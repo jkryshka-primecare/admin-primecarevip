@@ -22,7 +22,15 @@ type ServiceAccount = {
   project_id: string;
 };
 
-type Action = "get" | "invite" | "revoke" | "setAccess" | "provision" | "runAudit" | "smoke";
+type Action =
+  | "get"
+  | "invite"
+  | "revoke"
+  | "setAccess"
+  | "provision"
+  | "runAudit"
+  | "smoke"
+  | "unclaimedGuardians";
 
 const FUNCTION_BY_ACTION: Record<Action, string> = {
   get: "adminGetPortalAccess",
@@ -32,6 +40,7 @@ const FUNCTION_BY_ACTION: Record<Action, string> = {
   provision: "adminProvisionPatients",
   runAudit: "adminRunArtifactAudit",
   smoke: "adminRunReadPathSmoke",
+  unclaimedGuardians: "adminUnclaimedGuardiansReport",
 };
 
 const MUTATIONS: Action[] = ["invite", "revoke", "setAccess", "provision"];
@@ -40,10 +49,10 @@ const MUTATIONS: Action[] = ["invite", "revoke", "setAccess", "provision"];
  * Admin-only but not a member mutation: it changes no patient state, it only
  * asks the artifact-coverage job to run now instead of at 03:15.
  */
-const ADMIN_ONLY: Action[] = ["runAudit", "smoke"];
+const ADMIN_ONLY: Action[] = ["runAudit", "smoke", "unclaimedGuardians"];
 
 /** Actions that act on a set of members rather than a single patient. */
-const BATCH_ACTIONS: Action[] = ["provision", "runAudit", "smoke"];
+const BATCH_ACTIONS: Action[] = ["provision", "runAudit", "smoke", "unclaimedGuardians"];
 
 
 /**
