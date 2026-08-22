@@ -110,6 +110,16 @@ async function repairOne(row, ref) {
       resumable: false,
       // Bucket is private and uniform-access; no ACLs are set here, ever.
     });
+    // Download-back self-check, same as the backfill. Without it a corrupt
+    // source would be re-saved and marked healed, so the object exists and the
+    // next audit counts it present — a false green over corrupt bytes. The
+    // throw carries no .status, so it falls through to failures++ / park+alert.
+    const [back] = await bucket().file(row.path).download();
+    if (back.subarray(0, 5).toString() !== '%PDF-') {
+      await bucket().file(row.path).delete({ ignoreNotFound: true });
+      throw new Error('ARTIFACT_NOT_PDF');
+    }
+
     await ref.set(
       { repairedAt: new Date().toISOString(), failures: row.failures || 0, parked: false },
       { merge: true },
