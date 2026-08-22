@@ -1,137 +1,162 @@
-# Minor ingest — the two changed functions, for review
+# Minor ingest — the two changed functions, verified against the real files
 
-Both files live in the portal repo (`primecarevip/prime-care-vip-app-v2`), not in
-this bundle; the shared decision module they import ships here as
-`functions/core/services/patient/ingestEligibility.js` (real code, review that
-too — it is where the gate actually lives).
+Rewritten 2026-08-22 against the actual portal-repo sources
+(`functions/ingestElationReports.js` @ 239 lines, `functions/backfillElationReports.js`
+@ 349 lines). The earlier draft of this file guessed at both gates and got the
+backfill one wrong — see "Correction" below.
 
-`GUARDIAN_READS_ENABLED` stays **OFF** through all of this.
+The shared decision module ships here as
+`functions/core/services/patient/ingestEligibility.js`. `GUARDIAN_READS_ENABLED`
+stays **OFF** through all of this.
 
 ---
 
-## 1. `functions/ingestElationReports.js` — the gate exception
+## 1. `ingestElationReports.js` — the D-111 gate (lines 114–121)
 
-Only the gate changes. The D-068 allowlist check is untouched and still runs
-**first**; the decision is delegated so there is exactly one definition of
-"eligible".
+Add the import next to the other `./core/...` requires (~line 50):
 
 ```js
-// top of file
-const { ingestEligibility } = require('./core/services/patient/ingestEligibility');
-```
-
-Replace the D-111 status gate:
-
-```js
-// BEFORE
-if (!isIngestAllowed(patient)) { log('ingestElationReports','skip-not-allowlisted',{ id }); return; }
-const pSnap = await db.collection('patients').doc(String(id)).get();
-if (!pSnap.exists || pSnap.data().status !== 'active') {
-  log('ingestElationReports', 'skip-non-active', { id });
-  return;
-}
-```
-
-```js
-// AFTER
-if (!isIngestAllowed(patient)) { log('ingestElationReports','skip-not-allowlisted',{ id }); return; }
-const pSnap = await db.collection('patients').doc(String(id)).get();
-const gate = ingestEligibility(pSnap.exists ? pSnap.data() : null);
-if (!gate.eligible) {
-  log('ingestElationReports', gate.reason, { id, cohort: gate.cohort });
-  return;
-}
-log('ingestElationReports', 'ingest-allowed', { id, cohort: gate.cohort, reason: gate.reason });
-```
-
-Properties to check while reading:
-
-- **Both conditions required.** `ingestEligibility` admits an unclaimed record
-  only when `dependent.isMinor === true` **and** at least one guardian entry has
-  `status === 'active'`. Either alone is a skip.
-- **A converted adult cannot slip through.** The birthday sweep sets
-  `dependent.isMinor = false` *and* moves every `active` entry to
-  `pending_adult_consent` in the same write; condition 1 alone already denies,
-  and condition 2 denies independently. Belt and suspenders.
-- **`pending_adult_consent` / `revoked` never qualify** — only the literal
-  string `'active'`.
-- **No behaviour change for adults.** `status === 'active'` returns eligible
-  exactly as before; anything else with no minor flag returns the same
-  `skip-non-active` tag, so existing log-based alerts keep working.
-- **Allowlist unchanged.** A minor not in `ELATION_READ_ALLOWLIST` is still
-  dropped before the gate is consulted.
-
-## 2. `functions/backfillElationReports.js` — `internalUid` re-key, dropped skip/flip
-
-```js
-const { ensureInternalUid, objectPathFor } =
-  require('./core/services/patient/internalUid');
 const { ingestEligibility } = require('./core/services/patient/ingestEligibility');
 ```
 
 ```js
-// BEFORE
-const uid = pSnap.data().firebaseUid;
-if (!uid) {
-  log('backfillElationReports', 'artifact-skip-unclaimed', { id });
-  await docRef.set({ hasArtifact: false }, { merge: true });   // <- the flip
-  return;
-}
-const path = `elation-artifacts/${uid}/${reportId}/report.pdf`;
+// BEFORE (114–121)
+  // D-111 active-member gate: store only for a claimed patient (status === 'active',
+  // the claim-lifecycle field). membershipStatus is billing-only, NOT this gate.
+  const pSnap = await db.collection('patients').doc(patient).get();
+  if (!pSnap.exists || (pSnap.data() || {}).status !== 'active') {
+    counters.skippedNonActive += 1;
+    log('ingestElationReports', 'skip-non-active', { reportId, elationPatientId: patient, feedId: Number(rec.id) });
+    return; // advance (replay-safe; resurfaced if they activate + a later event fires)
+  }
 ```
 
 ```js
 // AFTER
-// The RECORD's id, not the caller's. Minors have no auth uid at all, so an
-// auth-keyed path cannot express a dependent's artifact and would mislocate
-// PHI under a guardian's prefix.
-const { internalUid } = await ensureInternalUid(id);
-if (!internalUid) {
-  log('backfillElationReports', 'artifact-skip-no-internal-uid', { id });
-  return;               // no hasArtifact flip — this is a mint gap, not "no artifact"
-}
-const path = objectPathFor(internalUid, reportId);
+  // D-111 active-member gate, plus the Release 2b guardian-proxied-dependent
+  // exception. Single definition of "eligible" lives in ingestEligibility.
+  const pSnap = await db.collection('patients').doc(patient).get();
+  const gate = ingestEligibility(pSnap.exists ? pSnap.data() : null);
+  if (!gate.eligible) {
+    counters.skippedNonActive += 1;
+    log('ingestElationReports', gate.reason, { reportId, elationPatientId: patient, feedId: Number(rec.id), cohort: gate.cohort });
+    return; // advance (replay-safe)
+  }
 ```
 
-and the early return at the top of the row loop gets the same exception:
+Notes:
+
+- The D-068 `isIngestAllowed` check at 108–112 is **untouched** and still runs first.
+- `counters.skippedNonActive` keeps its name so the run-stats shape is unchanged;
+  only the log tag now varies (`skip-non-active`, `skip-minor-no-active-guardian`,
+  `no-patient-doc`).
+- Adults: `status === 'active'` → eligible, byte-identical behaviour. A missing
+  doc still returns `no-patient-doc` and skips (hard gate preserved — this poller
+  has no vetted input list).
+- Minors: admitted only when `dependent.isMinor === true` **and** ≥1 guardian
+  entry with `status === 'active'`. Either alone is a skip.
+
+## 2. `backfillElationReports.js` — soft gate (105–116) and the artifact key (245–296)
 
 ```js
-// BEFORE:  if (!pSnap.exists || pSnap.data().status !== 'active') return;
-const gate = ingestEligibility(pSnap.exists ? pSnap.data() : null);
-if (!gate.eligible) { log('backfillElationReports', gate.reason, { id, cohort: gate.cohort }); return; }
+const { ensureInternalUid, objectPathFor } = require('./core/services/patient/internalUid');
+const { ingestEligibility } = require('./core/services/patient/ingestEligibility');
 ```
 
-### PR note — the `hasArtifact:false` removal is minor-only (refinement 2)
+### 2a. Correction — this gate is SOFT (D-080), not the poller's hard gate
 
-Deleting `artifact-skip-unclaimed` and its `hasArtifact:false` flip **cannot**
-change behaviour for an unclaimed adult:
+```js
+// BEFORE (105–116)
+  if (pSnap.exists) {
+    const status = (pSnap.data() || {}).status;
+    if (status !== undefined && status !== 'active') {
+      counters.patientsSkippedNonActive += 1;
+      pc.skippedNonActive = true;
+      log('backfillElationReports', 'skip-non-active', { elationPatientId: pid, status: status });
+      return pc;
+    }
+  } else {
+    pc.noPatientDoc = true;
+    log('backfillElationReports', 'no-patient-doc-proceeding', { elationPatientId: pid });
+  }
+```
+
+```js
+// AFTER — D-080 soft posture preserved exactly: a MISSING doc still proceeds.
+// Only the "doc exists but is not active" branch consults the 2b exception.
+  if (pSnap.exists) {
+    const data = pSnap.data() || {};
+    const gate = ingestEligibility(data);
+    if (!gate.eligible && data.status !== undefined) {
+      counters.patientsSkippedNonActive += 1;
+      pc.skippedNonActive = true;
+      log('backfillElationReports', gate.reason, { elationPatientId: pid, status: data.status, cohort: gate.cohort });
+      return pc;
+    }
+  } else {
+    pc.noPatientDoc = true;
+    log('backfillElationReports', 'no-patient-doc-proceeding', { elationPatientId: pid });
+  }
+```
+
+The `data.status !== undefined` conjunct is what keeps D-080 soft: a doc with no
+`status` field at all proceeds today and must keep proceeding. Net effect of the
+change is one new admission — a doc whose `status` is set to something other than
+`active` but which is a minor with an active guardian.
+
+### 2b. Artifact key: `firebaseUid` → `internalUid` (245–296)
+
+```js
+// BEFORE (249–262)
+        const fbUid = (pSnap && pSnap.exists) ? pSnap.data().firebaseUid : null;
+        if (!fbUid) {
+          try {
+            await db.collection('patients').doc(pid).collection('labs').doc(reportId)
+              .set({ hasArtifact: false }, { merge: true });
+          } catch (flipErr) { ... }
+          pc.artifactSkippedUnclaimed += 1; counters.artifactSkippedUnclaimed += 1;
+          log('backfillElationReports', 'artifact-skip-unclaimed', { elationPatientId: pid, reportId });
+        } else {
+          const uidLc = String(fbUid).toLowerCase();
+          const objectPath = 'elation-artifacts/' + uidLc + '/' + reportId + '/report.pdf';
+```
+
+```js
+// AFTER
+        // The RECORD's id, not the caller's. Minors have no auth uid at all, so an
+        // auth-keyed path cannot express a dependent's artifact and would mislocate
+        // PHI under a guardian's prefix. ensureInternalUid is a fallback only —
+        // backfillInternalUids has already minted for every id (runbook step 1).
+        const { internalUid } = await ensureInternalUid(pid, db);
+        if (!internalUid) {
+          // A mint gap, NOT "no artifact": do not flip hasArtifact:false.
+          pc.artifactErrors += 1; counters.artifactErrors += 1;
+          log('backfillElationReports', 'artifact-skip-no-internal-uid', { elationPatientId: pid, reportId });
+        } else {
+          const objectPath = objectPathFor(internalUid, reportId);
+```
+
+Everything inside the `else` after `objectPath` (the `/printable` fetch, the
+`%PDF-` download-back self-check, the `artifact-failed` flip) is **unchanged**.
+`counters.artifactSkippedUnclaimed` and `pc.artifactSkippedUnclaimed` (lines 80,
+and their declarations) become dead and can be dropped in the same PR, or left at
+0 if you prefer the run-stats shape frozen.
+
+## PR note — removing the `hasArtifact:false` unclaimed flip is minor-only
 
 - The flip only ever ran on a `labs` metadata doc that already existed.
-- `ingestElationReports` is the only writer of those docs, and an unclaimed
-  adult (no `status === 'active'`, not a minor, no active guardian) does not
-  match the exception — so no `labs` doc is ever written for them.
-- With no `labs` doc, `backfillElationReports` has no row to process for that
-  patient, so the removed branch was unreachable for adults. It fired only on
-  records that *had* metadata but no `firebaseUid`, i.e. exactly the dependents
-  this change exists to support.
+- `ingestElationReports` is the only writer of those docs, and pre-2b an unclaimed
+  adult never passed its hard `status === 'active'` gate — so no `labs` doc exists.
+- With no `labs` doc, the backfill has no row to reach line 245 with. The branch
+  was unreachable for unclaimed adults; it fired only on records that had metadata
+  but no `firebaseUid`, i.e. exactly the dependents this change exists to support.
 
-Net: adults see zero behavioural delta; minors stop being force-marked
-"no artifact".
-
-### PR note — `ensureInternalUid` is a fallback, not the primary mint (refinement 4)
-
-`backfillInternalUids` runs **before** `backfillElationReports` in the Part B
-runbook, so every id already has an `internalUid` by the time the upload runs.
-`ensureInternalUid` re-reads inside a transaction and returns the existing value
-untouched when one is present — it can only mint for a record the backfill
-missed, and it can never produce a second uid for the same record (that would
-orphan objects). Ordering is enforced by the runbook, not by hope: step 4 of
-`README-PART-B-RUNBOOK.md` is gated on step 1 reporting `failed: 0`.
+Net: adults see zero behavioural delta; minors stop being force-marked "no artifact".
 
 ## Scope note
 
 "At least one active guardian entry" ingests all 175 minors, including the 40
 whose only link is `email_on_file` and whose guardians cannot read until phase 2.
-That is intended: the bytes sit in Storage behind the same read path as everyone
-else's, `GUARDIAN_READS_ENABLED` is OFF, and those 40 children belong in the
-minor coverage denominator.
+Intended: the bytes sit in Storage behind the same read path as everyone else's,
+`GUARDIAN_READS_ENABLED` is OFF, and those 40 belong in the minor coverage
+denominator (`bySegment.minor.byLinkage.emailOnFile`).
