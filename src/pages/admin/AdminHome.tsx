@@ -57,7 +57,9 @@ export default function AdminHome() {
         {tab === "member-data" && <MemberAppExplorer />}
         {tab === "artifacts" && <ArtifactCoveragePanel />}
         {tab === "guardians" && <UnclaimedGuardiansPanel />}
-        {tab === "seed" && <SeedDataPanel />}
+        {tab === "backfills" && <BackfillRunner />}
+        {tab === "go-live" && <GoLiveChecklist />}
+
         {tab === "audit" && <PhiAuditLog />}
       </div>
     </AppLayout>
