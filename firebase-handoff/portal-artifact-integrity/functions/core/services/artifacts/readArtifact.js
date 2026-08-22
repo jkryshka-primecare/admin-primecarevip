@@ -43,7 +43,7 @@ const {
   isModuleVisible,
   filterHidden,
 } = require('../patient/portalAccess');
-const { isActiveGuardian } = require('../patient/guardians');
+const { resolveGuardianAccess } = require('../patient/guardians');
 const {
   getInternalUid,
   objectPathFor,
