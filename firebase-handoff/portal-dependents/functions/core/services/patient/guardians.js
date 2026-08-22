@@ -86,9 +86,10 @@ function sanitizeEntry(entry) {
  *
  * Throws Error with .reason set to a stable code for the HTTP layer.
  */
-async function linkGuardian(childElationId, entry, actor, reason) {
+async function linkGuardian(childElationId, rawEntry, actor, reason) {
   const db = admin.firestore();
   const ref = db.collection('patients').doc(String(childElationId));
+  const entry = { ...rawEntry, source: normalizeSource(rawEntry.source) };
 
   if (!SOURCES.includes(entry.source)) {
     const e = new Error('unknown source');
@@ -100,6 +101,7 @@ async function linkGuardian(childElationId, entry, actor, reason) {
     e.reason = 'GUARDIAN_IDENTITY_REQUIRED';
     throw e;
   }
+
 
   return db.runTransaction(async (tx) => {
     const snap = await tx.get(ref);
