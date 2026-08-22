@@ -67,8 +67,16 @@ writes bytes only and never grants access.
 - `self = resolvePatientForCaller(uid)` (may be absent for a guardian-only
   account); `targetElationId = childElationId || self.id`.
 - Authorized as `self` when the ids match, else `guardian` when
-  `isActiveGuardian(targetElationId, uid)` passes (fails closed: `status ==='active'`
-  and strict `guardianUid === uid`), else the stranger answer.
+  `resolveGuardianAccess(targetElationId, { uid, callerElationId: self?.id })`
+  passes, else the stranger answer. That resolver fails closed and authorizes on
+  either (a) an active entry already bound to this uid, or (b) phase-1
+  chart-backing: `callerElationId` and the entry's `guardianElationId` both
+  non-empty and strictly equal, `status === 'active'`. A falsy `callerElationId`
+  denies **before any comparison**, so a future guardian-only account can never
+  match a null-`guardianElationId` (`email_on_file`) entry. On (b) it lazily
+  binds that single entry's `guardianUid`, best-effort — a bind failure never
+  blocks or errors the read. `pending_adult_consent` and `revoked` neither
+  authorize nor bind.
 - `childElationId` is **untrusted until that check passes** — no `internalUid`
   resolution, no Storage touch, no signed URL, no repair enqueue before it.
 - Every record-scoped check runs on the **child's** record: allowlist,

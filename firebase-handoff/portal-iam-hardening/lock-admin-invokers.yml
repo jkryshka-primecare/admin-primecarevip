@@ -33,6 +33,7 @@
             adminRevokeGuardian
             backfillInternalUids
             backfillArtifactObjects
+            adminUnclaimedGuardiansReport
 
           )
 

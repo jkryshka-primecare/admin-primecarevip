@@ -187,7 +187,10 @@ invite should fall back to the email for display.
 Guardian *matching* is this document; guardian *reading* is
 [`README-INTERNAL-UID.md`](./README-INTERNAL-UID.md). Storage is re-keyed onto a
 per-record `internalUid` first (minors have no Firebase uid), then
-`readArtifact.js` authorizes a named `childElationId` via `isActiveGuardian`.
+`readArtifact.js` authorizes a named `childElationId` via `resolveGuardianAccess`
+(phase 1: chart-backed — the caller's own elation id must strictly equal the
+entry's `guardianElationId`, both non-empty — with a best-effort lazy
+`bindGuardianUid` on success). `email_on_file` guardians are phase 2.
 Guardian reads stay behind `GUARDIAN_READS_ENABLED`, default OFF, until both
 land and the red-team is green.
 
