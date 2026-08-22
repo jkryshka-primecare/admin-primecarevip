@@ -82,12 +82,13 @@ const { ingestEligibility, isMinorRecord } = require('./core/services/patient/in
 ```
 
 ```js
-// AFTER — D-080 soft posture preserved exactly: a MISSING doc still proceeds.
-// Only the "doc exists but is not active" branch consults the 2b exception.
+// AFTER — D-080 soft posture preserved for ADULTS exactly: a MISSING doc still
+// proceeds, and an existing doc with no `status` field still proceeds.
+// MINORS are ALWAYS subject to the guardian check, regardless of `status`.
   if (pSnap.exists) {
     const data = pSnap.data() || {};
     const gate = ingestEligibility(data);
-    if (!gate.eligible && data.status !== undefined) {
+    if (!gate.eligible && (data.status !== undefined || isMinorRecord(data))) {
       counters.patientsSkippedNonActive += 1;
       pc.skippedNonActive = true;
       log('backfillElationReports', gate.reason, { elationPatientId: pid, status: data.status, cohort: gate.cohort });
@@ -99,10 +100,26 @@ const { ingestEligibility, isMinorRecord } = require('./core/services/patient/in
   }
 ```
 
-The `data.status !== undefined` conjunct is what keeps D-080 soft: a doc with no
-`status` field at all proceeds today and must keep proceeding. Net effect of the
-change is one new admission — a doc whose `status` is set to something other than
-`active` but which is a minor with an active guardian.
+Why the `|| isMinorRecord(data)` conjunct matters: without it, a minor doc whose
+`status` is unset slips through D-080 without ever consulting
+`ingestEligibility`, so "guardian-proxied minors only" would be enforced by the
+input list rather than by the code — a guardian revoked between the batch load
+and the backfill run would still get their child's PHI stored. With it, a
+guardian-less minor is skipped as `skip-minor-no-active-guardian` on every path.
+
+**What status does a minor's doc actually carry?** Verified in the repo:
+`adminProvisionPatients.js` writes `status: 'not_invited'` on creation (line
+224), and `adminLinkGuardian.js` never writes `status` at all. So today a
+provisioned minor's `status` is **defined** (`'not_invited'`) and already routes
+through the eligibility path — the extra conjunct is a belt-and-braces guard for
+docs created by other/legacy writers, not a behaviour change for the 175.
+
+The `data.status !== undefined` conjunct is what keeps D-080 soft **for adults**:
+an adult doc with no `status` field proceeds today and must keep proceeding. Net
+effect of the change is one new admission — a doc whose `status` is set to
+something other than `active` but which is a minor with an active guardian — and
+one new skip: a status-less minor with no active guardian.
+
 
 ### 2b. Artifact key: `firebaseUid` → `internalUid` (245–296)
 
