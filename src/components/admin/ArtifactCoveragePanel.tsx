@@ -1,7 +1,8 @@
 import { forwardRef, useState } from "react";
 import { motion } from "framer-motion";
-import { ShieldCheck, RefreshCw, Download, AlertTriangle, FileWarning, PlayCircle, Stethoscope, Check, X, MinusCircle } from "lucide-react";
+import { ShieldCheck, RefreshCw, Download, AlertTriangle, FileWarning, PlayCircle, Stethoscope, Check, X, MinusCircle, Eye, EyeOff } from "lucide-react";
 import { useArtifactCoverage, missesToCsv } from "@/hooks/useArtifactCoverage";
+import CoverageGate from "@/components/admin/CoverageGate";
 import { useRunArtifactAudit, useRunReadPathSmoke, type SmokeReport } from "@/hooks/usePortalAdmin";
 import { useToast } from "@/hooks/use-toast";
 
@@ -25,6 +26,9 @@ export default function ArtifactCoveragePanel() {
   const runAudit = useRunArtifactAudit();
   const runSmoke = useRunReadPathSmoke();
   const [smoke, setSmoke] = useState<SmokeReport | null>(null);
+  // Patient-level rows are PHI. Counts and pass/fail are the default view;
+  // the row detail takes a second, deliberate step under the same audited read.
+  const [revealMisses, setRevealMisses] = useState(false);
 
   const pct = report?.coveragePct;
   const healthy = pct !== null && pct !== undefined && pct >= 100;
@@ -213,6 +217,14 @@ export default function ArtifactCoveragePanel() {
             <Stat label="Parked (alerting)" value={report.parkedCount.toLocaleString()} tone={report.parkedCount ? "bad" : "good"} />
           </div>
 
+          {report.systemicStorageFailure && (
+            <p className="mt-3 flex items-center gap-2 rounded-lg bg-destructive/10 px-3 py-2 text-xs text-destructive">
+              <AlertTriangle className="h-3.5 w-3.5" /> Storage was unreadable on this run
+              ({report.erroredCount.toLocaleString()} failed probes). No coverage figure is
+              trustworthy and no repairs were queued.
+            </p>
+          )}
+
           {(report.unpathedCount > 0 || report.truncatedWalk) && (
             <div className="mt-3 space-y-1.5">
               {report.truncatedWalk && (
@@ -231,13 +243,27 @@ export default function ArtifactCoveragePanel() {
             </div>
           )}
 
+          <CoverageGate report={report} />
+
           <p className="mt-3 text-xs text-muted-foreground">
             Run <span className="font-mono">{report.runId}</span>
             {report.generatedAt ? ` · ${new Date(report.generatedAt).toLocaleString()}` : ""}
           </p>
 
           {report.misses.length > 0 && (
-            <div className="mt-4 overflow-hidden rounded-xl border border-border">
+            <button
+              onClick={() => setRevealMisses((v) => !v)}
+              className="mt-4 inline-flex items-center gap-1.5 rounded-lg border border-border px-3 py-2 text-xs font-medium text-foreground hover:bg-muted"
+            >
+              {revealMisses ? <EyeOff className="h-3 w-3" /> : <Eye className="h-3 w-3" />}
+              {revealMisses
+                ? "Hide missing artifacts"
+                : `Show ${report.misses.length} missing artifacts (PHI)`}
+            </button>
+          )}
+
+          {report.misses.length > 0 && revealMisses && (
+            <div className="mt-3 overflow-hidden rounded-xl border border-border">
               <table className="w-full text-left text-xs">
                 <thead className="bg-muted/60 text-muted-foreground">
                   <tr>
