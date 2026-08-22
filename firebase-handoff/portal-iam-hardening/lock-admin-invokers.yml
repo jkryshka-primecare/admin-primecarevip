@@ -31,6 +31,9 @@
             adminRunReadPathSmoke
             adminLinkGuardian
             adminRevokeGuardian
+            backfillInternalUids
+            backfillArtifactObjects
+
           )
 
           printf '%s' "$GOOGLE_APPLICATION_CREDENTIALS_JSON" > /tmp/production-sa.json

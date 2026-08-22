@@ -43,7 +43,46 @@ const {
   isModuleVisible,
   filterHidden,
 } = require('../patient/portalAccess');
+const { isActiveGuardian } = require('../patient/guardians');
+const {
+  getInternalUid,
+  objectPathFor,
+  legacyObjectPathFor,
+  legacyFallbackEnabled,
+} = require('../patient/internalUid');
 const { enqueueRepair, PREPARING } = require('./repairQueue');
+
+/**
+ * Release 2b guardian reads stay OFF until the internal-UID re-key (Part B) is
+ * complete and the red-team is green. OFF means a guardian read is treated
+ * exactly like a stranger read — absence, never "forbidden".
+ */
+function guardianReadsEnabled() {
+  return process.env.GUARDIAN_READS_ENABLED === 'true';
+}
+
+/**
+ * Proxy audit (enforcement rule 4): every read logs BOTH uids. Self-reads set
+ * acting == subject. No PHI beyond ids already logged; failures never change
+ * the member answer.
+ */
+async function logAccess({ actingUid, subjectUid, subjectElationId, reportId, moduleKey, mode, outcome }) {
+  try {
+    await admin.firestore().collection('phi_access_log').add({
+      actingUid: actingUid || null,
+      subjectUid: subjectUid || null,
+      subjectElationId: subjectElationId || null,
+      reportId: reportId || null,
+      module: moduleKey || null,
+      mode,
+      outcome,
+      at: new Date().toISOString(),
+    });
+  } catch (_e) {
+    // Logging is best-effort; it must never leak or alter the answer.
+  }
+}
+
 
 /** Signed-URL TTL: default, and the hard cap a caller can never exceed. */
 const DEFAULT_TTL_SECONDS = 300;
@@ -95,9 +134,11 @@ function isReadAllowed(elationPatientId) {
   return allow.includes(String(elationPatientId));
 }
 
-function objectPathFor(uid, reportId) {
-  return `elation-artifacts/${uid}/${reportId}/report.pdf`;
-}
+// Storage paths now come from `core/services/patient/internalUid` — the object
+// is keyed on the RECORD's internalUid, never on the caller's token uid. See
+// Part B: minors have no firebaseUid, so a uid-keyed path made guardian reads
+// unserveable and would have mislocated the child's PDF under the guardian.
+
 
 /**
  * Serve one artifact.
@@ -127,27 +168,59 @@ async function handleArtifactRead(req, params = {}) {
   }
   const uid = String(user.uid).toLowerCase();
 
-  // 2. Server-derived patient. Ownership never comes from the caller.
-  let doc;
+  // 2. Resolve the SUBJECT record. Two id spaces, kept distinct:
+  //      - the Firestore RECORD is keyed by elationPatientId (what a guardian
+  //        link points at);
+  //      - the Storage OBJECT is keyed by that record's `internalUid`.
+  //    A guardian-only account may resolve to no record of its own, which is
+  //    fine — the guardian check below is what authorizes the read.
+  let doc = null;
   try {
     doc = await resolvePatientForCaller(uid);
   } catch (err) {
     const status = err.httpErrorCode?.status || 500;
-    throw fail(status, status === 404 ? 'NOT_FOUND' : status === 401 ? 'UNAUTHENTICATED' : 'INTERNAL',
-      err.details?.reason || 'INTERNAL', err.message);
+    if (status !== 404) {
+      throw fail(status, status === 401 ? 'UNAUTHENTICATED' : 'INTERNAL',
+        err.details?.reason || 'INTERNAL', err.message);
+    }
   }
-  const elationPatientId = doc && doc.id;
+  const selfElationId = doc && doc.id ? String(doc.id) : null;
+
+  // The caller MAY name a child. That id is untrusted until isActiveGuardian
+  // passes: no internalUid resolution, no Storage touch, no signed URL and no
+  // repair enqueue happen before authorization succeeds.
+  const requestedChildId = String(
+    (params && params.childElationId) || (req && req.body && req.body.childElationId) || '',
+  ).trim();
+  const elationPatientId = requestedChildId || selfElationId;
   if (!elationPatientId) {
     throw fail(403, 'PERMISSION_DENIED', 'NO_PATIENT_BOUND', 'No patient record for this account.');
   }
 
-  // 3. Pre-G9 allowlist gate — fail closed.
+  let mode = null;
+  if (selfElationId && selfElationId === elationPatientId) {
+    mode = 'self';
+  } else if (guardianReadsEnabled() && (await isActiveGuardian(elationPatientId, uid))) {
+    // isActiveGuardian fails CLOSED: it requires status === 'active' and a
+    // strict guardianUid === uid match, and denies on any error. A revoked or
+    // pending_adult_consent entry is not active, so it lands in the else below.
+    mode = 'guardian';
+  }
+  if (!mode) {
+    // Absence-never-forbidden: an unlinked, revoked or pending target answers
+    // exactly like a stranger's guess. Nothing here reveals the child exists.
+    await logAccess({ actingUid: uid, subjectElationId: null, reportId, moduleKey, mode: 'denied', outcome: 'unauthorized' });
+    throw notSynced();
+  }
+
+  // 3. Pre-G9 allowlist gate — fail closed, on the SUBJECT's record.
   if (!isReadAllowed(elationPatientId)) {
     throw fail(403, 'PERMISSION_DENIED', 'NOT_IN_ALLOWLIST',
       'Records access is not enabled for this account yet.');
   }
 
-  // 4. Suspension fails CLOSED.
+  // 4. Suspension fails CLOSED — evaluated on the CHILD's record for a proxy
+  //    read (enforcement rule 2), never on the guardian's.
   try {
     await assertNotSuspended(elationPatientId);
   } catch (err) {
@@ -159,7 +232,7 @@ async function handleArtifactRead(req, params = {}) {
   }
 
   // 5. Reference ownership FIRST, so suppression can be evaluated under the
-  //    report's TRUE module. All artifact-bearing docs live in the patient's
+  //    report's TRUE module. All artifact-bearing docs live in the subject's
   //    `labs` subcollection, discriminated by `category`. A guessed id
   //    belonging to another member resolves to nothing here — 404, and
   //    crucially NO repair is queued, so the healer can never be steered at
@@ -182,7 +255,9 @@ async function handleArtifactRead(req, params = {}) {
   const effectiveModule = CATEGORY_TO_MODULE[String(refSnap.get('category') || '')];
   if (!effectiveModule || effectiveModule !== moduleKey) throw notSynced();
 
-  // 6. Suppression reads as absence — evaluated BEFORE any Storage access.
+  // 6. Suppression reads as absence — evaluated BEFORE any Storage access, and
+  //    always on the SUBJECT's record. A guardian never sees more than the
+  //    child's own settings allow, and a hidden item is the identical absence.
   const portalAccess = await getPortalAccess(elationPatientId);
   if (!isModuleVisible(portalAccess, effectiveModule)) throw notSynced();
   if (filterHidden(portalAccess, effectiveModule, [{ id: reportId }], (it) => it.id).length === 0) {
@@ -190,38 +265,67 @@ async function handleArtifactRead(req, params = {}) {
   }
 
 
-  // 6b. The object itself lives under the caller's own uid prefix.
-  const path = objectPathFor(uid, reportId);
-  const file = admin.storage().bucket(artifactBucketName()).file(path);
-
+  // 6b. Only now — after authorization — is the STORAGE key resolved. The
+  //     object lives under the SUBJECT record's internalUid.
+  const { internalUid, legacyUid } = await getInternalUid(elationPatientId);
+  const path = objectPathFor(internalUid, reportId);
+  const bucket = admin.storage().bucket(artifactBucketName());
 
   let exists = false;
+  let servedPath = path;
   try {
-    [exists] = await file.exists();
+    if (path) [exists] = await bucket.file(path).exists();
+    if (!exists && legacyFallbackEnabled() && legacyUid) {
+      // Dual-read window (Part B step 2): serve the legacy firebaseUid path
+      // while the object backfill runs. Removed once coverage is 100% under
+      // the new key. A record with no legacyUid (every minor) never reaches
+      // this branch, so a guardian read is only ever served re-keyed.
+      const legacyPath = legacyObjectPathFor(legacyUid, reportId);
+      [exists] = await bucket.file(legacyPath).exists();
+      if (exists) servedPath = legacyPath;
+    }
   } catch (err) {
     throw fail(500, 'INTERNAL', 'STORAGE_ERROR', 'Storage unavailable.');
   }
 
   if (!exists) {
-    // Server-scoped repair: the queue entry is derived from the resolved
-    // patient, never from the request. The member is not blocked on Elation.
+    // Server-scoped repair: the queue entry is derived from the authorized
+    // subject, never from the request, and it is keyed on the internalUid
+    // path — so a heal can never land a child's PDF under a guardian prefix.
     try {
-      await enqueueRepair({ patientId: elationPatientId, uid }, { documentId: reportId, path, module: effectiveModule });
+      if (path) {
+        await enqueueRepair(
+          { patientId: elationPatientId, internalUid },
+          { documentId: reportId, path, module: effectiveModule },
+        );
+      }
     } catch (err) {
       // A repair-queue failure must never leak or change the member answer.
     }
+    await logAccess({
+      actingUid: uid, subjectUid: internalUid, subjectElationId: elationPatientId,
+      reportId, moduleKey: effectiveModule, mode, outcome: 'preparing',
+    });
     return { ...PREPARING };
   }
+
 
   const ttlSeconds = clampTtl(params.ttlSeconds);
   const expiresMs = Date.now() + ttlSeconds * 1000;
   let signedUrl;
   try {
-    const [url] = await file.getSignedUrl({ version: 'v4', action: 'read', expires: expiresMs });
+    const [url] = await bucket
+      .file(servedPath)
+      .getSignedUrl({ version: 'v4', action: 'read', expires: expiresMs });
     signedUrl = url;
   } catch (err) {
     throw fail(500, 'INTERNAL', 'SIGN_ERROR', 'Could not prepare the report link.');
   }
+
+  await logAccess({
+    actingUid: uid, subjectUid: internalUid, subjectElationId: elationPatientId,
+    reportId, moduleKey: effectiveModule, mode, outcome: 'served',
+  });
 
   return {
     signedUrl,
@@ -229,6 +333,7 @@ async function handleArtifactRead(req, params = {}) {
     contentType: 'application/pdf',
   };
 }
+
 
 module.exports = {
   handleArtifactRead,

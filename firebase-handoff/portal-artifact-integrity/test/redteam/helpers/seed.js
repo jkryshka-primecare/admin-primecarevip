@@ -10,6 +10,7 @@
  */
 
 const admin = require('firebase-admin');
+const crypto = require('crypto');
 const { writableBucket, initOnce } = require('./storage');
 const { assertStatefulTargetAllowed } = require('./env');
 
@@ -62,9 +63,12 @@ function accessRef(patientId) {
   return db().collection('portalAccess').doc(patientId);
 }
 
-async function seedPatient({ id, suspended = false, bound = true } = {}) {
+async function seedPatient({ id, suspended = false, bound = true, minor = false } = {}) {
   const patientId = id ? `${PREFIX}${id}` : uniqueId('patient');
-  const firebaseUid = `${patientId}-uid`.toLowerCase();
+  // A MINOR never logs in: no Firebase Auth uid at all. That is exactly why
+  // storage is keyed on `internalUid` (Release 2b Part B) and not on the uid.
+  const firebaseUid = minor ? null : `${patientId}-uid`.toLowerCase();
+  const internalUid = crypto.randomUUID();
 
   await db()
     .collection('patients')
@@ -72,9 +76,10 @@ async function seedPatient({ id, suspended = false, bound = true } = {}) {
     .set(
       {
         redteam: true,
-        // `bound: false` mirrors a not-yet-claimed member: no uid on the
-        // patient doc, so the audit must classify their artifacts `unpathed`.
-        ...(bound ? { firebaseUid } : {}),
+        // `bound: false` mirrors a record with NO storage key at all, so the
+        // audit must classify its artifacts `unpathed`.
+        ...(bound ? { internalUid } : {}),
+        ...(bound && firebaseUid ? { firebaseUid } : {}),
         updatedAt: new Date().toISOString(),
       },
       { merge: true },
@@ -84,12 +89,39 @@ async function seedPatient({ id, suspended = false, bound = true } = {}) {
     await accessRef(patientId).set({ redteam: true, status: 'suspended' }, { merge: true });
   }
 
-  const token = await mintPatientToken(firebaseUid);
+  // Minors get no token — a guardian acts for them.
+  const token = firebaseUid ? await mintPatientToken(firebaseUid) : null;
 
   return {
     patientId,
     firebaseUid,
+    internalUid: bound ? internalUid : null,
+    minor,
     token,
+    /** Attach `guardian` (a seedPatient handle) as a proxy on THIS record. */
+    async linkGuardian(guardian, { status = 'active' } = {}) {
+      await db().collection('patients').doc(patientId).set(
+        {
+          guardians: admin.firestore.FieldValue.arrayUnion({
+            guardianElationId: guardian.patientId,
+            guardianEmail: `${guardian.patientId}@example.test`,
+            guardianUid: guardian.firebaseUid,
+            source: 'manual',
+            status,
+            confirmedBy: 'redteam',
+            reason: 'redteam',
+          }),
+        },
+        { merge: true },
+      );
+    },
+    /** Flip one guardian entry's status (revoked / pending_adult_consent). */
+    async setGuardianStatus(guardian, status) {
+      const snap = await db().collection('patients').doc(patientId).get();
+      const guardians = (snap.get('guardians') || []).map((g) =>
+        g.guardianElationId === guardian.patientId ? { ...g, status } : g);
+      await db().collection('patients').doc(patientId).set({ guardians }, { merge: true });
+    },
     async suspend() {
       await accessRef(patientId).set({ redteam: true, status: 'suspended' }, { merge: true });
     },
@@ -101,6 +133,24 @@ async function seedPatient({ id, suspended = false, bound = true } = {}) {
         },
         { merge: true },
       );
+    },
+    /** Toggle a portalAccess module on the CHILD's record. */
+    async setModule(moduleKey, visible) {
+      await accessRef(patientId).set(
+        { redteam: true, modules: { [moduleKey]: !!visible } },
+        { merge: true },
+      );
+    },
+    /** Simulate an invite claim: records the AUTH uid, never the storage key. */
+    async claimLogin(uid) {
+      await db().collection('patients').doc(patientId).set(
+        { firebaseUid: String(uid).toLowerCase() },
+        { merge: true },
+      );
+    },
+    async readInternalUid() {
+      const snap = await db().collection('patients').doc(patientId).get();
+      return snap.get('internalUid') || null;
     },
     async repairQueueRows() {
       const snap = await db()
@@ -128,9 +178,10 @@ async function seedDocument(
   { documentId, hidden = false, missingObject = false, module: moduleKey = 'labs' } = {},
 ) {
   if (typeof patient === 'string') throw new Error('seedDocument requires a seedPatient() handle (uid-keyed paths)');
-  const { patientId, firebaseUid } = patient;
+  const { patientId, firebaseUid, internalUid } = patient;
   const docId = documentId ? `${PREFIX}${documentId}` : uniqueId('doc');
-  const path = `elation-artifacts/${firebaseUid}/${docId}/report.pdf`;
+  // Release 2b Part B: the OBJECT is keyed on the record's internalUid.
+  const path = `elation-artifacts/${internalUid}/${docId}/report.pdf`;
   const CATEGORY = { labs: 'lab', imaging: 'imaging', records: 'medical_records' };
   const b = writableBucket();
 
@@ -170,7 +221,15 @@ async function seedDocument(
     });
   }
 
-  return { patientId, firebaseUid, documentId: docId, path, bucket: b.name, module: moduleKey };
+  return { patientId, firebaseUid, internalUid, documentId: docId, path, bucket: b.name, module: moduleKey };
+}
+
+/** PHI access-log rows this suite produced, for the both-uid assertions. */
+async function accessLogRows({ reportId } = {}) {
+  let q = db().collection('phi_access_log');
+  if (reportId) q = q.where('reportId', '==', reportId);
+  const snap = await q.get();
+  return snap.docs.map((d) => ({ id: d.id, ...d.data() }));
 }
 
 /** Run the REAL sweep against a seeded miss (never a fake write). */
@@ -215,7 +274,22 @@ async function cleanup() {
   }
   const queue = await firestore.collection('artifact_repair_queue').where('source', '==', 'redteam').get();
   await Promise.all(queue.docs.map((d) => d.ref.delete()));
+  const logs = await firestore
+    .collection('phi_access_log')
+    .where('reportId', '>=', PREFIX)
+    .where('reportId', '<', `${PREFIX}\uf8ff`)
+    .get()
+    .catch(() => ({ docs: [] }));
+  await Promise.all(logs.docs.map((d) => d.ref.delete()));
   await writableBucket().deleteFiles({ prefix: 'elation-artifacts/redteam-', force: true });
 }
 
-module.exports = { seedPatient, seedDocument, healArtifact, cleanup, PREFIX, SEEDED_COLLECTIONS };
+module.exports = {
+  seedPatient,
+  seedDocument,
+  healArtifact,
+  accessLogRows,
+  cleanup,
+  PREFIX,
+  SEEDED_COLLECTIONS,
+};

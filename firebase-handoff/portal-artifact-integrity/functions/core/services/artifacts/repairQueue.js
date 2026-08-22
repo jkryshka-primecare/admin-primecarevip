@@ -20,7 +20,10 @@ const admin = require('firebase-admin');
 const PREPARING = { state: 'preparing', message: 'We are preparing your document. Check back shortly.' };
 
 /**
- * @param {{ patientId: string }} ctx  server-resolved read context — NOT client input
+ * @param {{ patientId: string, internalUid?: string }} ctx  server-resolved read
+ *        context — NOT client input. `internalUid` is the record's STORAGE key
+ *        (Release 2b Part B); the queued `path` is always internalUid-keyed, so
+ *        a heal can never land a child's PDF under a guardian's prefix.
  * @param {{ documentId: string, path: string }} doc  the reference that 404'd
  */
 async function enqueueRepair(ctx, doc) {
@@ -41,6 +44,7 @@ async function enqueueRepair(ctx, doc) {
       ref,
       {
         patientId,
+        internalUid: (ctx && ctx.internalUid) || null,
         documentId: doc.documentId,
         path: doc.path,
         firstSeenAt: (snap.exists && snap.data().firstSeenAt) || new Date().toISOString(),
