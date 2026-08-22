@@ -410,6 +410,32 @@ async function recordAction(
   }
 }
 
+/**
+ * Attribution-first audit write for bulk PHI migrations. Unlike recordAction
+ * this FAILS CLOSED: the caller must not touch the upstream function if this
+ * returns false. Upstream only ever sees `portal-admin`, so if this row is
+ * missing there is no record anywhere of which human ran the migration.
+ */
+async function recordActionStrict(
+  ctx: AuthContext,
+  entry: { action: string; reason: string; after?: unknown },
+): Promise<boolean> {
+  const { error } = await ctx.supabase.from("portal_admin_actions").insert({
+    actor_user_id: ctx.user.id,
+    actor_email: ctx.user.email ?? null,
+    elation_patient_id: null,
+    action: entry.action,
+    reason: entry.reason,
+    before_state: null as never,
+    after_state: (entry.after ?? null) as never,
+    ok: false,
+    http_status: null,
+    error_message: "started — awaiting upstream result",
+  });
+  return !error;
+}
+
+
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: corsHeaders });
 
