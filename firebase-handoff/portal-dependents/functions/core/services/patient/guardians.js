@@ -255,7 +255,12 @@ async function bindGuardianUid(childElationId, selector, uid) {
   const db = admin.firestore();
   const ref = db.collection('patients').doc(String(childElationId));
   const key = typeof selector === 'string' ? selector : guardianKey(selector || {});
-  if (!key || key === 'email:' || !uid) return { bound: false, reason: 'SELECTOR_REQUIRED' };
+  // Empty-identity keys must never match an entry. 'id:' is included because a
+  // malformed `{ guardianElationId: '' }` selector would otherwise key as
+  // `id:` and could collide with an equally malformed stored entry.
+  if (!key || key === 'email:' || key === 'id:' || !uid) {
+    return { bound: false, reason: 'SELECTOR_REQUIRED' };
+  }
 
   return db.runTransaction(async (tx) => {
     const snap = await tx.get(ref);
