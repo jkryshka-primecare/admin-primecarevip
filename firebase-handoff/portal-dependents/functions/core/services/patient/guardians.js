@@ -288,6 +288,93 @@ async function bindGuardianUid(childElationId, selector, uid) {
 }
 
 
+/**
+ * Release 2b phase 1 — CHART-BACKED guardian authorization at read time.
+ *
+ * `isActiveGuardian` only recognizes a guardian whose `guardianUid` was bound
+ * beforehand, and nothing in production ever binds it. This resolver closes
+ * that gap for the guardians we can authenticate against a chart: the caller's
+ * OWN elation record id must strictly equal the entry's `guardianElationId`.
+ * On success it lazily (best-effort) binds the uid to that one entry so the
+ * fast path applies next time.
+ *
+ * NULL-EQUALITY FENCE (non-negotiable): `email_on_file` entries carry
+ * `guardianElationId === null`, and phase 2 introduces guardian-only accounts
+ * with no owned record (`callerElationId === null`). A bare `===` would then
+ * make such an account a guardian over EVERY email_on_file child. So:
+ *   - a falsy `callerElationId` denies immediately, before any comparison;
+ *   - a match requires BOTH ids non-empty AND strictly equal.
+ *
+ * Fails CLOSED: any error, missing doc, or non-active entry denies.
+ *
+ * @returns {Promise<{ authorized: boolean, reason?: string, guardianKey?: string,
+ *                     bound?: boolean, bindReason?: string }>}
+ */
+async function resolveGuardianAccess(childElationId, { uid, callerElationId } = {}) {
+  const callerId = String(callerElationId || '').trim();
+  const childId = String(childElationId || '').trim();
+  if (!uid) return { authorized: false, reason: 'NO_UID' };
+  // Fence: no owned chart -> never a chart-backed guardian. Checked BEFORE any
+  // comparison so two nulls can never satisfy the match.
+  if (!callerId) return { authorized: false, reason: 'NO_CALLER_RECORD' };
+  if (!childId) return { authorized: false, reason: 'NO_CHILD' };
+  if (callerId === childId) return { authorized: false, reason: 'SELF_NOT_GUARDIAN' };
+
+  let guardians;
+  try {
+    const snap = await admin.firestore().collection('patients').doc(childId).get();
+    if (!snap.exists) return { authorized: false, reason: 'CHILD_NOT_FOUND' };
+    guardians = snap.data().guardians;
+  } catch (_e) {
+    return { authorized: false, reason: 'LOOKUP_FAILED' };
+  }
+  if (!Array.isArray(guardians)) return { authorized: false, reason: 'NO_GUARDIANS' };
+
+  // Fast path: an already-bound active entry (what isActiveGuardian sees).
+  if (guardians.some((g) => g && g.status === 'active' && g.guardianUid && g.guardianUid === uid)) {
+    return { authorized: true, reason: 'BOUND_UID', bound: true };
+  }
+
+  // Chart-backed path. Only 'active' authorizes: 'pending_adult_consent' and
+  // 'revoked' neither authorize nor bind, so the 18th-birthday sweep cuts
+  // access even for a guardian who was previously bound.
+  const matches = guardians.filter(
+    (g) =>
+      g &&
+      g.status === 'active' &&
+      String(g.guardianElationId || '').trim() !== '' &&
+      String(g.guardianElationId).trim() === callerId,
+  );
+  if (matches.length === 0) return { authorized: false, reason: 'NOT_A_GUARDIAN' };
+
+  const entry = matches[0];
+  if (entry.guardianUid && entry.guardianUid !== uid) {
+    // The chart says this caller is the guardian, but the entry is already
+    // bound to a different account. Fail closed and let an admin sort it out.
+    return { authorized: false, reason: 'ALREADY_BOUND_TO_OTHER_UID' };
+  }
+
+  const key = guardianKey(entry);
+  // Best-effort lazy bind: authorization already came from the chart match, so
+  // a bind failure must never block or error the read.
+  let bind = { bound: false, reason: 'NOT_ATTEMPTED' };
+  try {
+    if (matches.length === 1) bind = await bindGuardianUid(childId, key, uid);
+    else bind = { bound: false, reason: 'AMBIGUOUS_SELECTOR' };
+  } catch (_e) {
+    bind = { bound: false, reason: 'BIND_FAILED' };
+  }
+
+  return {
+    authorized: true,
+    reason: 'CHART_MATCH',
+    guardianKey: key,
+    bound: Boolean(bind && bind.bound),
+    bindReason: (bind && bind.reason) || null,
+  };
+}
+
+
 module.exports = {
   SOURCES,
   SOURCE_ALIASES,
