@@ -218,6 +218,19 @@ async function runAudit() {
   // be laundered into a coverage number or a repair queue full of ghosts.
   const systemicStorageFailure = probed > 0 && erroredCount / probed >= 0.25;
 
+  // Per-cohort coverage. `null` means "nothing referenced in this cohort" —
+  // which for `minor` before the minor-ingest deploy is the EXPECTED value and
+  // is NOT a pass. The Part B join gate requires both splits at 100 with a
+  // non-zero denominator.
+  const pct = (s) => {
+    const c = s.present + s.missing;
+    return systemicStorageFailure || c === 0 ? null : (s.present / c) * 100;
+  };
+  const bySegment = {
+    adult: { ...splits.adult, coveragePct: pct(splits.adult) },
+    minor: { ...splits.minor, coveragePct: pct(splits.minor) },
+  };
+
   const report = {
     generatedAt: new Date().toISOString(),
     scope: 'referenced',
