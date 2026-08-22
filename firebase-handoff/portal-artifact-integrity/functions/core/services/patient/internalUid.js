@@ -103,14 +103,14 @@ function legacyFallbackEnabled() {
 function makeInternalUidResolver(db = admin.firestore()) {
   const cache = new Map();
   return async function resolve(elationPatientId) {
-    if (!elationPatientId) return { internalUid: null, legacyUid: null };
+    if (!elationPatientId) return { internalUid: null, legacyUid: null, isMinor: false };
     const key = String(elationPatientId);
     if (cache.has(key)) return cache.get(key);
     let value;
     try {
       value = await getInternalUid(key, db);
     } catch (_e) {
-      value = { internalUid: null, legacyUid: null };
+      value = { internalUid: null, legacyUid: null, isMinor: false };
     }
     cache.set(key, value);
     return value;
