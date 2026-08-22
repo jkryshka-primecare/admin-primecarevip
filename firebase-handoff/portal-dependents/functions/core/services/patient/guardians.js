@@ -220,28 +220,51 @@ async function isActiveGuardian(childElationId, uid) {
   }
 }
 
-/** Bind a uid to a guardian entry the first time that guardian claims/proxies. */
-async function bindGuardianUid(childElationId, email, uid) {
+/**
+ * Bind a uid to exactly ONE guardian entry, the first time that guardian
+ * claims/proxies.
+ *
+ * `selector` must identify a single entry — pass the `guardianKey` the invite
+ * token was issued for (preferred), or `{ guardianElationId }` / `{ guardianEmail }`
+ * which are reduced to the same key. Binding by email alone is NOT safe: two
+ * distinct guardians (both parents) can share one email, and binding both
+ * entries to the first claimer fuses the proxies and breaks per-parent
+ * revocation.
+ *
+ * Only 'active' or 'pending_adult_consent' entries are bindable; a revoked
+ * entry never gains a uid.
+ */
+async function bindGuardianUid(childElationId, selector, uid) {
   const db = admin.firestore();
   const ref = db.collection('patients').doc(String(childElationId));
-  const target = String(email || '').trim().toLowerCase();
+  const key = typeof selector === 'string' ? selector : guardianKey(selector || {});
+  if (!key || key === 'email:' || !uid) return { bound: false, reason: 'SELECTOR_REQUIRED' };
+
   return db.runTransaction(async (tx) => {
     const snap = await tx.get(ref);
-    if (!snap.exists) return { bound: false };
+    if (!snap.exists) return { bound: false, reason: 'CHILD_NOT_FOUND' };
     const guardians = Array.isArray(snap.data().guardians) ? snap.data().guardians.slice() : [];
-    let bound = false;
-    for (let i = 0; i < guardians.length; i += 1) {
-      const g = guardians[i];
-      if (!g || g.guardianUid) continue;
-      if (String(g.guardianEmail || '').toLowerCase() === target) {
-        guardians[i] = { ...g, guardianUid: uid };
-        bound = true;
-      }
+
+    const matches = guardians
+      .map((g, i) => ({ g, i }))
+      .filter(({ g }) => g && guardianKey(g) === key);
+    if (matches.length === 0) return { bound: false, reason: 'GUARDIAN_NOT_FOUND' };
+    if (matches.length > 1) return { bound: false, reason: 'AMBIGUOUS_SELECTOR' };
+
+    const { g, i } = matches[0];
+    if (g.status !== 'active' && g.status !== 'pending_adult_consent') {
+      return { bound: false, reason: 'GUARDIAN_NOT_BINDABLE' };
     }
-    if (bound) tx.set(ref, { guardians }, { merge: true });
-    return { bound };
+    if (g.guardianUid) {
+      return { bound: g.guardianUid === uid, reason: g.guardianUid === uid ? null : 'ALREADY_BOUND' };
+    }
+
+    guardians[i] = { ...g, guardianUid: String(uid) };
+    tx.set(ref, { guardians }, { merge: true });
+    return { bound: true, guardianKey: key };
   });
 }
+
 
 module.exports = {
   SOURCES,
