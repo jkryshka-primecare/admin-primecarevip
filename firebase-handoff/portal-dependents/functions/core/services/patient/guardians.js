@@ -125,11 +125,17 @@ async function linkGuardian(childElationId, rawEntry, actor, reason) {
       e.reason = 'CHILD_IS_ADULT';
       throw e;
     }
-    if (String(childElationId) === String(entry.guardianElationId || '')) {
+    const childEmail = String(data.email || data.contactEmail || '').trim().toLowerCase();
+    const guardianEmail = String(entry.guardianEmail || '').trim().toLowerCase();
+    const selfById =
+      entry.guardianElationId && String(childElationId) === String(entry.guardianElationId);
+    const selfByEmail = guardianEmail && childEmail && guardianEmail === childEmail;
+    if (selfById || selfByEmail) {
       const e = new Error('self link');
       e.reason = 'SELF_LINK_REJECTED';
       throw e;
     }
+
 
     const now = admin.firestore.Timestamp.now();
     const existing = Array.isArray(data.guardians) ? data.guardians.slice() : [];
