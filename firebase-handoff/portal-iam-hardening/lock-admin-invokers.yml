@@ -34,6 +34,8 @@
             backfillInternalUids
             backfillArtifactObjects
             adminUnclaimedGuardiansReport
+            backfillElationReports
+            dependentBirthdaySweep
 
           )
 
