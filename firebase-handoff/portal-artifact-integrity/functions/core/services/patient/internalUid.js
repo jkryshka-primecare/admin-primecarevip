@@ -117,20 +117,22 @@ function legacyFallbackEnabled() {
 /** Per-request memo so one read never fetches the same patient doc twice. */
 function makeInternalUidResolver(db = admin.firestore()) {
   const cache = new Map();
+  const EMPTY = { internalUid: null, legacyUid: null, isMinor: false, chartBacked: false };
   return async function resolve(elationPatientId) {
-    if (!elationPatientId) return { internalUid: null, legacyUid: null, isMinor: false };
+    if (!elationPatientId) return EMPTY;
     const key = String(elationPatientId);
     if (cache.has(key)) return cache.get(key);
     let value;
     try {
       value = await getInternalUid(key, db);
     } catch (_e) {
-      value = { internalUid: null, legacyUid: null, isMinor: false };
+      value = EMPTY;
     }
     cache.set(key, value);
     return value;
   };
 }
+
 
 module.exports = {
   FIELD,
