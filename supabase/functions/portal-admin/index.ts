@@ -69,7 +69,19 @@ const ADMIN_ONLY: Action[] = ["runAudit", "smoke", "unclaimedGuardians"];
  *     sees `portal-admin`, so this row is the sole human-attribution record
  *     for a PHI migration.
  */
-const BULK_MIGRATIONS: Action[] = ["backfillUids", "backfillArtifacts", "backfillMinorReports"];
+const BULK_MIGRATIONS: Action[] = [
+  "backfillUids",
+  "backfillArtifacts",
+  "backfillMinorReports",
+  "linkGuardians",
+];
+
+/**
+ * Bulk actions that this bridge fans out itself, one upstream call per row,
+ * because the Cloud Function is a single-record endpoint. Everything else
+ * makes exactly one upstream call.
+ */
+const FAN_OUT: Action[] = ["linkGuardians"];
 
 /** Actions that act on a set of members rather than a single patient. */
 const BATCH_ACTIONS: Action[] = [
@@ -82,6 +94,7 @@ const BATCH_ACTIONS: Action[] = [
 
 /** Upper bound on one minor-track ingest call. The 2b cohort is ~175. */
 const MAX_MINOR_IDS = 500;
+
 
 /**
  * Elation chart ids for the minor-track ingest. Shape-validated here and
