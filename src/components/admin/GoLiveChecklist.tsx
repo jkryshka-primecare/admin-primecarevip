@@ -75,6 +75,13 @@ const OPERATOR_ITEMS: Item[] = [
     owner: "operator",
   },
   {
+    id: "artifact-bucket-unset",
+    label: "ARTIFACT_BUCKET is UNSET in prod and staging",
+    detail:
+      "NO-GO if set. The runner hardcodes prive-care-vip.firebasestorage.app while the read path resolves artifactBucketName(); any override makes writes and reads land in different buckets and every read is a permanent \"preparing\". Remove this line once the fast-follow has the runner import artifactBucketName().",
+    owner: "operator",
+  },
+  {
     id: "fallback-off",
     label: "ARTIFACT_LEGACY_UID_FALLBACK turned OFF for the gate audit",
     detail: "The gate below refuses to pass on a report that was produced with the fallback on.",
