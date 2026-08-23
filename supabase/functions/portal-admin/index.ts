@@ -197,20 +197,42 @@ function parseGuardianCsv(
   const lines = raw.split(/\r?\n/).filter((l) => l.trim());
   if (lines.length < 2) return "The CSV has a header but no rows.";
 
-  const header = splitCsvLine(lines[0]).map((h) => h.trim().toLowerCase());
+  // Normalize headers: strip BOM/quotes, lowercase, spaces/dashes -> underscore.
+  const header = splitCsvLine(lines[0]).map((h) =>
+    h.replace(/^\uFEFF/, "").replace(/^"|"$/g, "").trim().toLowerCase().replace(/[\s-]+/g, "_")
+  );
+  // Accept the common export spellings for each logical column.
+  const ALIASES: Record<string, string[]> = {
+    minor_elation_id: [
+      "minor_elation_id", "child_elation_id", "minor_id", "child_id",
+      "patient_elation_id", "elation_id", "minor_chart_id", "child_chart_id",
+    ],
+    guardian_email: ["guardian_email", "guardian_email_address", "parent_email", "email", "email_on_file"],
+    match_source: ["match_source", "source", "match_type", "link_source"],
+    guardian_elation_id: ["guardian_elation_id", "guardian_chart_id", "parent_elation_id"],
+    guardian_hint_id: ["guardian_hint_id", "hint_id", "guardian_hint_patient_id"],
+    guardian_name: ["guardian_name", "parent_name", "guardian_full_name"],
+  };
+  const col = (name: string) => {
+    for (const alias of ALIASES[name] ?? [name]) {
+      const i = header.indexOf(alias);
+      if (i > -1) return i;
+    }
+    return -1;
+  };
   const required = ["minor_elation_id", "guardian_email", "match_source"];
-  const missing = required.filter((h) => !header.includes(h));
+  const missing = required.filter((h) => col(h) === -1);
   if (missing.length) {
-    return `The CSV is missing required column(s): ${missing.join(", ")}.`;
+    return `The CSV is missing required column(s): ${missing.join(", ")}. Found: ${header.join(", ")}.`;
   }
   if (lines.length - 1 > MAX_GUARDIAN_ROWS) {
     return `At most ${MAX_GUARDIAN_ROWS} rows at a time (received ${lines.length - 1}).`;
   }
-  const col = (name: string) => header.indexOf(name);
   const at = (cells: string[], name: string) => {
     const i = col(name);
-    return i > -1 ? (cells[i] ?? "").trim() : "";
+    return i > -1 ? (cells[i] ?? "").replace(/^"|"$/g, "").trim() : "";
   };
+
 
   const rows: GuardianRow[] = [];
   const rejected: GuardianRejection[] = [];
