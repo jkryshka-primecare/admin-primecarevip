@@ -43,14 +43,24 @@ async function run({ apply, limit, cursor }) {
   // Cursors are full document paths. A collection-group query ordered by
   // documentId() rejects a bare doc id ("…456296" — odd segment count), so we
   // resume from the DocumentSnapshot itself, which carries the full path.
+  // Legacy bare-id cursors are ignored (run restarts from the beginning)
+  // rather than throwing, so a stale saved cursor cannot 500 the runner.
   let startAfterSnap = null;
   if (cursor) {
     const path = String(cursor);
     if (path.split('/').filter(Boolean).length % 2 !== 0) {
-      throw new Error('INVALID_CURSOR: expected a full document path');
+      log('backfillArtifactObjects', 'ignoring legacy bare-id cursor', { cursor: path });
+      report.ignoredLegacyCursor = path;
+    } else {
+      startAfterSnap = await db.doc(path).get();
+      if (!startAfterSnap.exists) {
+        log('backfillArtifactObjects', 'cursor doc missing; restarting', { cursor: path });
+        startAfterSnap = null;
+        report.ignoredLegacyCursor = path;
+      }
     }
-    startAfterSnap = await db.doc(path).get();
   }
+
 
   let budget = limit || DEFAULT_LIMIT;
 
