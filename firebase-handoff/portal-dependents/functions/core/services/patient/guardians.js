@@ -125,16 +125,29 @@ async function linkGuardian(childElationId, rawEntry, actor, reason) {
       e.reason = 'CHILD_IS_ADULT';
       throw e;
     }
-    const childEmail = String(data.email || data.contactEmail || '').trim().toLowerCase();
-    const guardianEmail = String(entry.guardianEmail || '').trim().toLowerCase();
+    // SELF-LINK GUARD — IDENTITY ONLY.
+    //
+    // Deliberately NOT keyed on email. Minors in this cohort were registered
+    // with a parent's email on the child's own record (that is precisely how
+    // inferred_email_name / email_on_file matched them), so guardianEmail ===
+    // childEmail is the EXPECTED shape for a valid guardian proxy, not a
+    // self-link. Rejecting on it broke the whole minor cohort (e.g. a child
+    // with two chart-backed guardians on one shared parent address).
+    //
+    // A self-link is only ever the same *patient*: same Elation chart id, or
+    // same Hint id when both are known.
+    const childHintId = String(data.hintId || data.hint_id || '').trim();
+    const guardianHintId = String(entry.guardianHintId || '').trim();
     const selfById =
-      entry.guardianElationId && String(childElationId) === String(entry.guardianElationId);
-    const selfByEmail = guardianEmail && childEmail && guardianEmail === childEmail;
-    if (selfById || selfByEmail) {
+      Boolean(entry.guardianElationId) &&
+      String(childElationId).trim() === String(entry.guardianElationId).trim();
+    const selfByHintId = Boolean(childHintId) && childHintId === guardianHintId;
+    if (selfById || selfByHintId) {
       const e = new Error('self link');
       e.reason = 'SELF_LINK_REJECTED';
       throw e;
     }
+
 
 
     const now = admin.firestore.Timestamp.now();
