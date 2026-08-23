@@ -225,8 +225,10 @@ function parseGuardianCsv(
     const guardianElationId = at(cells, "guardian_elation_id");
     const guardianHintId = at(cells, "guardian_hint_id");
     const guardianName = at(cells, "guardian_name").slice(0, 200);
-    // The export's `manual_search` is the operator-facing name for `manual`.
-    const rawSource = at(cells, "match_source");
+    // The export's `manual_search` is the operator-facing name for `manual`
+    // (same normalization as load-guardian-links.js). Case/whitespace tolerant
+    // so a re-export with different casing doesn't reject ~35 rows.
+    const rawSource = at(cells, "match_source").toLowerCase().replace(/[\s-]+/g, "_");
     const source = rawSource === "manual_search" ? "manual" : rawSource;
 
     const reject = (reason: string) =>
@@ -264,7 +266,18 @@ function parseGuardianCsv(
 
     // Idempotent upstream, but a duplicate pair inside one paste is a sign the
     // export was concatenated twice — drop it and say so.
-    const key = `${childElationId}|${guardianElationId || `email:${guardianEmail}`}`;
+    // Idempotent upstream, but a duplicate pair inside one paste is a sign the
+    // export was concatenated twice — drop it and say so.
+    //
+    // The guardian key is the CHART id whenever there is one. Two guardians can
+    // legitimately share a mailbox (Ella Goldstein -> Greg + Jill on one
+    // ggoldstein@ address); keying on email would collapse them and the child
+    // would lose a guardian. Email is the key only for `email_on_file`, where
+    // by definition no chart exists.
+    const guardianKey = guardianElationId
+      ? `chart:${guardianElationId}`
+      : `email:${guardianEmail}`;
+    const key = `${childElationId}|${guardianKey}`;
     if (seen.has(key)) {
       duplicates += 1;
       continue;
@@ -663,8 +676,11 @@ async function fanOutGuardianLinks(
 
   for (const row of page) {
     if (Date.now() - startedAt > FAN_OUT_BUDGET_MS) break;
-    // PHI-free handle for the audit trail and the UI.
-    const guardian = row.guardianElationId || `email:${row.guardianEmail.split("@")[1] ?? "redacted"}`;
+    // PHI-free handle for the audit trail and the UI. Chart-id first so two
+    // guardians sharing one mailbox stay distinguishable in the log.
+    const guardian = row.guardianElationId
+      ? `chart:${row.guardianElationId}`
+      : `email:${row.guardianEmail.split("@")[1] ?? "redacted"}`;
     let status = 0;
     let ok = false;
     let created: boolean | undefined;
@@ -889,7 +905,9 @@ Deno.serve(async (req) => {
         done: true,
         preview: page.slice(0, 20).map((r) => ({
           childElationId: r.childElationId,
-          guardianRef: r.guardianElationId || `email:${r.guardianEmail.split("@")[1] ?? "redacted"}`,
+          guardianRef: r.guardianElationId
+            ? `chart:${r.guardianElationId}`
+            : `email:${r.guardianEmail.split("@")[1] ?? "redacted"}`,
           source: r.source,
         })),
       });
