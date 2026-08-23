@@ -905,7 +905,9 @@ Deno.serve(async (req) => {
         done: true,
         preview: page.slice(0, 20).map((r) => ({
           childElationId: r.childElationId,
-          guardianRef: r.guardianElationId || `email:${r.guardianEmail.split("@")[1] ?? "redacted"}`,
+          guardianRef: r.guardianElationId
+            ? `chart:${r.guardianElationId}`
+            : `email:${r.guardianEmail.split("@")[1] ?? "redacted"}`,
           source: r.source,
         })),
       });
