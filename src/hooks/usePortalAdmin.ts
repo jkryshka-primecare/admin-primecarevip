@@ -445,3 +445,63 @@ export function useBackfillRunner(action: BackfillAction) {
     },
   });
 }
+
+// ---------------------------------------------------------------------------
+// Release 2b Step 1 — guardian link loader (console replacement for
+// scripts/load-guardian-links.js). The CSV is sent as raw text and parsed
+// server-side; nothing about authority is read from it.
+// ---------------------------------------------------------------------------
+
+export type GuardianLinkRejection = {
+  line: number;
+  childElationId: string | null;
+  reason: string;
+};
+
+export type GuardianLinkReport = {
+  apply?: boolean;
+  totalRows?: number;
+  uniqueChildren?: number;
+  duplicates?: number;
+  rejected?: GuardianLinkRejection[];
+  pageSize?: number;
+  offset?: number;
+  processed?: number;
+  linked?: number;
+  created?: number;
+  updated?: number;
+  failures?: { childElationId: string; guardianRef: string; status: number; reason: string }[];
+  preview?: { childElationId: string; guardianRef: string; source: string }[];
+  nextOffset?: number | null;
+  done?: boolean;
+  partial?: boolean;
+};
+
+export type GuardianLinkVars = {
+  csv: string;
+  apply?: boolean;
+  reason?: string;
+  offset?: number;
+  pageSize?: number;
+  /** Stage 2: apply exactly one child from the pasted CSV. */
+  onlyChildElationId?: string;
+};
+
+export function useGuardianLinkLoader() {
+  return useMutation({
+    mutationFn: async (vars: GuardianLinkVars) => {
+      const res = await callPortalAdmin<GuardianLinkReport>({
+        action: "linkGuardians",
+        csv: vars.csv,
+        apply: vars.apply === true,
+        reason: vars.reason ?? "",
+        ...(vars.offset ? { offset: vars.offset } : {}),
+        ...(vars.pageSize ? { pageSize: vars.pageSize } : {}),
+        ...(vars.onlyChildElationId
+          ? { onlyChildElationId: vars.onlyChildElationId }
+          : {}),
+      });
+      return res.data ?? ({} as GuardianLinkReport);
+    },
+  });
+}
