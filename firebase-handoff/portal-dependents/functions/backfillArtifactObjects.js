@@ -53,10 +53,14 @@ async function run({ apply, limit, cursor }) {
     // eslint-disable-next-line no-await-in-loop
     const snap = await q.get();
     if (snap.empty) { report.done = true; break; }
-    last = snap.docs[snap.docs.length - 1].id;
 
     for (const doc of snap.docs) {
       if (budget <= 0) break;
+      // Cursor tracks the last record ACTUALLY processed. Advancing it to the
+      // end of the page up-front would skip every record after a mid-page
+      // budget stop — those artifacts stay uncopied and only surface as 404s
+      // once the legacy fallback is disabled.
+      last = doc.id;
       report.scanned += 1;
       const patientId = doc.ref.parent.parent ? doc.ref.parent.parent.id : null;
       // eslint-disable-next-line no-await-in-loop
