@@ -162,7 +162,7 @@ type GuardianRow = {
 type GuardianRejection = { line: number; childElationId: string | null; reason: string };
 
 /** Minimal RFC4180 split: quoted fields, doubled quotes, no embedded newlines. */
-function splitCsvLine(line: string): string[] {
+function splitCsvLine(line: string, delim = ","): string[] {
   const out: string[] = [];
   let cur = "";
   let quoted = false;
@@ -175,7 +175,7 @@ function splitCsvLine(line: string): string[] {
       } else if (c === '"') quoted = false;
       else cur += c;
     } else if (c === '"') quoted = true;
-    else if (c === ",") {
+    else if (c === delim) {
       out.push(cur);
       cur = "";
     } else cur += c;
@@ -183,6 +183,22 @@ function splitCsvLine(line: string): string[] {
   out.push(cur);
   return out;
 }
+
+// Sheets/Excel pastes arrive tab-delimited; some exports use ; or |.
+function detectDelimiter(headerLine: string): string {
+  const candidates = [",", "\t", ";", "|"];
+  let best = ",";
+  let bestCount = 0;
+  for (const d of candidates) {
+    const n = splitCsvLine(headerLine, d).length;
+    if (n > bestCount) {
+      bestCount = n;
+      best = d;
+    }
+  }
+  return best;
+}
+
 
 function parseGuardianCsv(
   raw: unknown,
