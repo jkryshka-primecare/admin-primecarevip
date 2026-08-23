@@ -10,7 +10,7 @@
 const functions = require('firebase-functions');
 const admin = require('firebase-admin');
 const { log, logError } = require('./middleware/logger');
-const { requireAuth } = require('./middleware/requireAuth');
+const { verifyPatientToken } = require('./middleware/verifyAuth');
 const { guardianKey } = require('./core/services/patient/guardians');
 
 function jsonError(res, status, code, reason, message) {
@@ -29,9 +29,20 @@ exports.memberSetGuardianConsent = functions
       return jsonError(res, 405, 'FAILED_PRECONDITION', 'METHOD_NOT_ALLOWED');
     }
 
-    const auth = await requireAuth(req);
-    if (!auth.ok) return jsonError(res, auth.status || 401, 'UNAUTHENTICATED', auth.reason || 'NO_TOKEN');
-    const uid = auth.uid;
+    // Patient self-auth: token-only, no role gate (D-067). verifyPatientToken
+    // throws HttpsError with details.reason; normalize it to this file's
+    // JSON error envelope so the member portal sees a stable shape.
+    let uid;
+    try {
+      const auth = await verifyPatientToken(req.headers.authorization || '');
+      uid = auth.uid;
+    } catch (err) {
+      const reason = (err && err.details && err.details.reason) || 'NO_TOKEN';
+      return jsonError(res, 401, 'UNAUTHENTICATED', reason);
+    }
+    if (!uid || uid === 'unauthenticated') {
+      return jsonError(res, 401, 'UNAUTHENTICATED', 'NO_TOKEN');
+    }
 
     let body;
     try {

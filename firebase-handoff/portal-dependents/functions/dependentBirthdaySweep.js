@@ -20,7 +20,7 @@ const { eighteenthBirthday } = require('./core/services/patient/guardians');
 
 // Reuse the existing invite path so the email template, token TTL, and
 // claimTokens shape stay identical to a staff-issued invite.
-const { issueClaimToken } = require('./core/services/patient/claimTokens');
+const { issueClaimToken } = require('./core/services/patient/claimToken');
 const { sendInviteEmail } = require('./core/services/email/sendInviteEmail');
 
 const BATCH_LIMIT = 200;
@@ -61,9 +61,17 @@ async function convertOne(doc, now) {
     try {
       const email = String(data.email || '').trim().toLowerCase();
       if (email) {
-        const { rawToken, existing } = await issueClaimToken(doc.id, { reissue: false });
-        if (!existing && rawToken) {
-          await sendInviteEmail({ to: email, token: rawToken, elationPatientId: doc.id });
+        // Same mint the staff-run invite uses. A live (unused, unexpired)
+        // token already covers this member, so LIVE_TOKEN_EXISTS is a no-op,
+        // never a second live claim link for one patient.
+        let rawToken = null;
+        try {
+          ({ rawToken } = await issueClaimToken(doc.id, 'existing'));
+        } catch (e) {
+          if (e.code !== 'LIVE_TOKEN_EXISTS') throw e;
+        }
+        if (rawToken) {
+          await sendInviteEmail({ to: email, token: rawToken });
           invited = true;
         }
       }
