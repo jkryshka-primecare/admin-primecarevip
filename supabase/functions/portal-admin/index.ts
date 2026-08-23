@@ -121,6 +121,170 @@ function parseMinorIds(raw: unknown): string[] | string {
   return out;
 }
 
+// ---------------------------------------------------------------------------
+// Guardian-link CSV (Release 2b, Step 1)
+// ---------------------------------------------------------------------------
+// The client pastes raw CSV text. It is parsed and validated HERE, in the
+// trusted server, and nothing about the caller's authority is read from it:
+// the acting human comes from the verified session, the tier comes from the
+// database. A row that fails validation is never sent upstream — it is
+// reported back as `rejected` with a PHI-free reason.
+//
+// `adminLinkGuardian` re-validates everything again (child exists, child is a
+// minor, source is known, no self-link) and is the authority. This parser is a
+// fast, cheap failure so 194 bad rows do not become 194 upstream 400s.
+
+/** Mirrors SOURCES in functions/core/services/patient/guardians.js. */
+const GUARDIAN_SOURCES = ["hint_household", "inferred_email_name", "manual", "email_on_file"];
+
+/** The finalized export is ~194 rows; this is a mistake-catcher, not a target. */
+const MAX_GUARDIAN_ROWS = 1000;
+/** Rows per fan-out page. 50 x (~400ms) leaves large headroom under 150s. */
+const GUARDIAN_PAGE = 50;
+const MAX_GUARDIAN_PAGE = 50;
+/** A 194-row export is ~40KB. */
+const MAX_CSV_CHARS = 512 * 1024;
+/** Stop a page early and hand back a cursor rather than risk IDLE_TIMEOUT. */
+const FAN_OUT_BUDGET_MS = 100_000;
+
+const EMAIL_RE = /^[^@\s]+@[^@\s]+\.[^@\s]+$/;
+
+type GuardianRow = {
+  line: number;
+  childElationId: string;
+  guardianElationId: string;
+  guardianHintId: string;
+  guardianEmail: string;
+  guardianName: string;
+  source: string;
+};
+
+type GuardianRejection = { line: number; childElationId: string | null; reason: string };
+
+/** Minimal RFC4180 split: quoted fields, doubled quotes, no embedded newlines. */
+function splitCsvLine(line: string): string[] {
+  const out: string[] = [];
+  let cur = "";
+  let quoted = false;
+  for (let i = 0; i < line.length; i += 1) {
+    const c = line[i];
+    if (quoted) {
+      if (c === '"' && line[i + 1] === '"') {
+        cur += '"';
+        i += 1;
+      } else if (c === '"') quoted = false;
+      else cur += c;
+    } else if (c === '"') quoted = true;
+    else if (c === ",") {
+      out.push(cur);
+      cur = "";
+    } else cur += c;
+  }
+  out.push(cur);
+  return out;
+}
+
+function parseGuardianCsv(
+  raw: unknown,
+): { rows: GuardianRow[]; rejected: GuardianRejection[]; duplicates: number } | string {
+  if (typeof raw !== "string" || !raw.trim()) {
+    return "Paste the finalized guardian-links CSV, including its header row.";
+  }
+  if (raw.length > MAX_CSV_CHARS) {
+    return "That CSV is larger than this console accepts. Split it or use a smaller export.";
+  }
+
+  const lines = raw.split(/\r?\n/).filter((l) => l.trim());
+  if (lines.length < 2) return "The CSV has a header but no rows.";
+
+  const header = splitCsvLine(lines[0]).map((h) => h.trim().toLowerCase());
+  const required = ["minor_elation_id", "guardian_email", "match_source"];
+  const missing = required.filter((h) => !header.includes(h));
+  if (missing.length) {
+    return `The CSV is missing required column(s): ${missing.join(", ")}.`;
+  }
+  if (lines.length - 1 > MAX_GUARDIAN_ROWS) {
+    return `At most ${MAX_GUARDIAN_ROWS} rows at a time (received ${lines.length - 1}).`;
+  }
+  const col = (name: string) => header.indexOf(name);
+  const at = (cells: string[], name: string) => {
+    const i = col(name);
+    return i > -1 ? (cells[i] ?? "").trim() : "";
+  };
+
+  const rows: GuardianRow[] = [];
+  const rejected: GuardianRejection[] = [];
+  const seen = new Set<string>();
+  let duplicates = 0;
+
+  for (let i = 1; i < lines.length; i += 1) {
+    const cells = splitCsvLine(lines[i]);
+    const line = i + 1;
+    const childElationId = at(cells, "minor_elation_id");
+    const guardianEmail = at(cells, "guardian_email").toLowerCase();
+    const guardianElationId = at(cells, "guardian_elation_id");
+    const guardianHintId = at(cells, "guardian_hint_id");
+    const guardianName = at(cells, "guardian_name").slice(0, 200);
+    // The export's `manual_search` is the operator-facing name for `manual`.
+    const rawSource = at(cells, "match_source");
+    const source = rawSource === "manual_search" ? "manual" : rawSource;
+
+    const reject = (reason: string) =>
+      rejected.push({ line, childElationId: childElationId || null, reason });
+
+    if (!childElationId) {
+      reject("NO_MINOR_CHART_ID");
+      continue;
+    }
+    if (!/^\d{6,25}$/.test(childElationId)) {
+      reject("MINOR_CHART_ID_INVALID");
+      continue;
+    }
+    if (!EMAIL_RE.test(guardianEmail)) {
+      reject("GUARDIAN_EMAIL_INVALID");
+      continue;
+    }
+    if (!GUARDIAN_SOURCES.includes(source)) {
+      reject("UNKNOWN_SOURCE");
+      continue;
+    }
+    if (guardianElationId && !/^\d{6,25}$/.test(guardianElationId)) {
+      reject("GUARDIAN_CHART_ID_INVALID");
+      continue;
+    }
+    // Every source except email_on_file asserts a real guardian chart.
+    if (source !== "email_on_file" && !guardianElationId) {
+      reject("GUARDIAN_CHART_REQUIRED");
+      continue;
+    }
+    if (guardianElationId && guardianElationId === childElationId) {
+      reject("SELF_LINK_REJECTED");
+      continue;
+    }
+
+    // Idempotent upstream, but a duplicate pair inside one paste is a sign the
+    // export was concatenated twice — drop it and say so.
+    const key = `${childElationId}|${guardianElationId || `email:${guardianEmail}`}`;
+    if (seen.has(key)) {
+      duplicates += 1;
+      continue;
+    }
+    seen.add(key);
+
+    rows.push({
+      line,
+      childElationId,
+      guardianElationId,
+      guardianHintId,
+      guardianEmail,
+      guardianName,
+      source,
+    });
+  }
+
+  if (!rows.length && !rejected.length) return "No usable rows found in that CSV.";
+  return { rows, rejected, duplicates };
+}
 
 
 /**
