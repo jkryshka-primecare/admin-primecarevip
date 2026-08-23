@@ -33,7 +33,8 @@ type Action =
   | "unclaimedGuardians"
   | "backfillUids"
   | "backfillArtifacts"
-  | "backfillMinorReports";
+  | "backfillMinorReports"
+  | "linkGuardians";
 
 const FUNCTION_BY_ACTION: Record<Action, string> = {
   get: "adminGetPortalAccess",
@@ -47,6 +48,7 @@ const FUNCTION_BY_ACTION: Record<Action, string> = {
   backfillUids: "backfillInternalUids",
   backfillArtifacts: "backfillArtifactObjects",
   backfillMinorReports: "backfillElationReports",
+  linkGuardians: "adminLinkGuardian",
 };
 
 const MUTATIONS: Action[] = ["invite", "revoke", "setAccess", "provision"];
@@ -67,7 +69,19 @@ const ADMIN_ONLY: Action[] = ["runAudit", "smoke", "unclaimedGuardians"];
  *     sees `portal-admin`, so this row is the sole human-attribution record
  *     for a PHI migration.
  */
-const BULK_MIGRATIONS: Action[] = ["backfillUids", "backfillArtifacts", "backfillMinorReports"];
+const BULK_MIGRATIONS: Action[] = [
+  "backfillUids",
+  "backfillArtifacts",
+  "backfillMinorReports",
+  "linkGuardians",
+];
+
+/**
+ * Bulk actions that this bridge fans out itself, one upstream call per row,
+ * because the Cloud Function is a single-record endpoint. Everything else
+ * makes exactly one upstream call.
+ */
+const FAN_OUT: Action[] = ["linkGuardians"];
 
 /** Actions that act on a set of members rather than a single patient. */
 const BATCH_ACTIONS: Action[] = [
@@ -80,6 +94,7 @@ const BATCH_ACTIONS: Action[] = [
 
 /** Upper bound on one minor-track ingest call. The 2b cohort is ~175. */
 const MAX_MINOR_IDS = 500;
+
 
 /**
  * Elation chart ids for the minor-track ingest. Shape-validated here and
@@ -106,6 +121,170 @@ function parseMinorIds(raw: unknown): string[] | string {
   return out;
 }
 
+// ---------------------------------------------------------------------------
+// Guardian-link CSV (Release 2b, Step 1)
+// ---------------------------------------------------------------------------
+// The client pastes raw CSV text. It is parsed and validated HERE, in the
+// trusted server, and nothing about the caller's authority is read from it:
+// the acting human comes from the verified session, the tier comes from the
+// database. A row that fails validation is never sent upstream — it is
+// reported back as `rejected` with a PHI-free reason.
+//
+// `adminLinkGuardian` re-validates everything again (child exists, child is a
+// minor, source is known, no self-link) and is the authority. This parser is a
+// fast, cheap failure so 194 bad rows do not become 194 upstream 400s.
+
+/** Mirrors SOURCES in functions/core/services/patient/guardians.js. */
+const GUARDIAN_SOURCES = ["hint_household", "inferred_email_name", "manual", "email_on_file"];
+
+/** The finalized export is ~194 rows; this is a mistake-catcher, not a target. */
+const MAX_GUARDIAN_ROWS = 1000;
+/** Rows per fan-out page. 50 x (~400ms) leaves large headroom under 150s. */
+const GUARDIAN_PAGE = 50;
+const MAX_GUARDIAN_PAGE = 50;
+/** A 194-row export is ~40KB. */
+const MAX_CSV_CHARS = 512 * 1024;
+/** Stop a page early and hand back a cursor rather than risk IDLE_TIMEOUT. */
+const FAN_OUT_BUDGET_MS = 100_000;
+
+const EMAIL_RE = /^[^@\s]+@[^@\s]+\.[^@\s]+$/;
+
+type GuardianRow = {
+  line: number;
+  childElationId: string;
+  guardianElationId: string;
+  guardianHintId: string;
+  guardianEmail: string;
+  guardianName: string;
+  source: string;
+};
+
+type GuardianRejection = { line: number; childElationId: string | null; reason: string };
+
+/** Minimal RFC4180 split: quoted fields, doubled quotes, no embedded newlines. */
+function splitCsvLine(line: string): string[] {
+  const out: string[] = [];
+  let cur = "";
+  let quoted = false;
+  for (let i = 0; i < line.length; i += 1) {
+    const c = line[i];
+    if (quoted) {
+      if (c === '"' && line[i + 1] === '"') {
+        cur += '"';
+        i += 1;
+      } else if (c === '"') quoted = false;
+      else cur += c;
+    } else if (c === '"') quoted = true;
+    else if (c === ",") {
+      out.push(cur);
+      cur = "";
+    } else cur += c;
+  }
+  out.push(cur);
+  return out;
+}
+
+function parseGuardianCsv(
+  raw: unknown,
+): { rows: GuardianRow[]; rejected: GuardianRejection[]; duplicates: number } | string {
+  if (typeof raw !== "string" || !raw.trim()) {
+    return "Paste the finalized guardian-links CSV, including its header row.";
+  }
+  if (raw.length > MAX_CSV_CHARS) {
+    return "That CSV is larger than this console accepts. Split it or use a smaller export.";
+  }
+
+  const lines = raw.split(/\r?\n/).filter((l) => l.trim());
+  if (lines.length < 2) return "The CSV has a header but no rows.";
+
+  const header = splitCsvLine(lines[0]).map((h) => h.trim().toLowerCase());
+  const required = ["minor_elation_id", "guardian_email", "match_source"];
+  const missing = required.filter((h) => !header.includes(h));
+  if (missing.length) {
+    return `The CSV is missing required column(s): ${missing.join(", ")}.`;
+  }
+  if (lines.length - 1 > MAX_GUARDIAN_ROWS) {
+    return `At most ${MAX_GUARDIAN_ROWS} rows at a time (received ${lines.length - 1}).`;
+  }
+  const col = (name: string) => header.indexOf(name);
+  const at = (cells: string[], name: string) => {
+    const i = col(name);
+    return i > -1 ? (cells[i] ?? "").trim() : "";
+  };
+
+  const rows: GuardianRow[] = [];
+  const rejected: GuardianRejection[] = [];
+  const seen = new Set<string>();
+  let duplicates = 0;
+
+  for (let i = 1; i < lines.length; i += 1) {
+    const cells = splitCsvLine(lines[i]);
+    const line = i + 1;
+    const childElationId = at(cells, "minor_elation_id");
+    const guardianEmail = at(cells, "guardian_email").toLowerCase();
+    const guardianElationId = at(cells, "guardian_elation_id");
+    const guardianHintId = at(cells, "guardian_hint_id");
+    const guardianName = at(cells, "guardian_name").slice(0, 200);
+    // The export's `manual_search` is the operator-facing name for `manual`.
+    const rawSource = at(cells, "match_source");
+    const source = rawSource === "manual_search" ? "manual" : rawSource;
+
+    const reject = (reason: string) =>
+      rejected.push({ line, childElationId: childElationId || null, reason });
+
+    if (!childElationId) {
+      reject("NO_MINOR_CHART_ID");
+      continue;
+    }
+    if (!/^\d{6,25}$/.test(childElationId)) {
+      reject("MINOR_CHART_ID_INVALID");
+      continue;
+    }
+    if (!EMAIL_RE.test(guardianEmail)) {
+      reject("GUARDIAN_EMAIL_INVALID");
+      continue;
+    }
+    if (!GUARDIAN_SOURCES.includes(source)) {
+      reject("UNKNOWN_SOURCE");
+      continue;
+    }
+    if (guardianElationId && !/^\d{6,25}$/.test(guardianElationId)) {
+      reject("GUARDIAN_CHART_ID_INVALID");
+      continue;
+    }
+    // Every source except email_on_file asserts a real guardian chart.
+    if (source !== "email_on_file" && !guardianElationId) {
+      reject("GUARDIAN_CHART_REQUIRED");
+      continue;
+    }
+    if (guardianElationId && guardianElationId === childElationId) {
+      reject("SELF_LINK_REJECTED");
+      continue;
+    }
+
+    // Idempotent upstream, but a duplicate pair inside one paste is a sign the
+    // export was concatenated twice — drop it and say so.
+    const key = `${childElationId}|${guardianElationId || `email:${guardianEmail}`}`;
+    if (seen.has(key)) {
+      duplicates += 1;
+      continue;
+    }
+    seen.add(key);
+
+    rows.push({
+      line,
+      childElationId,
+      guardianElationId,
+      guardianHintId,
+      guardianEmail,
+      guardianName,
+      source,
+    });
+  }
+
+  if (!rows.length && !rejected.length) return "No usable rows found in that CSV.";
+  return { rows, rejected, duplicates };
+}
 
 
 /**
@@ -435,6 +614,118 @@ async function recordActionStrict(
   return !error;
 }
 
+/**
+ * One audience-scoped identity token, cached. Same credential path as the
+ * single-call flow below: WIF first, legacy key only if one was configured.
+ */
+async function mintIdToken(url: string): Promise<string> {
+  const now = Math.floor(Date.now() / 1000);
+  const cached = tokenCache.get(url);
+  if (cached && cached.expiresAt - 60 > now) return cached.token;
+  if (wifConfigured()) {
+    const token = await getIdentityTokenViaWif(url);
+    tokenCache.set(url, { token, expiresAt: now + 3000 });
+    return token;
+  }
+  return await getIdentityToken(loadServiceAccount(), url);
+}
+
+type LinkOutcome = {
+  childElationId: string;
+  guardian: string;
+  ok: boolean;
+  created?: boolean;
+  status: number;
+  reason?: string;
+};
+
+/**
+ * Fan-out for `linkGuardians`. One `adminLinkGuardian` call per row, serial
+ * with a small gap — the admin plane is not a bulk endpoint. Bounded by page
+ * size AND by wall clock, so a slow upstream hands back a resumable offset
+ * instead of dying at the 150s idle limit.
+ *
+ * The `actor` on every upstream call is the session email. Nothing from the
+ * pasted CSV can influence who is recorded as having done this.
+ */
+async function fanOutGuardianLinks(
+  ctx: AuthContext,
+  url: string,
+  page: GuardianRow[],
+  offset: number,
+  actor: string,
+  reason: string,
+): Promise<{ outcomes: LinkOutcome[]; processed: number }> {
+  const idToken = await mintIdToken(url);
+  const outcomes: LinkOutcome[] = [];
+  const startedAt = Date.now();
+  let processed = 0;
+
+  for (const row of page) {
+    if (Date.now() - startedAt > FAN_OUT_BUDGET_MS) break;
+    // PHI-free handle for the audit trail and the UI.
+    const guardian = row.guardianElationId || `email:${row.guardianEmail.split("@")[1] ?? "redacted"}`;
+    let status = 0;
+    let ok = false;
+    let created: boolean | undefined;
+    let failReason: string | undefined;
+
+    try {
+      const res = await fetch(url, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${idToken}`, "Content-Type": "application/json" },
+        body: JSON.stringify({
+          childElationId: row.childElationId,
+          actor,
+          reason,
+          source: row.source,
+          guardianElationId: row.guardianElationId,
+          guardianHintId: row.guardianHintId,
+          guardianEmail: row.guardianEmail,
+          guardianName: row.guardianName,
+        }),
+      });
+      status = res.status;
+      const text = await res.text();
+      let body: Record<string, unknown> | null = null;
+      try {
+        body = text ? JSON.parse(text) : null;
+      } catch {
+        body = null;
+      }
+      ok = res.ok;
+      if (ok) {
+        created = Boolean((body as { created?: boolean } | null)?.created);
+      } else {
+        const env = body as { error?: { message?: string; details?: { reason?: string } } } | null;
+        failReason = env?.error?.details?.reason ?? env?.error?.message ?? `HTTP_${status}`;
+      }
+    } catch (e) {
+      status = 502;
+      failReason = e instanceof Error ? e.message.slice(0, 200) : "UPSTREAM_UNREACHABLE";
+    }
+
+    processed += 1;
+    outcomes.push({ childElationId: row.childElationId, guardian, ok, created, status, reason: failReason });
+
+    // Per-row attribution: every linked child is individually accountable,
+    // not buried in a batch summary.
+    await recordAction(ctx, {
+      elationPatientId: row.childElationId,
+      action: "linkGuardians:link",
+      reason,
+      after: { guardianRef: guardian, source: row.source, created: created ?? false, row: offset + processed },
+      ok,
+      httpStatus: status,
+      errorMessage: failReason ?? null,
+    });
+
+    await new Promise((r) => setTimeout(r, 120));
+  }
+
+  return { outcomes, processed };
+}
+
 
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: corsHeaders });
@@ -510,6 +801,207 @@ Deno.serve(async (req) => {
   // client payload — the service account identifies the system, this
   // identifies the human.
   const actor = ctx.user.email ?? ctx.user.id;
+
+  // --- linkGuardians ---------------------------------------------------------
+  // Enforcement order, unchanged from the reviewed backfill pattern and all
+  // already applied above this point:
+  //   1. requireStaff  -> verified session (top of the handler)
+  //   2. is_hr_admin   -> required even for a dry run (BULK_MIGRATIONS gate)
+  //   3. super_admin   -> required for apply, resolved from the DB by uid
+  //   4. non-empty reason required for apply
+  // What remains here: parse/validate the CSV, write attribution FIRST, then
+  // fan out. A dry run makes no upstream call at all — `adminLinkGuardian`
+  // has no dry-run mode, so "dry run" here means validation only.
+  if (action === "linkGuardians") {
+    const parsed = parseGuardianCsv(body.csv);
+    if (typeof parsed === "string") return deny(400, parsed);
+    const { rows, rejected, duplicates } = parsed;
+
+    const rawOffset = Number(body.offset);
+    const offset = Number.isFinite(rawOffset) && rawOffset > 0 ? Math.floor(rawOffset) : 0;
+    const rawPage = Number(body.pageSize);
+    const pageSize = Number.isFinite(rawPage) && rawPage > 0
+      ? Math.min(Math.floor(rawPage), MAX_GUARDIAN_PAGE)
+      : GUARDIAN_PAGE;
+
+    // Stage 2 of the rollout: apply exactly one child before going wide.
+    const onlyChild = typeof body.onlyChildElationId === "string"
+      ? body.onlyChildElationId.trim()
+      : "";
+    if (onlyChild && !/^\d{6,25}$/.test(onlyChild)) {
+      return deny(400, "The single-child filter is not a valid Elation patient id.");
+    }
+    const scoped = onlyChild ? rows.filter((r) => r.childElationId === onlyChild) : rows;
+    if (onlyChild && scoped.length === 0) {
+      return deny(400, "That child id does not appear in the pasted CSV.");
+    }
+
+    const uniqueChildren = new Set(scoped.map((r) => r.childElationId)).size;
+    const page = scoped.slice(offset, offset + pageSize);
+    const fnUrl = `${FUNCTIONS_BASE}/${FUNCTION_BY_ACTION.linkGuardians}`;
+    const startedAt = Date.now();
+
+    const finish = (data: Record<string, unknown>, httpStatus = 200) =>
+      new Response(
+        JSON.stringify({
+          ok: httpStatus < 300,
+          status: httpStatus,
+          elapsedMs: Date.now() - startedAt,
+          error: null,
+          data,
+        }),
+        { status: httpStatus, headers: { ...corsHeaders, "Content-Type": "application/json" } },
+      );
+
+    if (!bulkApply) {
+      await recordAction(ctx, {
+        elationPatientId: null,
+        action: "linkGuardians:dry-run",
+        reason: reason || null,
+        after: {
+          totalRows: scoped.length,
+          uniqueChildren,
+          rejected: rejected.length,
+          duplicates,
+          onlyChild: onlyChild || null,
+        },
+        ok: true,
+        httpStatus: 200,
+      });
+      await logPhiAccess(ctx, req, {
+        source: "portal.admin",
+        resource: FUNCTION_BY_ACTION.linkGuardians,
+        scope: "linkGuardians:dry-run",
+        resource_id: null,
+        http_status: 200,
+        row_count: scoped.length,
+      });
+      return finish({
+        apply: false,
+        totalRows: scoped.length,
+        uniqueChildren,
+        duplicates,
+        rejected,
+        pageSize,
+        offset,
+        processed: 0,
+        nextOffset: null,
+        done: true,
+        preview: page.slice(0, 20).map((r) => ({
+          childElationId: r.childElationId,
+          guardianRef: r.guardianElationId || `email:${r.guardianEmail.split("@")[1] ?? "redacted"}`,
+          source: r.source,
+        })),
+      });
+    }
+
+    if (page.length === 0) {
+      return deny(400, "There is nothing left to apply at that offset.");
+    }
+
+    // Attribution BEFORE the first write. Upstream only ever sees
+    // `portal-admin`; if this insert fails there is no record of the human, so
+    // the page does not run.
+    const attributed = await recordActionStrict(ctx, {
+      action: "linkGuardians:apply",
+      reason,
+      after: {
+        totalRows: scoped.length,
+        uniqueChildren,
+        offset,
+        pageSize,
+        pageChildIds: page.map((r) => r.childElationId),
+        onlyChild: onlyChild || null,
+        rejected: rejected.length,
+      },
+    });
+    if (!attributed) {
+      return new Response(
+        JSON.stringify({
+          ok: false,
+          status: 503,
+          error:
+            "The attribution record could not be written, so no guardian links were created. Try again.",
+        }),
+        { status: 503, headers: { ...corsHeaders, "Content-Type": "application/json" } },
+      );
+    }
+
+    let outcomes: LinkOutcome[] = [];
+    let processed = 0;
+    let fanError: string | null = null;
+    try {
+      const result = await fanOutGuardianLinks(ctx, fnUrl, page, offset, actor, reason);
+      outcomes = result.outcomes;
+      processed = result.processed;
+    } catch (e) {
+      fanError = e instanceof Error ? e.message : String(e);
+    }
+
+    const linked = outcomes.filter((o) => o.ok);
+    const failed = outcomes.filter((o) => !o.ok);
+    const nextOffset = offset + processed;
+    const done = !fanError && nextOffset >= scoped.length;
+
+    await recordAction(ctx, {
+      elationPatientId: null,
+      action: "linkGuardians:apply-result",
+      reason,
+      after: {
+        offset,
+        processed,
+        linked: linked.length,
+        created: linked.filter((o) => o.created).length,
+        failed: failed.length,
+        nextOffset,
+        done,
+      },
+      ok: !fanError && failed.length === 0,
+      httpStatus: fanError ? 502 : 200,
+      errorMessage: fanError,
+    });
+
+    await logPhiAccess(ctx, req, {
+      source: "portal.admin",
+      resource: FUNCTION_BY_ACTION.linkGuardians,
+      scope: "linkGuardians:apply",
+      resource_id: null,
+      http_status: fanError ? 502 : 200,
+      row_count: processed,
+    });
+
+    if (fanError && processed === 0) {
+      return new Response(
+        JSON.stringify({ ok: false, status: 502, error: fanError }),
+        { status: 502, headers: { ...corsHeaders, "Content-Type": "application/json" } },
+      );
+    }
+
+    return finish({
+      apply: true,
+      totalRows: scoped.length,
+      uniqueChildren,
+      duplicates,
+      rejected,
+      pageSize,
+      offset,
+      processed,
+      linked: linked.length,
+      created: linked.filter((o) => o.created).length,
+      updated: linked.filter((o) => !o.created).length,
+      failures: failed.map((o) => ({
+        childElationId: o.childElationId,
+        guardianRef: o.guardian,
+        status: o.status,
+        reason: o.reason ?? "UNKNOWN",
+      })),
+      nextOffset: done ? null : nextOffset,
+      done,
+      partial: Boolean(fanError),
+    });
+  }
+
+
 
   const upstreamPayload: Record<string, unknown> = {
     elationPatientId: isBatch ? null : elationPatientId,
