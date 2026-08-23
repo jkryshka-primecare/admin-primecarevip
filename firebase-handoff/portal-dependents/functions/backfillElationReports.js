@@ -252,28 +252,18 @@ async function backfillPatient(db, FieldValue, bucket, elationPatientId, counter
       // above (D-102) and never reach here. Never store the Bearer-gated URL — fetch the
       // bytes server-side and store only the bytes (D-102).
       if ((category === 'lab' || category === 'imaging') && computeHasArtifact(report)) {
-        // Owner uid comes from the SAME patient doc already fetched for the D-080 check
-        // (pSnap). A missing doc / absent firebaseUid = unclaimed patient: no upload
-        // target yet. Not an error — the idempotent re-run uploads once claimed.
-        const fbUid = (pSnap && pSnap.exists) ? pSnap.data().firebaseUid : null;
-        if (!fbUid) {
-          // Unclaimed patient: no upload target yet. The metadata store above may have
-          // stamped hasArtifact:true (buildStoredPayload); force it false so the doc is
-          // Storage-truth (D-119) — no doc claims an artifact that isn't in Storage.
-          // The idempotent re-run after the patient claims uploads and flips it true.
-          try {
-            await db.collection('patients').doc(pid).collection('labs').doc(reportId)
-              .set({ hasArtifact: false }, { merge: true });
-          } catch (flipErr) {
-            logError('backfillElationReports', 'artifact-unclaimed-flip-failed', flipErr, { elationPatientId: pid, reportId });
-          }
-          pc.artifactSkippedUnclaimed += 1; counters.artifactSkippedUnclaimed += 1;
-          log('backfillElationReports', 'artifact-skip-unclaimed', { elationPatientId: pid, reportId });
+        // 2b re-key: the RECORD's internalUid, never the caller's / claimant's auth uid.
+        // Minors have no auth uid at all, so an auth-keyed path cannot express a
+        // dependent's artifact and would mislocate PHI under a guardian's prefix.
+        // ensureInternalUid is a FALLBACK only — backfillInternalUids has already
+        // minted for every id (Part B runbook step 1).
+        const { internalUid } = await ensureInternalUid(pid, db);
+        if (!internalUid) {
+          // A mint gap, NOT "no artifact": do not flip hasArtifact:false.
+          pc.artifactErrors += 1; counters.artifactErrors += 1;
+          log('backfillElationReports', 'artifact-skip-no-internal-uid', { elationPatientId: pid, reportId });
         } else {
-          const uidLc = String(fbUid).toLowerCase();
-          // Write path MUST match the read side byte-for-byte (getLabs.js):
-          // elation-artifacts/<firebaseUid-lc>/<reportId>/report.pdf
-          const objectPath = 'elation-artifacts/' + uidLc + '/' + reportId + '/report.pdf';
+          const objectPath = objectPathFor(internalUid, reportId);
           try {
             const { buffer } = await getBinary('/reports/' + reportId + '/printable');
             await bucket.file(objectPath).save(buffer, { contentType: 'application/pdf', resumable: false });
@@ -287,19 +277,23 @@ async function backfillPatient(db, FieldValue, bucket, elationPatientId, counter
             pc.artifactsStored += 1; counters.artifactsStored += 1;
             log('backfillElationReports', 'artifact-stored', { elationPatientId: pid, reportId, bytes: buffer.byteLength });
           } catch (artErr) {
-            // Classified failure (Elation fetch threw, or the bytes are not a PDF):
-            // flip hasArtifact:false so the UI shows no chip and never dead-ends.
-            // Idempotent re-run re-fetches and flips it back to true on success.
-            pc.artifactErrors += 1; counters.artifactErrors += 1;
-            logError('backfillElationReports', 'artifact-failed', artErr, { elationPatientId: pid, reportId });
+            // Coverage-gate era: do NOT flip hasArtifact:false. That would drop the
+            // report out of the audit denominator AND the repair queue, so a
+            // persistently-failing report silently reads as 100%. Instead delete any
+            // partial/corrupt object and leave hasArtifact:true — the audit sees an
+            // honest MISS and sweepArtifactRepairs heals it (or parks + alerts after
+            // MAX_FAILURES).
             try {
-              await db.collection('patients').doc(pid).collection('labs').doc(reportId)
-                .set({ hasArtifact: false }, { merge: true });
-            } catch (flipErr) {
-              // Murky failure (couldn't even flip the flag): leave the doc untouched,
-              // log loud, let the re-run reconcile. Do NOT guess the doc's state.
-              logError('backfillElationReports', 'artifact-flip-failed', flipErr, { elationPatientId: pid, reportId });
+              await bucket.file(objectPath).delete({ ignoreNotFound: true });
+            } catch (delErr) {
+              log('backfillElationReports', 'artifact-cleanup-failed', {
+                elationPatientId: pid, reportId, error: delErr.message,
+              });
             }
+            pc.artifactErrors += 1; counters.artifactErrors += 1;
+            logError('backfillElationReports', 'artifact-failed-left-open', artErr, {
+              elationPatientId: pid, reportId,
+            });
           }
         }
       }
