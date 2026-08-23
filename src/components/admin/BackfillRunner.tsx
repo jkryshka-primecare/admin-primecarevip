@@ -136,18 +136,25 @@ function Runner({ def, canApply }: { def: RunnerDef; canApply: boolean }) {
   const badIds = ids.filter((id) => !/^\d{6,25}$/.test(id));
   const idsReady = !def.needsIds || (ids.length > 0 && badIds.length === 0);
 
-  async function go(apply: boolean) {
+  async function go(apply: boolean, runToEnd = false) {
     setMode(apply ? "apply" : "dry");
+    let cur = cursor;
     try {
-      const res = await run.mutateAsync({
-        apply,
-        reason: reason.trim(),
-        ...(limit ? { limit: Number(limit) } : {}),
-        ...(cursor ? { cursor } : {}),
-        ...(def.needsIds ? { patientIds: ids } : {}),
-      });
-      setReport(res);
-      if (def.paged) setCursor(res.nextCursor ?? null);
+      // Batches are capped server-side (100) so a page always finishes inside
+      // the 150s function window. "Run to completion" just walks the cursor.
+      for (let page = 0; page < 500; page += 1) {
+        const res = await run.mutateAsync({
+          apply,
+          reason: reason.trim(),
+          ...(limit ? { limit: Number(limit) } : {}),
+          ...(cur ? { cursor: cur } : {}),
+          ...(def.needsIds ? { patientIds: ids } : {}),
+        });
+        setReport(res);
+        cur = def.paged ? (res.nextCursor ?? null) : null;
+        if (def.paged) setCursor(cur);
+        if (!runToEnd || !def.paged || res.done || !cur) break;
+      }
     } catch {
       /* surfaced through run.error */
     } finally {
@@ -156,6 +163,7 @@ function Runner({ def, canApply }: { def: RunnerDef; canApply: boolean }) {
   }
 
   const busy = run.isPending;
+
 
   return (
     <section className="rounded-xl border border-border bg-card p-4 shadow-soft">
