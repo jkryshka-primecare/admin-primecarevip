@@ -50,6 +50,7 @@ const {
 } = require('./core/services/elation/ingest/reportIngest');
 const { drainPublishedEvents } = require('./core/services/elation/ingest/feed');
 const { deleteCachedRecordByIndex } = require('./core/services/elation/ingest/cacheDelete');
+const { ingestEligibility } = require('./core/services/patient/ingestEligibility');
 
 const ELATION_CLIENT_ID = defineSecret('ELATION_CLIENT_ID');
 const ELATION_CLIENT_SECRET = defineSecret('ELATION_CLIENT_SECRET');
