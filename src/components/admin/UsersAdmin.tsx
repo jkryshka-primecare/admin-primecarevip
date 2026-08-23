@@ -232,7 +232,7 @@ export default function UsersAdmin() {
                         <span className="text-xs font-mono text-muted-foreground">{new Date(u.created_at).toLocaleDateString()}</span>
                       </TableCell>
                       <TableCell className="text-right">
-                        <Select value={current} onValueChange={(v) => setRole(u.user_id, v as AppRole)} disabled={saving}>
+                        <Select value={current} onValueChange={(v) => requestRole(u.user_id, v as AppRole)} disabled={saving || isMe}>
                           <SelectTrigger className="h-8 w-36 ml-auto text-xs">
                             <SelectValue />
                           </SelectTrigger>
