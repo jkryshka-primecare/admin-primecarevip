@@ -49,7 +49,11 @@ async function run({ apply, limit, cursor }) {
       .where('hasArtifact', '==', true)
       .orderBy(admin.firestore.FieldPath.documentId())
       .limit(PAGE);
-    if (last) q = q.startAfter(last);
+    // Collection-group queries ordered by documentId() require a FULL document
+    // path as the cursor — a bare doc id ("1040863151456296") has an odd number
+    // of segments and Firestore rejects it. Track and pass ref.path.
+    if (last) q = q.startAfter(db.doc(last));
+
     // eslint-disable-next-line no-await-in-loop
     const snap = await q.get();
     if (snap.empty) { report.done = true; break; }
