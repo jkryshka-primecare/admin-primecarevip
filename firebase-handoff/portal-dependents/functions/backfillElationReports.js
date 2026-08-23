@@ -43,6 +43,8 @@ const {
   buildStoredPayload,
   computeHasArtifact,
 } = require('./core/services/elation/ingest/reportIngest');
+const { ensureInternalUid, objectPathFor } = require('./core/services/patient/internalUid');
+const { ingestEligibility, isMinorRecord } = require('./core/services/patient/ingestEligibility');
 
 const REPORTS_PAGE_CAP = 200; // safety cap; loud failure > silent partial pull.
 
