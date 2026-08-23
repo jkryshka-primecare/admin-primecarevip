@@ -40,7 +40,13 @@ async function run({ apply, limit, cursor }) {
     noInternalUid: [], noLegacyObject: 0, failed: [], nextCursor: null, done: false,
   };
 
-  let last = cursor || null;
+  // Cursors are full document paths (even segment count). Ignore any legacy
+  // bare-id cursor rather than blowing up mid-run.
+  let last =
+    cursor && String(cursor).split('/').filter(Boolean).length % 2 === 0
+      ? String(cursor)
+      : null;
+
   let budget = limit || DEFAULT_LIMIT;
 
   while (budget > 0) {
@@ -49,7 +55,11 @@ async function run({ apply, limit, cursor }) {
       .where('hasArtifact', '==', true)
       .orderBy(admin.firestore.FieldPath.documentId())
       .limit(PAGE);
-    if (last) q = q.startAfter(last);
+    // Collection-group queries ordered by documentId() require a FULL document
+    // path as the cursor — a bare doc id ("1040863151456296") has an odd number
+    // of segments and Firestore rejects it. Track and pass ref.path.
+    if (last) q = q.startAfter(db.doc(last));
+
     // eslint-disable-next-line no-await-in-loop
     const snap = await q.get();
     if (snap.empty) { report.done = true; break; }
@@ -60,7 +70,7 @@ async function run({ apply, limit, cursor }) {
       // end of the page up-front would skip every record after a mid-page
       // budget stop — those artifacts stay uncopied and only surface as 404s
       // once the legacy fallback is disabled.
-      last = doc.id;
+      last = doc.ref.path;
       report.scanned += 1;
       const patientId = doc.ref.parent.parent ? doc.ref.parent.parent.id : null;
       // eslint-disable-next-line no-await-in-loop
