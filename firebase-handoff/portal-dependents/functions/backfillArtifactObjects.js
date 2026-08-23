@@ -40,7 +40,13 @@ async function run({ apply, limit, cursor }) {
     noInternalUid: [], noLegacyObject: 0, failed: [], nextCursor: null, done: false,
   };
 
-  let last = cursor || null;
+  // Cursors are full document paths (even segment count). Ignore any legacy
+  // bare-id cursor rather than blowing up mid-run.
+  let last =
+    cursor && String(cursor).split('/').filter(Boolean).length % 2 === 0
+      ? String(cursor)
+      : null;
+
   let budget = limit || DEFAULT_LIMIT;
 
   while (budget > 0) {
