@@ -145,20 +145,31 @@ exports.backfillElationReports = functions
       // write is still caught. `actor`/`reason` are NOT runner inputs: the human
       // is attributed in the admin app's portal_admin_actions row (written
       // before this call) and echoed into the logs below.
-      const report = await runner.backfillElationReports(
+      const raw = await runner.backfillElationReports(
         admin.firestore(),
         admin.firestore.FieldValue,
         eligible,
       );
 
+      // Normalize the runner's report to the same shape as the empty-eligible
+      // branch above, so the caller sees one contract either way.
+      const r = raw && typeof raw === 'object' ? raw : {};
+      const report = {
+        ...r,
+        ingested: Number.isFinite(r.ingested) ? r.ingested : 0,
+        skipped: Number.isFinite(r.skipped) ? r.skipped : 0,
+        failed: Array.isArray(r.failed) ? r.failed : [],
+      };
 
       log('backfillElationReports', 'applied', {
         actor, eligible: eligible.length, rejected: rejected.length,
       });
-      return res.status(200).json({ apply: true, requested: parsed.ids.length, rejected, ...report });
+      // Runner fields first: the wrapper's own apply/requested/rejected always win.
+      return res.status(200).json({ ...report, apply: true, requested: parsed.ids.length, rejected });
     } catch (e) {
       logError('backfillElationReports', e);
-      return jsonError(res, 500, 'INTERNAL', 'MINOR_INGEST_FAILED', e.message);
+      // Never echo runner error text — it can embed PHI.
+      return jsonError(res, 500, 'INTERNAL', 'MINOR_INGEST_FAILED', 'Minor ingest failed.');
     }
   });
 
