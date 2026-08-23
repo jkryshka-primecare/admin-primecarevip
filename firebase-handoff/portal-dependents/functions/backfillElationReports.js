@@ -105,11 +105,18 @@ async function backfillPatient(db, FieldValue, bucket, elationPatientId, counter
     return pc;
   }
   if (pSnap.exists) {
-    const status = (pSnap.data() || {}).status;
-    if (status !== undefined && status !== 'active') {
+    const data = pSnap.data() || {};
+    const gate = ingestEligibility(data);
+    // D-080 stays SOFT for ADULTS: an existing doc with no `status` field proceeds,
+    // exactly as before. MINORS are ALWAYS subject to the guardian check, whatever
+    // their `status` — so a guardian revoked between batch load and run is honoured
+    // by the code, not by the input list.
+    if (!gate.eligible && (data.status !== undefined || isMinorRecord(data))) {
       counters.patientsSkippedNonActive += 1;
       pc.skippedNonActive = true;
-      log('backfillElationReports', 'skip-non-active', { elationPatientId: pid, status: status });
+      log('backfillElationReports', gate.reason, {
+        elationPatientId: pid, status: data.status, cohort: gate.cohort,
+      });
       return pc;
     }
   } else {
