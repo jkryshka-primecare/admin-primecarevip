@@ -136,18 +136,25 @@ function Runner({ def, canApply }: { def: RunnerDef; canApply: boolean }) {
   const badIds = ids.filter((id) => !/^\d{6,25}$/.test(id));
   const idsReady = !def.needsIds || (ids.length > 0 && badIds.length === 0);
 
-  async function go(apply: boolean) {
+  async function go(apply: boolean, runToEnd = false) {
     setMode(apply ? "apply" : "dry");
+    let cur = cursor;
     try {
-      const res = await run.mutateAsync({
-        apply,
-        reason: reason.trim(),
-        ...(limit ? { limit: Number(limit) } : {}),
-        ...(cursor ? { cursor } : {}),
-        ...(def.needsIds ? { patientIds: ids } : {}),
-      });
-      setReport(res);
-      if (def.paged) setCursor(res.nextCursor ?? null);
+      // Batches are capped server-side (100) so a page always finishes inside
+      // the 150s function window. "Run to completion" just walks the cursor.
+      for (let page = 0; page < 500; page += 1) {
+        const res = await run.mutateAsync({
+          apply,
+          reason: reason.trim(),
+          ...(limit ? { limit: Number(limit) } : {}),
+          ...(cur ? { cursor: cur } : {}),
+          ...(def.needsIds ? { patientIds: ids } : {}),
+        });
+        setReport(res);
+        cur = def.paged ? (res.nextCursor ?? null) : null;
+        if (def.paged) setCursor(cur);
+        if (!runToEnd || !def.paged || res.done || !cur) break;
+      }
     } catch {
       /* surfaced through run.error */
     } finally {
@@ -156,6 +163,7 @@ function Runner({ def, canApply }: { def: RunnerDef; canApply: boolean }) {
   }
 
   const busy = run.isPending;
+
 
   return (
     <section className="rounded-xl border border-border bg-card p-4 shadow-soft">
@@ -198,10 +206,12 @@ function Runner({ def, canApply }: { def: RunnerDef; canApply: boolean }) {
           <input
             value={limit}
             onChange={(e) => setLimit(e.target.value.replace(/\D/g, ""))}
-            placeholder="default"
+            placeholder="100 max"
             className="mt-1 w-28 rounded-md border border-border bg-background px-3 py-1.5 font-mono text-xs text-foreground"
           />
+          <p className="mt-1 text-[11px] text-muted-foreground">capped at 100 per call</p>
         </div>
+
         {def.paged && (
           <div className="text-xs text-muted-foreground">
             Cursor:{" "}
@@ -258,12 +268,33 @@ function Runner({ def, canApply }: { def: RunnerDef; canApply: boolean }) {
           </button>
         )}
 
+        {def.paged && (
+          <button
+            onClick={() => go(false, true)}
+            disabled={busy}
+            className="inline-flex items-center gap-2 rounded-md border border-border bg-background px-3 py-1.5 text-xs font-medium text-foreground hover:bg-muted disabled:opacity-50"
+          >
+            Dry run to completion
+          </button>
+        )}
+
+        {def.paged && canApply && (
+          <button
+            onClick={() => go(true, true)}
+            disabled={busy || !reason.trim()}
+            className="inline-flex items-center gap-2 rounded-md bg-primary px-3 py-1.5 text-xs font-medium text-primary-foreground hover:opacity-90 disabled:opacity-50"
+          >
+            Apply all pages
+          </button>
+        )}
+
         {def.paged && report && !report.done && canApply && (
           <span className="text-[11px] text-muted-foreground">
             Run again to continue from the cursor.
           </span>
         )}
       </div>
+
 
       {run.error && (
         <p className="mt-3 flex items-start gap-2 rounded-md bg-destructive/10 p-2 text-xs text-destructive">

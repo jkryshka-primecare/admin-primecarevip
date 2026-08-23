@@ -532,8 +532,17 @@ Deno.serve(async (req) => {
     // Dry run unless the caller explicitly asked to apply AND cleared the
     // super-admin gate above.
     upstreamPayload.apply = bulkApply;
+    // The edge runtime kills a request after 150s idle. A large batch upstream
+    // blows past that and the caller sees IDLE_TIMEOUT with no report (work is
+    // still done upstream but the cursor is lost). Clamp every bulk batch to a
+    // size that comfortably finishes inside the window; the runner is resumable
+    // via `cursor`, so paging is the correct way to do volume.
+    const MAX_BATCH = 100;
     const limit = Number(body.limit);
-    if (Number.isFinite(limit) && limit > 0) upstreamPayload.limit = Math.floor(limit);
+    upstreamPayload.limit = Number.isFinite(limit) && limit > 0
+      ? Math.min(Math.floor(limit), MAX_BATCH)
+      : MAX_BATCH;
+
     if (typeof body.cursor === "string" && body.cursor) upstreamPayload.cursor = body.cursor;
     if (action === "backfillMinorReports") upstreamPayload.patientIds = minorIds;
   }
