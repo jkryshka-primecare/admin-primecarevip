@@ -40,12 +40,17 @@ async function run({ apply, limit, cursor }) {
     noInternalUid: [], noLegacyObject: 0, failed: [], nextCursor: null, done: false,
   };
 
-  // Cursors are full document paths (even segment count). Ignore any legacy
-  // bare-id cursor rather than blowing up mid-run.
-  let last =
-    cursor && String(cursor).split('/').filter(Boolean).length % 2 === 0
-      ? String(cursor)
-      : null;
+  // Cursors are full document paths. A collection-group query ordered by
+  // documentId() rejects a bare doc id ("…456296" — odd segment count), so we
+  // resume from the DocumentSnapshot itself, which carries the full path.
+  let startAfterSnap = null;
+  if (cursor) {
+    const path = String(cursor);
+    if (path.split('/').filter(Boolean).length % 2 !== 0) {
+      throw new Error('INVALID_CURSOR: expected a full document path');
+    }
+    startAfterSnap = await db.doc(path).get();
+  }
 
   let budget = limit || DEFAULT_LIMIT;
 
@@ -55,10 +60,7 @@ async function run({ apply, limit, cursor }) {
       .where('hasArtifact', '==', true)
       .orderBy(admin.firestore.FieldPath.documentId())
       .limit(PAGE);
-    // Collection-group queries ordered by documentId() require a FULL document
-    // path as the cursor — a bare doc id ("1040863151456296") has an odd number
-    // of segments and Firestore rejects it. Track and pass ref.path.
-    if (last) q = q.startAfter(db.doc(last));
+    if (startAfterSnap) q = q.startAfter(startAfterSnap);
 
     // eslint-disable-next-line no-await-in-loop
     const snap = await q.get();
@@ -70,7 +72,8 @@ async function run({ apply, limit, cursor }) {
       // end of the page up-front would skip every record after a mid-page
       // budget stop — those artifacts stay uncopied and only surface as 404s
       // once the legacy fallback is disabled.
-      last = doc.ref.path;
+      startAfterSnap = doc;
+
       report.scanned += 1;
       const patientId = doc.ref.parent.parent ? doc.ref.parent.parent.id : null;
       // eslint-disable-next-line no-await-in-loop
@@ -103,7 +106,10 @@ async function run({ apply, limit, cursor }) {
     if (snap.size < PAGE) { report.done = true; break; }
   }
 
-  report.nextCursor = report.done ? null : last;
+  report.nextCursor = report.done
+    ? null
+    : (startAfterSnap ? startAfterSnap.ref.path : null);
+
   return report;
 }
 
