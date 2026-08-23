@@ -57,7 +57,12 @@ export default function AdminHome() {
         {tab === "member-data" && <MemberAppExplorer />}
         {tab === "artifacts" && <ArtifactCoveragePanel />}
         {tab === "guardians" && <UnclaimedGuardiansPanel />}
-        {tab === "backfills" && <BackfillRunner />}
+        {tab === "backfills" && (
+          <div className="space-y-4">
+            <GuardianLinkLoader />
+            <BackfillRunner />
+          </div>
+        )}
         {tab === "go-live" && <GoLiveChecklist />}
         {tab === "seed" && <SeedDataPanel />}
 
