@@ -111,12 +111,16 @@ async function processRecord(db, rec, counters) {
     return; // advance (replay-safe; resurfaced post-go-live if a later event fires)
   }
 
-  // D-111 active-member gate: store only for a claimed patient (status === 'active',
-  // the claim-lifecycle field). membershipStatus is billing-only, NOT this gate.
+  // D-111 active-member gate, plus the Release 2b guardian-proxied-dependent
+  // exception. The single definition of "eligible" lives in ingestEligibility —
+  // adults are byte-identical to the old `status === 'active'` rule.
   const pSnap = await db.collection('patients').doc(patient).get();
-  if (!pSnap.exists || (pSnap.data() || {}).status !== 'active') {
+  const gate = ingestEligibility(pSnap.exists ? pSnap.data() : null);
+  if (!gate.eligible) {
     counters.skippedNonActive += 1;
-    log('ingestElationReports', 'skip-non-active', { reportId, elationPatientId: patient, feedId: Number(rec.id) });
+    log('ingestElationReports', gate.reason, {
+      reportId, elationPatientId: patient, feedId: Number(rec.id), cohort: gate.cohort,
+    });
     return; // advance (replay-safe; resurfaced if they activate + a later event fires)
   }
 
