@@ -106,7 +106,10 @@ async function run({ apply, limit, cursor }) {
     if (snap.size < PAGE) { report.done = true; break; }
   }
 
-  report.nextCursor = report.done ? null : last;
+  report.nextCursor = report.done
+    ? null
+    : (startAfterSnap ? startAfterSnap.ref.path : null);
+
   return report;
 }
 
