@@ -25,7 +25,7 @@ confirm the filter returns rows in Logs Explorer over the last conversion run.
 ## Alert policy
 
 - Condition: `logging.googleapis.com/user/sweep_invite_failed` **count > 0** over
-  a 10-minute rolling window (the sweep runs daily at 07:15 UTC).
+  a 10-minute rolling window (the sweep runs daily at 07:15 America/New_York).
 - Auto-close: 24 hours.
 - Severity: this is a member-access incident, not a nightly-job wobble — route it
   to the same channel as the artifact repair `parked` alert.

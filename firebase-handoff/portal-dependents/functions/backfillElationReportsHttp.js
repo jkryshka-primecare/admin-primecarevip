@@ -139,11 +139,18 @@ exports.backfillElationReports = functions
         });
       }
 
-      // Delegate to the real runner. It re-applies the §2a gate per patient, so
-      // a guardian revoked between this check and the write is still caught.
-      const run = runner._run || runner.run || runner.backfill;
-      if (typeof run !== 'function') throw new Error('RUNNER_ENTRYPOINT_MISSING');
-      const report = await run({ patientIds: eligible, actor, reason });
+      // Delegate to the real runner. Its signature is positional and id-array
+      // only — (db, FieldValue, elationPatientIds) — and it re-applies the §2a
+      // gate per patient, so a guardian revoked between this check and the
+      // write is still caught. `actor`/`reason` are NOT runner inputs: the human
+      // is attributed in the admin app's portal_admin_actions row (written
+      // before this call) and echoed into the logs below.
+      const report = await runner.backfillElationReports(
+        admin.firestore(),
+        admin.firestore.FieldValue,
+        eligible,
+      );
+
 
       log('backfillElationReports', 'applied', {
         actor, eligible: eligible.length, rejected: rejected.length,
