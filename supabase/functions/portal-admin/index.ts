@@ -33,7 +33,8 @@ type Action =
   | "unclaimedGuardians"
   | "backfillUids"
   | "backfillArtifacts"
-  | "backfillMinorReports";
+  | "backfillMinorReports"
+  | "linkGuardians";
 
 const FUNCTION_BY_ACTION: Record<Action, string> = {
   get: "adminGetPortalAccess",
@@ -47,6 +48,7 @@ const FUNCTION_BY_ACTION: Record<Action, string> = {
   backfillUids: "backfillInternalUids",
   backfillArtifacts: "backfillArtifactObjects",
   backfillMinorReports: "backfillElationReports",
+  linkGuardians: "adminLinkGuardian",
 };
 
 const MUTATIONS: Action[] = ["invite", "revoke", "setAccess", "provision"];
