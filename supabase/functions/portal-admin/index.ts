@@ -676,8 +676,11 @@ async function fanOutGuardianLinks(
 
   for (const row of page) {
     if (Date.now() - startedAt > FAN_OUT_BUDGET_MS) break;
-    // PHI-free handle for the audit trail and the UI.
-    const guardian = row.guardianElationId || `email:${row.guardianEmail.split("@")[1] ?? "redacted"}`;
+    // PHI-free handle for the audit trail and the UI. Chart-id first so two
+    // guardians sharing one mailbox stay distinguishable in the log.
+    const guardian = row.guardianElationId
+      ? `chart:${row.guardianElationId}`
+      : `email:${row.guardianEmail.split("@")[1] ?? "redacted"}`;
     let status = 0;
     let ok = false;
     let created: boolean | undefined;
