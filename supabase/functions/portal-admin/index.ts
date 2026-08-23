@@ -214,7 +214,8 @@ function parseGuardianCsv(
   if (lines.length < 2) return "The CSV has a header but no rows.";
 
   // Normalize headers: strip BOM/quotes, lowercase, spaces/dashes -> underscore.
-  const header = splitCsvLine(lines[0]).map((h) =>
+  const delim = detectDelimiter(lines[0]);
+  const header = splitCsvLine(lines[0], delim).map((h) =>
     h.replace(/^\uFEFF/, "").replace(/^"|"$/g, "").trim().toLowerCase().replace(/[\s-]+/g, "_")
   );
   // Accept the common export spellings for each logical column.
@@ -256,7 +257,7 @@ function parseGuardianCsv(
   let duplicates = 0;
 
   for (let i = 1; i < lines.length; i += 1) {
-    const cells = splitCsvLine(lines[i]);
+    const cells = splitCsvLine(lines[i], delim);
     const line = i + 1;
     const childElationId = at(cells, "minor_elation_id");
     const guardianEmail = at(cells, "guardian_email").toLowerCase();
