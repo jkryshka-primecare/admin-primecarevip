@@ -1,10 +1,32 @@
 # Read-path `reason` enumeration (portal ↔ admin OS contract)
 
+**Authority: the handler, not this doc.** `core/services/artifacts/readArtifact.js`
+shipped in Release 2a, is red-team covered, and the member UI
+(`artifact-read-contract`) is already built against its exact answers. This file
+was drafted ahead of that code and disagreed with it in two places; both are
+resolved in favour of the handler. A token change now lands in the handler and
+this doc in the same PR.
+
+Two settled decisions, previously in conflict:
+
+1. **`ARTIFACT_NOT_SYNCED`, not `ARTIFACT_SUPPRESSED` / `ITEM_HIDDEN`.** The
+   handler has exactly one absence token: hidden item, module off, deleted
+   reference, wrong module, unauthorized guardian and never-synced all throw the
+   identical `404 NOT_FOUND / ARTIFACT_NOT_SYNCED`. That single token is the
+   point — absence is never distinguishable from forbidden. Do not reintroduce
+   finer-grained absence tokens.
+2. **"Preparing" is `200 { state: 'preparing' }`, not `409 ARTIFACT_NOT_READY`.**
+   Reference present + object missing enqueues a repair and answers 200 with a
+   body state. It is not an error: the portal renders a calm preparing state and
+   polls (5× at 8s). `ARTIFACT_NOT_READY` / 409 is **withdrawn** — no handler
+   emits it and the portal must not branch on it.
+
 Every enforcing read handler answers a refusal with
 `{ error: { code, status, message, details: { reason } } }`. `reason` is the
 machine-readable token; `message` is human text and is NOT a contract. The
 portal member UI should switch on `reason` only, and should treat an unknown
 token as a generic "not available" rather than leaking it.
+
 
 ## Identity / session
 
