@@ -10,6 +10,10 @@ import {
 import {
   Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
 } from "@/components/ui/table";
+import { Textarea } from "@/components/ui/textarea";
+import {
+  Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle,
+} from "@/components/ui/dialog";
 import { toast } from "sonner";
 import { Loader2, ShieldAlert, RefreshCw, Search, Copy, X } from "lucide-react";
 import InviteUserDialog from "./InviteUserDialog";
@@ -298,6 +302,40 @@ export default function UsersAdmin() {
           </div>
         </div>
       )}
+
+      <Dialog open={!!pendingGrant} onOpenChange={(o) => !o && setPendingGrant(null)}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle className="font-serif">
+              Grant {pendingGrant?.role.replace("_", " ")} access
+            </DialogTitle>
+            <DialogDescription>
+              Privileged grants are audited. A written justification is required and recorded with your identity.
+            </DialogDescription>
+          </DialogHeader>
+          <Textarea
+            value={reason}
+            onChange={(e) => setReason(e.target.value)}
+            placeholder="Reason for this grant (e.g. approved by ops lead, ticket PC-1423)"
+            rows={3}
+          />
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setPendingGrant(null)}>Cancel</Button>
+            <Button
+              disabled={!reason.trim() || !!savingFor}
+              onClick={async () => {
+                const g = pendingGrant;
+                if (!g) return;
+                setPendingGrant(null);
+                await setRole(g.userId, g.role, reason);
+              }}
+            >
+              Grant role
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
+
   );
 }
