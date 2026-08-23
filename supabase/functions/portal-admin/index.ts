@@ -802,6 +802,207 @@ Deno.serve(async (req) => {
   // identifies the human.
   const actor = ctx.user.email ?? ctx.user.id;
 
+  // --- linkGuardians ---------------------------------------------------------
+  // Enforcement order, unchanged from the reviewed backfill pattern and all
+  // already applied above this point:
+  //   1. requireStaff  -> verified session (top of the handler)
+  //   2. is_hr_admin   -> required even for a dry run (BULK_MIGRATIONS gate)
+  //   3. super_admin   -> required for apply, resolved from the DB by uid
+  //   4. non-empty reason required for apply
+  // What remains here: parse/validate the CSV, write attribution FIRST, then
+  // fan out. A dry run makes no upstream call at all — `adminLinkGuardian`
+  // has no dry-run mode, so "dry run" here means validation only.
+  if (action === "linkGuardians") {
+    const parsed = parseGuardianCsv(body.csv);
+    if (typeof parsed === "string") return deny(400, parsed);
+    const { rows, rejected, duplicates } = parsed;
+
+    const rawOffset = Number(body.offset);
+    const offset = Number.isFinite(rawOffset) && rawOffset > 0 ? Math.floor(rawOffset) : 0;
+    const rawPage = Number(body.pageSize);
+    const pageSize = Number.isFinite(rawPage) && rawPage > 0
+      ? Math.min(Math.floor(rawPage), MAX_GUARDIAN_PAGE)
+      : GUARDIAN_PAGE;
+
+    // Stage 2 of the rollout: apply exactly one child before going wide.
+    const onlyChild = typeof body.onlyChildElationId === "string"
+      ? body.onlyChildElationId.trim()
+      : "";
+    if (onlyChild && !/^\d{6,25}$/.test(onlyChild)) {
+      return deny(400, "The single-child filter is not a valid Elation patient id.");
+    }
+    const scoped = onlyChild ? rows.filter((r) => r.childElationId === onlyChild) : rows;
+    if (onlyChild && scoped.length === 0) {
+      return deny(400, "That child id does not appear in the pasted CSV.");
+    }
+
+    const uniqueChildren = new Set(scoped.map((r) => r.childElationId)).size;
+    const page = scoped.slice(offset, offset + pageSize);
+    const fnUrl = `${FUNCTIONS_BASE}/${FUNCTION_BY_ACTION.linkGuardians}`;
+    const startedAt = Date.now();
+
+    const finish = (data: Record<string, unknown>, httpStatus = 200) =>
+      new Response(
+        JSON.stringify({
+          ok: httpStatus < 300,
+          status: httpStatus,
+          elapsedMs: Date.now() - startedAt,
+          error: null,
+          data,
+        }),
+        { status: httpStatus, headers: { ...corsHeaders, "Content-Type": "application/json" } },
+      );
+
+    if (!bulkApply) {
+      await recordAction(ctx, {
+        elationPatientId: null,
+        action: "linkGuardians:dry-run",
+        reason: reason || null,
+        after: {
+          totalRows: scoped.length,
+          uniqueChildren,
+          rejected: rejected.length,
+          duplicates,
+          onlyChild: onlyChild || null,
+        },
+        ok: true,
+        httpStatus: 200,
+      });
+      await logPhiAccess(ctx, req, {
+        source: "portal.admin",
+        resource: FUNCTION_BY_ACTION.linkGuardians,
+        scope: "linkGuardians:dry-run",
+        resource_id: null,
+        http_status: 200,
+        row_count: scoped.length,
+      });
+      return finish({
+        apply: false,
+        totalRows: scoped.length,
+        uniqueChildren,
+        duplicates,
+        rejected,
+        pageSize,
+        offset,
+        processed: 0,
+        nextOffset: null,
+        done: true,
+        preview: page.slice(0, 20).map((r) => ({
+          childElationId: r.childElationId,
+          guardianRef: r.guardianElationId || `email:${r.guardianEmail.split("@")[1] ?? "redacted"}`,
+          source: r.source,
+        })),
+      });
+    }
+
+    if (page.length === 0) {
+      return deny(400, "There is nothing left to apply at that offset.");
+    }
+
+    // Attribution BEFORE the first write. Upstream only ever sees
+    // `portal-admin`; if this insert fails there is no record of the human, so
+    // the page does not run.
+    const attributed = await recordActionStrict(ctx, {
+      action: "linkGuardians:apply",
+      reason,
+      after: {
+        totalRows: scoped.length,
+        uniqueChildren,
+        offset,
+        pageSize,
+        pageChildIds: page.map((r) => r.childElationId),
+        onlyChild: onlyChild || null,
+        rejected: rejected.length,
+      },
+    });
+    if (!attributed) {
+      return new Response(
+        JSON.stringify({
+          ok: false,
+          status: 503,
+          error:
+            "The attribution record could not be written, so no guardian links were created. Try again.",
+        }),
+        { status: 503, headers: { ...corsHeaders, "Content-Type": "application/json" } },
+      );
+    }
+
+    let outcomes: LinkOutcome[] = [];
+    let processed = 0;
+    let fanError: string | null = null;
+    try {
+      const result = await fanOutGuardianLinks(ctx, fnUrl, page, offset, actor, reason);
+      outcomes = result.outcomes;
+      processed = result.processed;
+    } catch (e) {
+      fanError = e instanceof Error ? e.message : String(e);
+    }
+
+    const linked = outcomes.filter((o) => o.ok);
+    const failed = outcomes.filter((o) => !o.ok);
+    const nextOffset = offset + processed;
+    const done = !fanError && nextOffset >= scoped.length;
+
+    await recordAction(ctx, {
+      elationPatientId: null,
+      action: "linkGuardians:apply-result",
+      reason,
+      after: {
+        offset,
+        processed,
+        linked: linked.length,
+        created: linked.filter((o) => o.created).length,
+        failed: failed.length,
+        nextOffset,
+        done,
+      },
+      ok: !fanError && failed.length === 0,
+      httpStatus: fanError ? 502 : 200,
+      errorMessage: fanError,
+    });
+
+    await logPhiAccess(ctx, req, {
+      source: "portal.admin",
+      resource: FUNCTION_BY_ACTION.linkGuardians,
+      scope: "linkGuardians:apply",
+      resource_id: null,
+      http_status: fanError ? 502 : 200,
+      row_count: processed,
+    });
+
+    if (fanError && processed === 0) {
+      return new Response(
+        JSON.stringify({ ok: false, status: 502, error: fanError }),
+        { status: 502, headers: { ...corsHeaders, "Content-Type": "application/json" } },
+      );
+    }
+
+    return finish({
+      apply: true,
+      totalRows: scoped.length,
+      uniqueChildren,
+      duplicates,
+      rejected,
+      pageSize,
+      offset,
+      processed,
+      linked: linked.length,
+      created: linked.filter((o) => o.created).length,
+      updated: linked.filter((o) => !o.created).length,
+      failures: failed.map((o) => ({
+        childElationId: o.childElationId,
+        guardianRef: o.guardian,
+        status: o.status,
+        reason: o.reason ?? "UNKNOWN",
+      })),
+      nextOffset: done ? null : nextOffset,
+      done,
+      partial: Boolean(fanError),
+    });
+  }
+
+
+
   const upstreamPayload: Record<string, unknown> = {
     elationPatientId: isBatch ? null : elationPatientId,
     actor,
