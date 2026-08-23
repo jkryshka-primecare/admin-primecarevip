@@ -614,6 +614,118 @@ async function recordActionStrict(
   return !error;
 }
 
+/**
+ * One audience-scoped identity token, cached. Same credential path as the
+ * single-call flow below: WIF first, legacy key only if one was configured.
+ */
+async function mintIdToken(url: string): Promise<string> {
+  const now = Math.floor(Date.now() / 1000);
+  const cached = tokenCache.get(url);
+  if (cached && cached.expiresAt - 60 > now) return cached.token;
+  if (wifConfigured()) {
+    const token = await getIdentityTokenViaWif(url);
+    tokenCache.set(url, { token, expiresAt: now + 3000 });
+    return token;
+  }
+  return await getIdentityToken(loadServiceAccount(), url);
+}
+
+type LinkOutcome = {
+  childElationId: string;
+  guardian: string;
+  ok: boolean;
+  created?: boolean;
+  status: number;
+  reason?: string;
+};
+
+/**
+ * Fan-out for `linkGuardians`. One `adminLinkGuardian` call per row, serial
+ * with a small gap — the admin plane is not a bulk endpoint. Bounded by page
+ * size AND by wall clock, so a slow upstream hands back a resumable offset
+ * instead of dying at the 150s idle limit.
+ *
+ * The `actor` on every upstream call is the session email. Nothing from the
+ * pasted CSV can influence who is recorded as having done this.
+ */
+async function fanOutGuardianLinks(
+  ctx: AuthContext,
+  url: string,
+  page: GuardianRow[],
+  offset: number,
+  actor: string,
+  reason: string,
+): Promise<{ outcomes: LinkOutcome[]; processed: number }> {
+  const idToken = await mintIdToken(url);
+  const outcomes: LinkOutcome[] = [];
+  const startedAt = Date.now();
+  let processed = 0;
+
+  for (const row of page) {
+    if (Date.now() - startedAt > FAN_OUT_BUDGET_MS) break;
+    // PHI-free handle for the audit trail and the UI.
+    const guardian = row.guardianElationId || `email:${row.guardianEmail.split("@")[1] ?? "redacted"}`;
+    let status = 0;
+    let ok = false;
+    let created: boolean | undefined;
+    let failReason: string | undefined;
+
+    try {
+      const res = await fetch(url, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${idToken}`, "Content-Type": "application/json" },
+        body: JSON.stringify({
+          childElationId: row.childElationId,
+          actor,
+          reason,
+          source: row.source,
+          guardianElationId: row.guardianElationId,
+          guardianHintId: row.guardianHintId,
+          guardianEmail: row.guardianEmail,
+          guardianName: row.guardianName,
+        }),
+      });
+      status = res.status;
+      const text = await res.text();
+      let body: Record<string, unknown> | null = null;
+      try {
+        body = text ? JSON.parse(text) : null;
+      } catch {
+        body = null;
+      }
+      ok = res.ok;
+      if (ok) {
+        created = Boolean((body as { created?: boolean } | null)?.created);
+      } else {
+        const env = body as { error?: { message?: string; details?: { reason?: string } } } | null;
+        failReason = env?.error?.details?.reason ?? env?.error?.message ?? `HTTP_${status}`;
+      }
+    } catch (e) {
+      status = 502;
+      failReason = e instanceof Error ? e.message.slice(0, 200) : "UPSTREAM_UNREACHABLE";
+    }
+
+    processed += 1;
+    outcomes.push({ childElationId: row.childElationId, guardian, ok, created, status, reason: failReason });
+
+    // Per-row attribution: every linked child is individually accountable,
+    // not buried in a batch summary.
+    await recordAction(ctx, {
+      elationPatientId: row.childElationId,
+      action: "linkGuardians:link",
+      reason,
+      after: { guardianRef: guardian, source: row.source, created: created ?? false, row: offset + processed },
+      ok,
+      httpStatus: status,
+      errorMessage: failReason ?? null,
+    });
+
+    await new Promise((r) => setTimeout(r, 120));
+  }
+
+  return { outcomes, processed };
+}
+
 
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: corsHeaders });
