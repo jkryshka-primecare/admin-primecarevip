@@ -225,8 +225,10 @@ function parseGuardianCsv(
     const guardianElationId = at(cells, "guardian_elation_id");
     const guardianHintId = at(cells, "guardian_hint_id");
     const guardianName = at(cells, "guardian_name").slice(0, 200);
-    // The export's `manual_search` is the operator-facing name for `manual`.
-    const rawSource = at(cells, "match_source");
+    // The export's `manual_search` is the operator-facing name for `manual`
+    // (same normalization as load-guardian-links.js). Case/whitespace tolerant
+    // so a re-export with different casing doesn't reject ~35 rows.
+    const rawSource = at(cells, "match_source").toLowerCase().replace(/[\s-]+/g, "_");
     const source = rawSource === "manual_search" ? "manual" : rawSource;
 
     const reject = (reason: string) =>
