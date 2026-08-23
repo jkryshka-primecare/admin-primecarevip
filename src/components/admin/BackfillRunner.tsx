@@ -206,10 +206,12 @@ function Runner({ def, canApply }: { def: RunnerDef; canApply: boolean }) {
           <input
             value={limit}
             onChange={(e) => setLimit(e.target.value.replace(/\D/g, ""))}
-            placeholder="default"
+            placeholder="100 max"
             className="mt-1 w-28 rounded-md border border-border bg-background px-3 py-1.5 font-mono text-xs text-foreground"
           />
+          <p className="mt-1 text-[11px] text-muted-foreground">capped at 100 per call</p>
         </div>
+
         {def.paged && (
           <div className="text-xs text-muted-foreground">
             Cursor:{" "}
