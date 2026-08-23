@@ -266,7 +266,18 @@ function parseGuardianCsv(
 
     // Idempotent upstream, but a duplicate pair inside one paste is a sign the
     // export was concatenated twice — drop it and say so.
-    const key = `${childElationId}|${guardianElationId || `email:${guardianEmail}`}`;
+    // Idempotent upstream, but a duplicate pair inside one paste is a sign the
+    // export was concatenated twice — drop it and say so.
+    //
+    // The guardian key is the CHART id whenever there is one. Two guardians can
+    // legitimately share a mailbox (Ella Goldstein -> Greg + Jill on one
+    // ggoldstein@ address); keying on email would collapse them and the child
+    // would lose a guardian. Email is the key only for `email_on_file`, where
+    // by definition no chart exists.
+    const guardianKey = guardianElationId
+      ? `chart:${guardianElationId}`
+      : `email:${guardianEmail}`;
+    const key = `${childElationId}|${guardianKey}`;
     if (seen.has(key)) {
       duplicates += 1;
       continue;
