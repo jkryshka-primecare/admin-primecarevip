@@ -7,6 +7,7 @@ import SeedDataPanel from "@/components/admin/SeedDataPanel";
 import ArtifactCoveragePanel from "@/components/admin/ArtifactCoveragePanel";
 import UnclaimedGuardiansPanel from "@/components/admin/UnclaimedGuardiansPanel";
 import BackfillRunner from "@/components/admin/BackfillRunner";
+import GuardianLinkLoader from "@/components/admin/GuardianLinkLoader";
 import GoLiveChecklist from "@/components/admin/GoLiveChecklist";
 import MemberBillingPanel from "@/components/firestore/MemberBillingPanel";
 import MemberAppExplorer from "@/components/firestore/MemberAppExplorer";
