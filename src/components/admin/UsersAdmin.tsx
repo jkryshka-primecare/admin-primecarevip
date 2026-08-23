@@ -10,6 +10,10 @@ import {
 import {
   Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
 } from "@/components/ui/table";
+import { Textarea } from "@/components/ui/textarea";
+import {
+  Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle,
+} from "@/components/ui/dialog";
 import { toast } from "sonner";
 import { Loader2, ShieldAlert, RefreshCw, Search, Copy, X } from "lucide-react";
 import InviteUserDialog from "./InviteUserDialog";
@@ -39,6 +43,9 @@ const ROLE_OPTIONS: AppRole[] = [
   "pending", "staff", "hr", "billing", "pharmacy", "clinical", "admin", "super_admin",
 ];
 
+const PRIVILEGED_ROLES: AppRole[] = ["admin", "super_admin"];
+
+
 const roleStyles: Record<AppRole, string> = {
   super_admin: "bg-destructive/10 text-destructive border-destructive/30",
   admin: "bg-destructive/10 text-destructive border-destructive/30",
@@ -63,6 +70,9 @@ export default function UsersAdmin() {
   const [loading, setLoading] = useState(true);
   const [savingFor, setSavingFor] = useState<string | null>(null);
   const [search, setSearch] = useState("");
+  const [pendingGrant, setPendingGrant] = useState<{ userId: string; role: AppRole } | null>(null);
+  const [reason, setReason] = useState("");
+
 
   async function load() {
     setLoading(true);
@@ -95,10 +105,16 @@ export default function UsersAdmin() {
 
   useEffect(() => { if (isAdmin) load(); }, [isAdmin]);
 
-  async function setRole(userId: string, newRole: AppRole) {
-    if (userId === me?.id && newRole !== "admin" && newRole !== "super_admin") {
-      const ok = window.confirm("You're about to remove your own admin role. You will lose access to this page immediately. Continue?");
-      if (!ok) return;
+  async function setRole(userId: string, newRole: AppRole, reason?: string) {
+    if (userId === me?.id) {
+      toast.error("You cannot change your own role", {
+        description: "Self-mutation is blocked. Ask another super admin.",
+      });
+      return;
+    }
+    if (PRIVILEGED_ROLES.includes(newRole) && !reason?.trim()) {
+      toast.error("A reason is required when granting a privileged role");
+      return;
     }
     setSavingFor(userId);
     const { error: delErr } = await supabase.from("user_roles").delete().eq("user_id", userId);
@@ -109,6 +125,16 @@ export default function UsersAdmin() {
     setSavingFor(null);
     await load();
   }
+
+  function requestRole(userId: string, newRole: AppRole) {
+    if (PRIVILEGED_ROLES.includes(newRole)) {
+      setPendingGrant({ userId, role: newRole });
+      setReason("");
+      return;
+    }
+    void setRole(userId, newRole);
+  }
+
 
   async function revokeInvite(id: string) {
     const { error } = await supabase.from("invitations").delete().eq("id", id);
@@ -210,7 +236,7 @@ export default function UsersAdmin() {
                         <span className="text-xs font-mono text-muted-foreground">{new Date(u.created_at).toLocaleDateString()}</span>
                       </TableCell>
                       <TableCell className="text-right">
-                        <Select value={current} onValueChange={(v) => setRole(u.user_id, v as AppRole)} disabled={saving}>
+                        <Select value={current} onValueChange={(v) => requestRole(u.user_id, v as AppRole)} disabled={saving || isMe}>
                           <SelectTrigger className="h-8 w-36 ml-auto text-xs">
                             <SelectValue />
                           </SelectTrigger>
@@ -276,6 +302,40 @@ export default function UsersAdmin() {
           </div>
         </div>
       )}
+
+      <Dialog open={!!pendingGrant} onOpenChange={(o) => !o && setPendingGrant(null)}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle className="font-serif">
+              Grant {pendingGrant?.role.replace("_", " ")} access
+            </DialogTitle>
+            <DialogDescription>
+              Privileged grants are audited. A written justification is required and recorded with your identity.
+            </DialogDescription>
+          </DialogHeader>
+          <Textarea
+            value={reason}
+            onChange={(e) => setReason(e.target.value)}
+            placeholder="Reason for this grant (e.g. approved by ops lead, ticket PC-1423)"
+            rows={3}
+          />
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setPendingGrant(null)}>Cancel</Button>
+            <Button
+              disabled={!reason.trim() || !!savingFor}
+              onClick={async () => {
+                const g = pendingGrant;
+                if (!g) return;
+                setPendingGrant(null);
+                await setRole(g.userId, g.role, reason);
+              }}
+            >
+              Grant role
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
+
   );
 }
