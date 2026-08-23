@@ -64,7 +64,7 @@ async function run({ apply, limit, cursor }) {
       // end of the page up-front would skip every record after a mid-page
       // budget stop — those artifacts stay uncopied and only surface as 404s
       // once the legacy fallback is disabled.
-      last = doc.id;
+      last = doc.ref.path;
       report.scanned += 1;
       const patientId = doc.ref.parent.parent ? doc.ref.parent.parent.id : null;
       // eslint-disable-next-line no-await-in-loop
