@@ -268,12 +268,33 @@ function Runner({ def, canApply }: { def: RunnerDef; canApply: boolean }) {
           </button>
         )}
 
+        {def.paged && (
+          <button
+            onClick={() => go(false, true)}
+            disabled={busy}
+            className="inline-flex items-center gap-2 rounded-md border border-border bg-background px-3 py-1.5 text-xs font-medium text-foreground hover:bg-muted disabled:opacity-50"
+          >
+            Dry run to completion
+          </button>
+        )}
+
+        {def.paged && canApply && (
+          <button
+            onClick={() => go(true, true)}
+            disabled={busy || !reason.trim()}
+            className="inline-flex items-center gap-2 rounded-md bg-primary px-3 py-1.5 text-xs font-medium text-primary-foreground hover:opacity-90 disabled:opacity-50"
+          >
+            Apply all pages
+          </button>
+        )}
+
         {def.paged && report && !report.done && canApply && (
           <span className="text-[11px] text-muted-foreground">
             Run again to continue from the cursor.
           </span>
         )}
       </div>
+
 
       {run.error && (
         <p className="mt-3 flex items-start gap-2 rounded-md bg-destructive/10 p-2 text-xs text-destructive">
