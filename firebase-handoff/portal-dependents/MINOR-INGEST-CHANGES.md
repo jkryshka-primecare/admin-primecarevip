@@ -230,3 +230,25 @@ whose only link is `email_on_file` and whose guardians cannot read until phase 2
 Intended: the bytes sit in Storage behind the same read path as everyone else's,
 `GUARDIAN_READS_ENABLED` is OFF, and those 40 belong in the minor coverage
 denominator (`bySegment.minor.byLinkage.emailOnFile`).
+
+---
+
+## Status 2026-08-23 — merged files now ship in this handoff
+
+The hunks above are applied. Take the FILES, not the diff:
+
+- `functions/ingestElationReports.js` (240 lines) — §1 only.
+- `functions/backfillElationReports.js` (351 lines) — §2a, §2b re-key, §2c.
+
+Both `node --check` clean. `backfillElationReports.js` contains no `firebaseUid`
+keying and no `hasArtifact: false` write of any kind. `counters.artifactSkippedUnclaimed`
+is retained at 0 to keep the run-stats shape frozen.
+
+Requires in the merged repo (already in the handoff, copy both folders into `functions/`):
+`core/services/patient/ingestEligibility.js`, `core/services/patient/internalUid.js`
+(ships in `portal-artifact-integrity/`). The wrapper's "runner re-applies §2a"
+guarantee is now backed: the runner imports the SAME `ingestEligibility` module.
+
+Still required before the minor track runs: the re-keyed `readArtifact.js` on the
+read side, and `backfillInternalUids` run first so `ensureInternalUid` is a
+fallback rather than the mint path.
