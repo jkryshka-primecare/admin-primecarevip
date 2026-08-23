@@ -1,0 +1,8 @@
+// Paste into firestore.rules, in the "PHI audit collections — admin SDK only"
+// block, next to phi_access_log. Written only by the Admin SDK inside
+// setUserRole; never client-writable.
+
+    match /role_change_audit/{auditId} {
+      allow read: if isSuperAdmin();
+      allow write: if false;
+    }
