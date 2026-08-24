@@ -92,7 +92,16 @@ async function partitionByMinorSet(ids) {
 }
 
 exports.backfillElationReports = functions
-  .runWith({ timeoutSeconds: 540, memory: '1GB' })
+  // Elation credentials MUST be bound here. The runner calls the shared Elation
+  // client, which reads ELATION_CLIENT_ID / ELATION_CLIENT_SECRET from
+  // process.env; without this binding Secret Manager never injects them and
+  // EVERY patient fails at the first Elation call (listed: 0, errors: 1).
+  // Mirrors getLabs.js / adminProvisionPatients.js / sweepArtifactRepairs.js.
+  .runWith({
+    timeoutSeconds: 540,
+    memory: '1GB',
+    secrets: ['ELATION_CLIENT_ID', 'ELATION_CLIENT_SECRET'],
+  })
   .https.onRequest(async (req, res) => {
     res.set('Cache-Control', 'no-store');
     if (req.method !== 'POST') {
@@ -154,11 +163,29 @@ exports.backfillElationReports = functions
       // Normalize the runner's report to the same shape as the empty-eligible
       // branch above, so the caller sees one contract either way.
       const r = raw && typeof raw === 'object' ? raw : {};
+      const c = r.counters || {};
+      const per = Array.isArray(r.perPatient) ? r.perPatient : [];
+      // The runner reports in `counters`/`perPatient`; it never emits
+      // ingested/skipped/failed. Deriving them here is what stops the
+      // contradiction where patientsErrored: 5 sits next to failed: [].
       const report = {
         ...r,
-        ingested: Number.isFinite(r.ingested) ? r.ingested : 0,
-        skipped: Number.isFinite(r.skipped) ? r.skipped : 0,
-        failed: Array.isArray(r.failed) ? r.failed : [],
+        ingested: Number.isFinite(r.ingested) ? r.ingested : (Number(c.stored) || 0),
+        skipped: Number.isFinite(r.skipped) ? r.skipped
+          : (Number(c.patientsSkippedNotAllowlisted) || 0)
+            + (Number(c.patientsSkippedNonActive) || 0),
+        failed: Array.isArray(r.failed) && r.failed.length
+          ? r.failed
+          : per
+            .filter((p) => p && p.errors > 0)
+            .map((p) => ({
+              patientId: p.elationPatientId,
+              errors: p.errors,
+              stage: p.lastError ? p.lastError.stage : null,
+              reason: p.lastError ? p.lastError.reason : null,
+              status: p.lastError ? p.lastError.status : null,
+              message: p.lastError ? p.lastError.message : null,
+            })),
       };
 
       log('backfillElationReports', 'applied', {
