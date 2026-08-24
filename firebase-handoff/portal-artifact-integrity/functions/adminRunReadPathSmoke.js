@@ -472,6 +472,11 @@ async function runSmoke() {
     fixture: { patientId: FIXTURE_PATIENT_ID, uid: FIXTURE_UID, missingId: MISSING_ID },
     guardianFixture: {
       enabled: guardianReadsEnabled(),
+      flag: process.env.GUARDIAN_READS_ENABLED === 'true',
+      // Non-empty = CANARY scope: a green run certifies only these guardians.
+      allowlistSize: guardianAllowlist().length,
+      scoped: guardianAllowlist().length > 0,
+
       guardianUid: GUARDIAN_UID || null,
       guardianElationId: GUARDIAN_ELATION_ID || null,
       childPatientId: CHILD_PATIENT_ID || null,
