@@ -339,6 +339,14 @@ async function runAudit() {
 
   // Feed the healer: one queue row per miss, keyed (patientId, documentId).
   const batch = db.batch();
+
+  // Retire any queue row a PREVIOUS run created for a fixture reference. Those
+  // rows can never be repaired, so left behind they keep the parked/alerting
+  // count permanently non-zero.
+  for (const f of fixtures) {
+    batch.delete(db.collection('artifact_repair_queue').doc(`${f.patientId}:${f.documentId}`));
+  }
+
   missing.slice(0, 500).forEach((m) => {
     const ref = db.collection('artifact_repair_queue').doc(`${m.patientId}:${m.documentId}`);
     batch.set(
