@@ -33,7 +33,6 @@ const {
   makeInternalUidResolver,
   objectPathFor: internalPathFor,
   legacyObjectPathFor: legacyPathFor,
-  legacyFallbackEnabled,
 } = require('./core/services/patient/internalUid');
 
 const REGION = 'us-central1';
@@ -164,6 +163,8 @@ async function runAudit() {
   const unpathed = [];
   const errored = [];
   const fixtures = [];
+  // Misses that exist under the legacy uid key (re-key work, not refetch work).
+  let legacyOnlyCount = 0;
   const errorStatusCounts = {};
   // Release 2b Part B: adult and minor are reported SEPARATELY. A single
   // rounded "100%" must never be able to hide a cohort the minor-ingest track
@@ -391,6 +392,8 @@ async function runAudit() {
         patientId: m.patientId,
         documentId: m.documentId,
         path: m.path,
+        legacyPath: m.legacyPath || null,
+        legacyPresent: m.legacyPresent === true,
         firstSeenAt: m.firstSeenAt,
         failures: m.failures,
         parked: m.parked,
