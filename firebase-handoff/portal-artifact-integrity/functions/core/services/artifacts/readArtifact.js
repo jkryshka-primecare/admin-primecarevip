@@ -56,10 +56,29 @@ const { enqueueRepair, PREPARING } = require('./repairQueue');
  * Release 2b guardian reads stay OFF until the internal-UID re-key (Part B) is
  * complete and the red-team is green. OFF means a guardian read is treated
  * exactly like a stranger read — absence, never "forbidden".
+ *
+ * CANARY SCOPING. `GUARDIAN_READS_ENABLED` alone is a global flip. When
+ * `GUARDIAN_READS_ALLOWLIST` is non-empty the flag is additionally scoped to
+ * that set, so exactly one canary guardian can be enabled in production while
+ * every other guardian keeps hitting the OFF path. Entries may be Firebase
+ * uids (lower-cased) or the guardian's OWN elation record id — matching either
+ * is enough, so the operator does not have to know which id space to use.
+ * Empty/unset allowlist = the flag's original global behaviour, so widening to
+ * all guardians is a one-line clear of the variable, not a code change.
  */
-function guardianReadsEnabled() {
-  return process.env.GUARDIAN_READS_ENABLED === 'true';
+function guardianAllowlist() {
+  return (process.env.GUARDIAN_READS_ALLOWLIST || '')
+    .split(',').map((s) => s.trim().toLowerCase()).filter(Boolean);
 }
+
+function guardianReadsEnabledFor(uid, callerElationId) {
+  if (process.env.GUARDIAN_READS_ENABLED !== 'true') return false;
+  const allow = guardianAllowlist();
+  if (allow.length === 0) return true; // unscoped: flag governs alone
+  return allow.includes(String(uid || '').toLowerCase())
+    || (callerElationId ? allow.includes(String(callerElationId).toLowerCase()) : false);
+}
+
 
 /**
  * Proxy audit (enforcement rule 4): every read logs BOTH uids. Self-reads set
