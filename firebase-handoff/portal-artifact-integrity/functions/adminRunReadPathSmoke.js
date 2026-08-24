@@ -292,13 +292,13 @@ async function restoreAccess(saved) {
  * negative case would "pass" for the wrong reason and the positive case would
  * fail for the wrong reason — neither tells us anything, so both are skipped.
  */
-async function runGuardianArm({ record, skip }) {
+async function runGuardianArm({ record, skip, fx }) {
   const label = {
     pos: '6. guardian -> linked minor: 200 + signed URL serves PDF bytes',
     neg: '7. guardian -> UNLINKED minor: denied (cross-child isolation)',
   };
 
-  if (!guardianReadsEnabled()) {
+  if (!guardianReadsEnabled(fx)) {
     const why = process.env.GUARDIAN_READS_ENABLED === 'true'
       ? 'skipped — GUARDIAN_READS_ENABLED is true but GUARDIAN_READS_ALLOWLIST is empty or does not include this guardian fixture; the read path fails closed and still denies it'
       : 'skipped — GUARDIAN_READS_ENABLED is not true on this runtime; guardian reads are denied unconditionally, so neither case is meaningful';
@@ -308,18 +308,18 @@ async function runGuardianArm({ record, skip }) {
     skip(label.neg, why);
     return;
   }
-  if (!GUARDIAN_UID || !CHILD_PATIENT_ID || !OTHER_CHILD_ID) {
-    const why = 'skipped — SMOKE_GUARDIAN_UID / SMOKE_CHILD_PATIENT_ID / SMOKE_OTHER_CHILD_ID are not all configured';
+  if (!fx.guardianUid || !fx.childPatientId || !fx.otherChildId) {
+    const why = 'skipped — guardianUid / childPatientId / otherChildId are not all supplied (request body) or configured (SMOKE_GUARDIAN_UID / SMOKE_CHILD_PATIENT_ID / SMOKE_OTHER_CHILD_ID)';
     skip(label.pos, why);
     skip(label.neg, why);
     return;
   }
-  if (CHILD_PATIENT_ID === OTHER_CHILD_ID) {
+  if (fx.childPatientId === fx.otherChildId) {
     record(label.neg, false, 'fixture error — the linked and unlinked child ids are the same, so isolation cannot be tested');
     return;
   }
 
-  const state = await guardianFixtureState();
+  const state = await guardianFixtureState(fx);
 
   // A link on the ISOLATION child would silently turn the negative case into a
   // second positive case. That is a fixture defect, and it fails loudly.
@@ -327,14 +327,14 @@ async function runGuardianArm({ record, skip }) {
     record(
       label.neg,
       false,
-      `fixture error — guardian IS actively linked to ${OTHER_CHILD_ID}; pick an unrelated minor for SMOKE_OTHER_CHILD_ID`,
+      `fixture error — guardian IS actively linked to ${fx.otherChildId}; pick an unrelated minor for the isolation fixture`,
     );
     return;
   }
 
   let token;
   try {
-    token = await mintPatientIdToken(GUARDIAN_UID);
+    token = await mintPatientIdToken(fx.guardianUid);
   } catch (err) {
     const why = `could not mint the guardian token: ${String((err && err.message) || err)}`;
     record(label.pos, false, why);
@@ -344,15 +344,15 @@ async function runGuardianArm({ record, skip }) {
 
   // --- positive ---
   if (!state.child || !state.child.exists) {
-    skip(label.pos, `skipped — patients/${CHILD_PATIENT_ID} does not exist`);
+    skip(label.pos, `skipped — patients/${fx.childPatientId} does not exist`);
   } else if (!state.child.active) {
-    skip(label.pos, `skipped — no ACTIVE guardian entry for this guardian on ${CHILD_PATIENT_ID} (the smoke never creates one)`);
+    skip(label.pos, `skipped — no ACTIVE guardian entry for this guardian on ${fx.childPatientId} (the smoke never creates one)`);
   } else {
-    const childLabId = await discover('labs', CHILD_PATIENT_ID);
+    const childLabId = await discover('labs', fx.childPatientId);
     if (!childLabId) {
-      skip(label.pos, `skipped — minor ${CHILD_PATIENT_ID} holds no lab with hasArtifact:true`);
+      skip(label.pos, `skipped — minor ${fx.childPatientId} holds no lab with hasArtifact:true`);
     } else {
-      const r = await callRead(token, 'labs', childLabId, CHILD_PATIENT_ID);
+      const r = await callRead(token, 'labs', childLabId, fx.childPatientId);
       const url = r.json && r.json.signedUrl;
       if (effectiveStatus(r) !== 200 || !url) {
         record(label.pos, false, `${effectiveStatus(r)} ${reasonOf(r) || r.raw}`);
@@ -366,8 +366,8 @@ async function runGuardianArm({ record, skip }) {
   }
 
   // --- negative (the gate) ---
-  const otherLabId = (await discover('labs', OTHER_CHILD_ID)) || MISSING_ID;
-  const n = await callRead(token, 'labs', otherLabId, OTHER_CHILD_ID);
+  const otherLabId = (await discover('labs', fx.otherChildId)) || MISSING_ID;
+  const n = await callRead(token, 'labs', otherLabId, fx.otherChildId);
   const status = effectiveStatus(n);
   const leaked = Boolean(n.json && (n.json.signedUrl || n.json.state === 'preparing'));
   record(
