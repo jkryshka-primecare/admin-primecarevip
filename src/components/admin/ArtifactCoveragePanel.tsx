@@ -227,6 +227,24 @@ export default function ArtifactCoveragePanel() {
 
       </div>
 
+      <div className="mt-3 flex flex-wrap items-center justify-between gap-2 rounded-lg bg-muted/50 px-3 py-2">
+        <p className="text-xs text-muted-foreground">
+          The hand-off report bundles this run's numbers, the go/no-go gate and the read-path
+          smoke from this session into one Markdown file you can give your agent.
+          {smoke ? "" : " Run the smoke first so it is included."}
+        </p>
+        <label className="flex items-center gap-2 text-xs text-muted-foreground">
+          <input
+            type="checkbox"
+            checked={handoffPhi}
+            onChange={(e) => setHandoffPhi(e.target.checked)}
+            className="h-3.5 w-3.5 accent-[hsl(var(--primary))]"
+          />
+          Include patient detail (PHI, audited)
+        </label>
+      </div>
+
+
       {smoke && (
         <div className="mt-4 overflow-hidden rounded-xl border border-border">
           <div className="flex flex-wrap items-center justify-between gap-2 bg-muted/60 px-3 py-2">
