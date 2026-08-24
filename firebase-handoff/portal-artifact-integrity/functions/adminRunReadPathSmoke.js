@@ -479,12 +479,15 @@ async function runSmoke() {
     guardianFixture: {
       enabled: guardianReadsEnabled(),
       flag: process.env.GUARDIAN_READS_ENABLED === 'true',
-      // Non-empty = CANARY scope: a green run certifies only these guardians.
+      // Empty = DENY ALL (fail closed). '*' = deliberate global widen.
       allowlistSize: guardianAllowlist().length,
-      scoped: guardianAllowlist().length > 0,
+      scoped: guardianAllowlist().length > 0 && !guardianAllowlistIsGlobal(guardianAllowlist()),
+      global: guardianAllowlistIsGlobal(guardianAllowlist()),
+      failClosed: guardianAllowlist().length === 0,
 
       guardianUid: GUARDIAN_UID || null,
       guardianElationId: GUARDIAN_ELATION_ID || null,
+
       childPatientId: CHILD_PATIENT_ID || null,
       otherChildPatientId: OTHER_CHILD_ID || null,
     },
