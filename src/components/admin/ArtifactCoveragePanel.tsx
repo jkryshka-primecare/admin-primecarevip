@@ -98,6 +98,61 @@ export default function ArtifactCoveragePanel() {
     }
   };
 
+  /**
+   * The hand-off report: audit numbers + gate verdict + the smoke run from this
+   * session, as Markdown an operator can paste to their agent. Counts only
+   * unless "include patient detail" is on — that adds PHI rows, so it goes
+   * through the same audited re-read as the CSV export.
+   */
+  const buildHandoff = async () => {
+    if (!report) return null;
+    if (handoffPhi) {
+      const fresh = await refetch();
+      void fresh;
+    }
+    return buildCoverageHandoff({ report, smoke, includePhi: handoffPhi });
+  };
+
+  const copyHandoff = async () => {
+    setHandoffBusy(true);
+    try {
+      const md = await buildHandoff();
+      if (!md) return;
+      await navigator.clipboard.writeText(md);
+      toast({
+        title: "Hand-off report copied",
+        description: handoffPhi ? "Includes patient detail — this read is audited." : "Counts and results only, no patient detail.",
+      });
+    } catch (e) {
+      toast({
+        variant: "destructive",
+        title: "Could not copy the report",
+        description: e instanceof Error ? e.message : String(e),
+      });
+    } finally {
+      setHandoffBusy(false);
+    }
+  };
+
+  const downloadHandoff = async () => {
+    setHandoffBusy(true);
+    try {
+      const md = await buildHandoff();
+      if (!md) return;
+      const blob = new Blob([md], { type: "text/markdown;charset=utf-8" });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `artifact-coverage-handoff-${report?.runId ?? "latest"}.md`;
+      a.click();
+      URL.revokeObjectURL(url);
+      toast({ title: "Hand-off report downloaded", description: `Run ${report?.runId ?? "latest"}.` });
+    } finally {
+      setHandoffBusy(false);
+    }
+  };
+
+
   return (
     <motion.div
       initial={{ opacity: 0, y: 12 }}
