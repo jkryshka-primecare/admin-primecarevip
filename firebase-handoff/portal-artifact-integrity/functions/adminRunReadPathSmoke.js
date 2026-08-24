@@ -75,7 +75,7 @@ function webApiKey() {
 
 // ----------------------------------------------------------------- auth ----
 
-async function mintPatientIdToken() {
+async function mintPatientIdToken(uid) {
   const key = webApiKey();
   if (!key) {
     throw new Error(
@@ -83,7 +83,8 @@ async function mintPatientIdToken() {
       'custom-token exchange cannot run.',
     );
   }
-  const customToken = await admin.auth().createCustomToken(FIXTURE_UID, { role: 'patient' });
+  const subject = String(uid || FIXTURE_UID);
+  const customToken = await admin.auth().createCustomToken(subject, { role: 'patient' });
   const res = await fetch(
     `https://identitytoolkit.googleapis.com/v1/accounts:signInWithCustomToken?key=${key}`,
     {
@@ -101,11 +102,20 @@ async function mintPatientIdToken() {
 
 // -------------------------------------------------------------- calling ----
 
-async function callRead(token, moduleKey, reportId) {
+/**
+ * `childElationId` is the ONLY body field that can point the read at another
+ * record, and the read path treats it as a request, not as identity: it is
+ * accepted solely after `resolveGuardianAccess` authorizes the caller for that
+ * child. Passing it here is exactly what the portal does for a dependent.
+ */
+async function callRead(token, moduleKey, reportId, childElationId) {
+  const payload = {};
+  if (reportId) payload.reportId = reportId;
+  if (childElationId) payload.childElationId = String(childElationId);
   const res = await fetch(`${BASE}/${FN_BY_MODULE[moduleKey]}`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-    body: JSON.stringify(reportId ? { reportId } : {}),
+    body: JSON.stringify(payload),
   });
   const text = await res.text();
   let json = null;
@@ -134,9 +144,9 @@ function reasonOf(r) {
  */
 const CATEGORY_BY_MODULE = { labs: 'lab', imaging: 'imaging', records: 'medical_records' };
 
-async function discover(moduleKey) {
+async function discover(moduleKey, patientId) {
   const snap = await admin.firestore()
-    .collection('patients').doc(FIXTURE_PATIENT_ID).collection('labs')
+    .collection('patients').doc(String(patientId || FIXTURE_PATIENT_ID)).collection('labs')
     .where('category', '==', CATEGORY_BY_MODULE[moduleKey])
     .where('hasArtifact', '==', true)
     .limit(10)
@@ -146,6 +156,35 @@ async function discover(moduleKey) {
   const hit = snap.docs.find((d) => d.id !== MISSING_ID);
   return hit ? hit.id : null;
 }
+
+// ------------------------------------------------------ guardian fixtures ----
+
+/**
+ * Read-only precondition check. The guardian arm asserts the READ PATH; it must
+ * never create or repair a guardian link to make itself pass, so a missing or
+ * non-active link is reported as SKIP (fixture gap) rather than FAIL, and a
+ * link that exists on the WRONG child (the isolation fixture) is a hard FAIL
+ * because it would invalidate the negative case.
+ */
+async function guardianFixtureState() {
+  const db = admin.firestore();
+  const linkedOn = async (childId) => {
+    if (!childId) return null;
+    const snap = await db.collection('patients').doc(String(childId)).get().catch(() => null);
+    if (!snap || !snap.exists) return { exists: false, active: false };
+    const guardians = Array.isArray(snap.data().guardians) ? snap.data().guardians : [];
+    const active = guardians.some((g) => g
+      && g.status === 'active'
+      && ((g.guardianUid && g.guardianUid === GUARDIAN_UID)
+        || (g.guardianElationId && String(g.guardianElationId) === GUARDIAN_ELATION_ID)));
+    return { exists: true, active };
+  };
+  return {
+    child: await linkedOn(CHILD_PATIENT_ID),
+    other: await linkedOn(OTHER_CHILD_ID),
+  };
+}
+
 
 
 // ------------------------------------------------- portalAccess toggling ----
