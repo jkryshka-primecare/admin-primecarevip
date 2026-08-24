@@ -188,7 +188,7 @@ describe('repair queue cannot be steered', () => {
  */
 describe('[2b] guardian proxy access', () => {
   const priorFlag = process.env.GUARDIAN_READS_ENABLED;
-  beforeAll(() => { process.env.GUARDIAN_READS_ENABLED = 'true'; });
+  beforeAll(() => { process.env.GUARDIAN_READS_ENABLED = 'true'; process.env.GUARDIAN_READS_ALLOWLIST = '*'; });
   afterAll(() => { process.env.GUARDIAN_READS_ENABLED = priorFlag; });
 
   async function family({ status = 'active' } = {}) {
@@ -296,7 +296,7 @@ describe('[2b] guardian proxy access', () => {
  */
 describe('[2b-phase1] chart-backed guardian authorization', () => {
   const priorFlag = process.env.GUARDIAN_READS_ENABLED;
-  beforeAll(() => { process.env.GUARDIAN_READS_ENABLED = 'true'; });
+  beforeAll(() => { process.env.GUARDIAN_READS_ENABLED = 'true'; process.env.GUARDIAN_READS_ALLOWLIST = '*'; });
   afterAll(() => { process.env.GUARDIAN_READS_ENABLED = priorFlag; });
 
   test('authorizes an unbound guardian and binds exactly one entry', async () => {
