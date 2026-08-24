@@ -33,10 +33,15 @@
  * GUARDIAN ARM (Release 2b Part B) — only runs when GUARDIAN_READS_ENABLED is
  * 'true' on THIS runtime AND the fixtures below are configured. Otherwise every
  * guardian assertion is SKIPPED with the reason, never silently passed.
- *   SMOKE_GUARDIAN_UID          Firebase uid of the guardian fixture account
- *   SMOKE_GUARDIAN_ELATION_ID   the guardian's OWN patients/{id} doc id
- *   SMOKE_CHILD_PATIENT_ID      minor LINKED to that guardian (positive case)
- *   SMOKE_OTHER_CHILD_ID        minor NOT linked to that guardian (isolation)
+ * Each fixture may be supplied EITHER in the request body (preferred in prod —
+ * minors' patient ids stay out of GitHub Secrets and the persistent .env) or
+ * via its env var, which remains the fallback:
+ *   guardianUid        / SMOKE_GUARDIAN_UID        guardian fixture account uid
+ *   guardianElationId  / SMOKE_GUARDIAN_ELATION_ID guardian's own patients/{id}
+ *   childPatientId     / SMOKE_CHILD_PATIENT_ID    LINKED minor (positive case)
+ *   otherChildId       / SMOKE_OTHER_CHILD_ID      UNLINKED minor (isolation)
+ * Overrides are validated as plain opaque id strings and are never interpolated
+ * into a resolver expression or query.
  */
 
 const functions = require('firebase-functions');
@@ -51,10 +56,59 @@ const FIXTURE_PATIENT_ID = String(process.env.SMOKE_PATIENT_ID || '8164559790407
 const FIXTURE_UID = String(process.env.SMOKE_FIREBASE_UID || 'd8h7h6xc6axkq3k3tgnoz6ytxmx1');
 const MISSING_ID = process.env.SMOKE_MISSING_ID || 'SMOKE-LAB-2';
 
-const GUARDIAN_UID = String(process.env.SMOKE_GUARDIAN_UID || '');
-const GUARDIAN_ELATION_ID = String(process.env.SMOKE_GUARDIAN_ELATION_ID || '');
-const CHILD_PATIENT_ID = String(process.env.SMOKE_CHILD_PATIENT_ID || '');
-const OTHER_CHILD_ID = String(process.env.SMOKE_OTHER_CHILD_ID || '');
+// ------------------------------------------------ guardian fixture input ----
+
+/**
+ * The guardian fixtures point at MINOR patient ids, which we deliberately keep
+ * out of GitHub Secrets and the persistent prod `.env`. They may therefore be
+ * supplied in the request body at invoke time; each one falls back to its
+ * existing env var when absent, so a runtime that already has them configured
+ * behaves exactly as before.
+ *
+ * Every override is treated as an OPAQUE STRING. It is validated against a
+ * conservative id charset and never interpolated into a resolver expression or
+ * a query string — it is only ever passed as a Firestore document id or as a
+ * JSON body field the read path re-authorizes on its own.
+ */
+const ID_RE = /^[A-Za-z0-9_.:@-]{1,128}$/;
+
+function readOverride(body, key, envValue) {
+  const raw = body && Object.prototype.hasOwnProperty.call(body, key) ? body[key] : undefined;
+  if (raw === undefined || raw === null || raw === '') {
+    return { value: String(envValue || ''), source: envValue ? 'env' : 'unset' };
+  }
+  if (typeof raw !== 'string' && typeof raw !== 'number') {
+    return { value: '', source: 'invalid', error: `${key} must be a string` };
+  }
+  const value = String(raw).trim();
+  if (!ID_RE.test(value)) {
+    return { value: '', source: 'invalid', error: `${key} is not a valid identifier` };
+  }
+  return { value, source: 'body' };
+}
+
+/**
+ * Returns { fx, sources, errors }. `fx` carries the four guardian fixtures for
+ * this run; nothing about the flag/allowlist gate is overridable.
+ */
+function resolveFixtures(body) {
+  const spec = [
+    ['guardianUid', process.env.SMOKE_GUARDIAN_UID],
+    ['guardianElationId', process.env.SMOKE_GUARDIAN_ELATION_ID],
+    ['childPatientId', process.env.SMOKE_CHILD_PATIENT_ID],
+    ['otherChildId', process.env.SMOKE_OTHER_CHILD_ID],
+  ];
+  const fx = {};
+  const sources = {};
+  const errors = [];
+  for (const pair of spec) {
+    const r = readOverride(body, pair[0], pair[1]);
+    if (r.error) errors.push(r.error);
+    fx[pair[0]] = r.value;
+    sources[pair[0]] = r.source;
+  }
+  return { fx, sources, errors };
+}
 
 function guardianAllowlist() {
   return (process.env.GUARDIAN_READS_ALLOWLIST || '')
@@ -70,13 +124,15 @@ function guardianAllowlistIsGlobal(allow) {
  * semantics: an empty/missing allowlist denies every guardian even with the
  * flag on, and `*` is the one explicit token that widens globally.
  */
-function guardianReadsEnabled() {
+function guardianReadsEnabled(fx) {
   if (process.env.GUARDIAN_READS_ENABLED !== 'true') return false;
   const allow = guardianAllowlist();
   if (allow.length === 0) return false;
   if (guardianAllowlistIsGlobal(allow)) return true;
-  return allow.includes(GUARDIAN_UID.toLowerCase())
-    || (GUARDIAN_ELATION_ID ? allow.includes(GUARDIAN_ELATION_ID.toLowerCase()) : false);
+  const uid = String((fx && fx.guardianUid) || '').toLowerCase();
+  const elationId = String((fx && fx.guardianElationId) || '').toLowerCase();
+  return (uid ? allow.includes(uid) : false)
+    || (elationId ? allow.includes(elationId) : false);
 }
 
 
@@ -187,7 +243,7 @@ async function discover(moduleKey, patientId) {
  * link that exists on the WRONG child (the isolation fixture) is a hard FAIL
  * because it would invalidate the negative case.
  */
-async function guardianFixtureState() {
+async function guardianFixtureState(fx) {
   const db = admin.firestore();
   const linkedOn = async (childId) => {
     if (!childId) return null;
@@ -196,13 +252,14 @@ async function guardianFixtureState() {
     const guardians = Array.isArray(snap.data().guardians) ? snap.data().guardians : [];
     const active = guardians.some((g) => g
       && g.status === 'active'
-      && ((g.guardianUid && g.guardianUid === GUARDIAN_UID)
-        || (g.guardianElationId && String(g.guardianElationId) === GUARDIAN_ELATION_ID)));
+      && ((g.guardianUid && fx.guardianUid && g.guardianUid === fx.guardianUid)
+        || (g.guardianElationId && fx.guardianElationId
+          && String(g.guardianElationId) === fx.guardianElationId)));
     return { exists: true, active };
   };
   return {
-    child: await linkedOn(CHILD_PATIENT_ID),
-    other: await linkedOn(OTHER_CHILD_ID),
+    child: await linkedOn(fx.childPatientId),
+    other: await linkedOn(fx.otherChildId),
   };
 }
 
@@ -240,13 +297,13 @@ async function restoreAccess(saved) {
  * negative case would "pass" for the wrong reason and the positive case would
  * fail for the wrong reason — neither tells us anything, so both are skipped.
  */
-async function runGuardianArm({ record, skip }) {
+async function runGuardianArm({ record, skip, fx }) {
   const label = {
     pos: '6. guardian -> linked minor: 200 + signed URL serves PDF bytes',
     neg: '7. guardian -> UNLINKED minor: denied (cross-child isolation)',
   };
 
-  if (!guardianReadsEnabled()) {
+  if (!guardianReadsEnabled(fx)) {
     const why = process.env.GUARDIAN_READS_ENABLED === 'true'
       ? 'skipped — GUARDIAN_READS_ENABLED is true but GUARDIAN_READS_ALLOWLIST is empty or does not include this guardian fixture; the read path fails closed and still denies it'
       : 'skipped — GUARDIAN_READS_ENABLED is not true on this runtime; guardian reads are denied unconditionally, so neither case is meaningful';
@@ -256,18 +313,18 @@ async function runGuardianArm({ record, skip }) {
     skip(label.neg, why);
     return;
   }
-  if (!GUARDIAN_UID || !CHILD_PATIENT_ID || !OTHER_CHILD_ID) {
-    const why = 'skipped — SMOKE_GUARDIAN_UID / SMOKE_CHILD_PATIENT_ID / SMOKE_OTHER_CHILD_ID are not all configured';
+  if (!fx.guardianUid || !fx.childPatientId || !fx.otherChildId) {
+    const why = 'skipped — guardianUid / childPatientId / otherChildId are not all supplied (request body) or configured (SMOKE_GUARDIAN_UID / SMOKE_CHILD_PATIENT_ID / SMOKE_OTHER_CHILD_ID)';
     skip(label.pos, why);
     skip(label.neg, why);
     return;
   }
-  if (CHILD_PATIENT_ID === OTHER_CHILD_ID) {
+  if (fx.childPatientId === fx.otherChildId) {
     record(label.neg, false, 'fixture error — the linked and unlinked child ids are the same, so isolation cannot be tested');
     return;
   }
 
-  const state = await guardianFixtureState();
+  const state = await guardianFixtureState(fx);
 
   // A link on the ISOLATION child would silently turn the negative case into a
   // second positive case. That is a fixture defect, and it fails loudly.
@@ -275,14 +332,14 @@ async function runGuardianArm({ record, skip }) {
     record(
       label.neg,
       false,
-      `fixture error — guardian IS actively linked to ${OTHER_CHILD_ID}; pick an unrelated minor for SMOKE_OTHER_CHILD_ID`,
+      `fixture error — guardian IS actively linked to ${fx.otherChildId}; pick an unrelated minor for the isolation fixture`,
     );
     return;
   }
 
   let token;
   try {
-    token = await mintPatientIdToken(GUARDIAN_UID);
+    token = await mintPatientIdToken(fx.guardianUid);
   } catch (err) {
     const why = `could not mint the guardian token: ${String((err && err.message) || err)}`;
     record(label.pos, false, why);
@@ -292,15 +349,15 @@ async function runGuardianArm({ record, skip }) {
 
   // --- positive ---
   if (!state.child || !state.child.exists) {
-    skip(label.pos, `skipped — patients/${CHILD_PATIENT_ID} does not exist`);
+    skip(label.pos, `skipped — patients/${fx.childPatientId} does not exist`);
   } else if (!state.child.active) {
-    skip(label.pos, `skipped — no ACTIVE guardian entry for this guardian on ${CHILD_PATIENT_ID} (the smoke never creates one)`);
+    skip(label.pos, `skipped — no ACTIVE guardian entry for this guardian on ${fx.childPatientId} (the smoke never creates one)`);
   } else {
-    const childLabId = await discover('labs', CHILD_PATIENT_ID);
+    const childLabId = await discover('labs', fx.childPatientId);
     if (!childLabId) {
-      skip(label.pos, `skipped — minor ${CHILD_PATIENT_ID} holds no lab with hasArtifact:true`);
+      skip(label.pos, `skipped — minor ${fx.childPatientId} holds no lab with hasArtifact:true`);
     } else {
-      const r = await callRead(token, 'labs', childLabId, CHILD_PATIENT_ID);
+      const r = await callRead(token, 'labs', childLabId, fx.childPatientId);
       const url = r.json && r.json.signedUrl;
       if (effectiveStatus(r) !== 200 || !url) {
         record(label.pos, false, `${effectiveStatus(r)} ${reasonOf(r) || r.raw}`);
@@ -314,8 +371,8 @@ async function runGuardianArm({ record, skip }) {
   }
 
   // --- negative (the gate) ---
-  const otherLabId = (await discover('labs', OTHER_CHILD_ID)) || MISSING_ID;
-  const n = await callRead(token, 'labs', otherLabId, OTHER_CHILD_ID);
+  const otherLabId = (await discover('labs', fx.otherChildId)) || MISSING_ID;
+  const n = await callRead(token, 'labs', otherLabId, fx.otherChildId);
   const status = effectiveStatus(n);
   const leaked = Boolean(n.json && (n.json.signedUrl || n.json.state === 'preparing'));
   record(
@@ -331,7 +388,10 @@ async function runGuardianArm({ record, skip }) {
 
 
 
-async function runSmoke() {
+async function runSmoke(options) {
+  const opts = options || {};
+  const fx = opts.fx || resolveFixtures(null).fx;
+  const sources = opts.sources || {};
   const results = [];
   const record = (name, pass, detail) => {
     results.push({ name, pass, detail: detail || '' });
@@ -458,7 +518,7 @@ async function runSmoke() {
     //     function mutates remains portalAccess/{FIXTURE_PATIENT_ID}, restored
     //     in the `finally` below. A guardian assertion that cannot be made
     //     honestly is SKIPPED with its reason — never recorded as a pass.
-    await runGuardianArm({ record, skip });
+    await runGuardianArm({ record, skip, fx });
 
   } finally {
     await restoreAccess(saved);
@@ -477,7 +537,7 @@ async function runSmoke() {
   return {
     fixture: { patientId: FIXTURE_PATIENT_ID, uid: FIXTURE_UID, missingId: MISSING_ID },
     guardianFixture: {
-      enabled: guardianReadsEnabled(),
+      enabled: guardianReadsEnabled(fx),
       flag: process.env.GUARDIAN_READS_ENABLED === 'true',
       // Empty = DENY ALL (fail closed). '*' = deliberate global widen.
       allowlistSize: guardianAllowlist().length,
@@ -485,11 +545,14 @@ async function runSmoke() {
       global: guardianAllowlistIsGlobal(guardianAllowlist()),
       failClosed: guardianAllowlist().length === 0,
 
-      guardianUid: GUARDIAN_UID || null,
-      guardianElationId: GUARDIAN_ELATION_ID || null,
+      guardianUid: fx.guardianUid || null,
+      guardianElationId: fx.guardianElationId || null,
 
-      childPatientId: CHILD_PATIENT_ID || null,
-      otherChildPatientId: OTHER_CHILD_ID || null,
+      childPatientId: fx.childPatientId || null,
+      otherChildPatientId: fx.otherChildId || null,
+
+      // Where each fixture came from this run: 'body' | 'env' | 'unset'.
+      fixtureSources: sources,
     },
     base: BASE,
     ranAt: new Date().toISOString(),
@@ -524,8 +587,16 @@ exports.adminRunReadPathSmoke = functions
       });
     }
 
+    // Guardian fixtures may arrive in the body (minor ids are deliberately kept
+    // out of the durable prod env); each falls back to its SMOKE_* env var.
+    const { fx, sources, errors } = resolveFixtures(req.body);
+    if (errors.length) {
+      return res.status(400).json({ ok: false, error: 'invalid_fixture_override', details: errors });
+    }
+    functions.logger.info('adminRunReadPathSmoke fixture sources', { sources });
+
     try {
-      const report = await runSmoke();
+      const report = await runSmoke({ fx, sources });
       return res.status(200).json({ ok: true, ...report });
     } catch (err) {
       functions.logger.error('adminRunReadPathSmoke failed', err);
