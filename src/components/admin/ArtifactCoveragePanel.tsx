@@ -1,10 +1,12 @@
 import { forwardRef, useState } from "react";
 import { motion } from "framer-motion";
-import { ShieldCheck, RefreshCw, Download, AlertTriangle, FileWarning, PlayCircle, Stethoscope, Check, X, MinusCircle, Eye, EyeOff } from "lucide-react";
+import { ShieldCheck, RefreshCw, Download, AlertTriangle, FileWarning, PlayCircle, Stethoscope, Check, X, MinusCircle, Eye, EyeOff, FileText, Copy } from "lucide-react";
 import { useArtifactCoverage, missesToCsv } from "@/hooks/useArtifactCoverage";
 import CoverageGate from "@/components/admin/CoverageGate";
 import { useRunArtifactAudit, useRunReadPathSmoke, type SmokeReport } from "@/hooks/usePortalAdmin";
+import { buildCoverageHandoff } from "@/lib/portal/coverageHandoff";
 import { useToast } from "@/hooks/use-toast";
+
 
 /**
  * Release 2a — Artifact Coverage.
@@ -29,6 +31,9 @@ export default function ArtifactCoveragePanel() {
   // Patient-level rows are PHI. Counts and pass/fail are the default view;
   // the row detail takes a second, deliberate step under the same audited read.
   const [revealMisses, setRevealMisses] = useState(false);
+  const [handoffPhi, setHandoffPhi] = useState(false);
+  const [handoffBusy, setHandoffBusy] = useState(false);
+
 
   const pct = report?.coveragePct;
   const healthy = pct !== null && pct !== undefined && pct >= 100;
@@ -96,6 +101,61 @@ export default function ArtifactCoveragePanel() {
     }
   };
 
+  /**
+   * The hand-off report: audit numbers + gate verdict + the smoke run from this
+   * session, as Markdown an operator can paste to their agent. Counts only
+   * unless "include patient detail" is on — that adds PHI rows, so it goes
+   * through the same audited re-read as the CSV export.
+   */
+  const buildHandoff = async () => {
+    if (!report) return null;
+    if (handoffPhi) {
+      const fresh = await refetch();
+      void fresh;
+    }
+    return buildCoverageHandoff({ report, smoke, includePhi: handoffPhi });
+  };
+
+  const copyHandoff = async () => {
+    setHandoffBusy(true);
+    try {
+      const md = await buildHandoff();
+      if (!md) return;
+      await navigator.clipboard.writeText(md);
+      toast({
+        title: "Hand-off report copied",
+        description: handoffPhi ? "Includes patient detail — this read is audited." : "Counts and results only, no patient detail.",
+      });
+    } catch (e) {
+      toast({
+        variant: "destructive",
+        title: "Could not copy the report",
+        description: e instanceof Error ? e.message : String(e),
+      });
+    } finally {
+      setHandoffBusy(false);
+    }
+  };
+
+  const downloadHandoff = async () => {
+    setHandoffBusy(true);
+    try {
+      const md = await buildHandoff();
+      if (!md) return;
+      const blob = new Blob([md], { type: "text/markdown;charset=utf-8" });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `artifact-coverage-handoff-${report?.runId ?? "latest"}.md`;
+      a.click();
+      URL.revokeObjectURL(url);
+      toast({ title: "Hand-off report downloaded", description: `Run ${report?.runId ?? "latest"}.` });
+    } finally {
+      setHandoffBusy(false);
+    }
+  };
+
+
   return (
     <motion.div
       initial={{ opacity: 0, y: 12 }}
@@ -143,12 +203,47 @@ export default function ArtifactCoveragePanel() {
           <button
             onClick={exportCsv}
             disabled={exporting || !report?.misses.length}
-            className="inline-flex items-center gap-1.5 rounded-lg bg-primary px-3 py-2 text-xs font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-50"
+            className="inline-flex items-center gap-1.5 rounded-lg border border-border px-3 py-2 text-xs font-medium text-foreground hover:bg-muted disabled:opacity-50"
           >
             <Download className="h-3 w-3" /> Export misses (audited)
           </button>
+
+          <button
+            onClick={downloadHandoff}
+            disabled={handoffBusy || !report}
+            className="inline-flex items-center gap-1.5 rounded-lg bg-primary px-3 py-2 text-xs font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-50"
+          >
+            <FileText className="h-3 w-3" /> {handoffBusy ? "Building…" : "Hand-off report"}
+          </button>
+          <button
+            onClick={copyHandoff}
+            disabled={handoffBusy || !report}
+            title="Copy the hand-off report as Markdown"
+            className="inline-flex items-center gap-1.5 rounded-lg border border-border px-3 py-2 text-xs font-medium text-muted-foreground hover:bg-muted disabled:opacity-50"
+          >
+            <Copy className="h-3 w-3" /> Copy
+          </button>
         </div>
+
       </div>
+
+      <div className="mt-3 flex flex-wrap items-center justify-between gap-2 rounded-lg bg-muted/50 px-3 py-2">
+        <p className="text-xs text-muted-foreground">
+          The hand-off report bundles this run's numbers, the go/no-go gate and the read-path
+          smoke from this session into one Markdown file you can give your agent.
+          {smoke ? "" : " Run the smoke first so it is included."}
+        </p>
+        <label className="flex items-center gap-2 text-xs text-muted-foreground">
+          <input
+            type="checkbox"
+            checked={handoffPhi}
+            onChange={(e) => setHandoffPhi(e.target.checked)}
+            className="h-3.5 w-3.5 accent-[hsl(var(--primary))]"
+          />
+          Include patient detail (PHI, audited)
+        </label>
+      </div>
+
 
       {smoke && (
         <div className="mt-4 overflow-hidden rounded-xl border border-border">
