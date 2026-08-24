@@ -60,6 +60,8 @@ export type CoverageReport = {
   parkedCount: number;
   /** Referenced docs that cannot be keyed yet — excluded from the percentage. */
   unpathedCount: number;
+  /** Read-path smoke fixtures, excluded from every other count. */
+  fixtureExcludedCount: number;
   /** Storage probes that FAILED (e.g. 403). "Couldn't check" is not "absent". */
   erroredCount: number;
   errorStatusCounts: Record<string, number>;
