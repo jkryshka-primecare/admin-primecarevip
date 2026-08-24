@@ -258,7 +258,15 @@ export default function GuardianLinkLoader() {
             Run again to continue from offset {report.nextOffset ?? 0}.
           </span>
         )}
+
+        {!csvReady && (
+          <span className="text-[11px] text-muted-foreground">
+            Paste the guardian-links CSV (header + rows) to enable the buttons — the single-child box
+            only narrows an already-pasted CSV.
+          </span>
+        )}
       </div>
+
 
       {!isSuperAdmin && (
         <p className="mt-2 rounded-md bg-muted/60 p-2 text-[11px] text-muted-foreground">
