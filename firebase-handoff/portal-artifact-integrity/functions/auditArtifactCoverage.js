@@ -152,6 +152,7 @@ async function runAudit() {
   const missing = [];
   const unpathed = [];
   const errored = [];
+  const fixtures = [];
   const errorStatusCounts = {};
   // Release 2b Part B: adult and minor are reported SEPARATELY. A single
   // rounded "100%" must never be able to hide a cohort the minor-ingest track
