@@ -170,6 +170,7 @@ function toReport(doc: FirestoreDoc): CoverageReport {
     missingCount: doc.missingCount !== undefined ? num(doc.missingCount) : misses.length,
     parkedCount: misses.filter((m) => m.parked).length,
     unpathedCount: num(doc.unpathedCount),
+    fixtureExcludedCount: num(doc.fixtureExcludedCount),
     erroredCount: num(doc.erroredCount),
     errorStatusCounts: (doc.errorStatusCounts ?? {}) as Record<string, number>,
     systemicStorageFailure: doc.systemicStorageFailure === true,
