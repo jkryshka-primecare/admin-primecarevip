@@ -56,9 +56,25 @@ const GUARDIAN_ELATION_ID = String(process.env.SMOKE_GUARDIAN_ELATION_ID || '');
 const CHILD_PATIENT_ID = String(process.env.SMOKE_CHILD_PATIENT_ID || '');
 const OTHER_CHILD_ID = String(process.env.SMOKE_OTHER_CHILD_ID || '');
 
-function guardianReadsEnabled() {
-  return process.env.GUARDIAN_READS_ENABLED === 'true';
+function guardianAllowlist() {
+  return (process.env.GUARDIAN_READS_ALLOWLIST || '')
+    .split(',').map((s) => s.trim().toLowerCase()).filter(Boolean);
 }
+
+/**
+ * Mirrors `readArtifact.guardianReadsEnabledFor`. During a canary the flag is
+ * true but scoped, so the arm must ask "is it on FOR THIS FIXTURE" — otherwise
+ * a canary run would assert against a guardian the read path still denies and
+ * report a false FAIL.
+ */
+function guardianReadsEnabled() {
+  if (process.env.GUARDIAN_READS_ENABLED !== 'true') return false;
+  const allow = guardianAllowlist();
+  if (allow.length === 0) return true;
+  return allow.includes(GUARDIAN_UID.toLowerCase())
+    || (GUARDIAN_ELATION_ID ? allow.includes(GUARDIAN_ELATION_ID.toLowerCase()) : false);
+}
+
 
 const FN_BY_MODULE = { labs: 'getLabs', imaging: 'getImaging', records: 'getMedicalRecords' };
 
