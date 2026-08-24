@@ -319,11 +319,16 @@ async function runAudit() {
   const report = {
     generatedAt: new Date().toISOString(),
     scope: 'referenced',
-    // Gate validity flag. With ARTIFACT_LEGACY_UID_FALLBACK ON, a legacy-path
-    // object counts as present, so a routine nightly run can read 100% while
-    // the uid-keyed path is still empty. Only a run with the fallback DISABLED
-    // is a valid go/no-go input for GUARDIAN_READS_ENABLED.
-    legacyFallbackDisabled: !legacyFallbackEnabled(),
+    // The audit is unconditionally strict: it evaluates ONLY the internalUid
+    // path and never lets a legacy object count as present. This is a constant
+    // so downstream gates keep a stable contract; it is no longer env-derived,
+    // so no per-function env juggling can invalidate a gate run.
+    legacyFallbackDisabled: true,
+    strictMode: true,
+    // Diagnostic: misses whose object DOES exist under the old uid key. These
+    // need a re-key/copy, not a refetch from Elation. Not counted as present.
+    legacyOnlyCount,
+
     elapsedMs: Date.now() - started,
     walked: seen,
     // A partial walk can never be read as complete coverage.
