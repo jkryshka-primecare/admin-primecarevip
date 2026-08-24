@@ -242,7 +242,10 @@ async function runGuardianArm({ record, skip }) {
   };
 
   if (!guardianReadsEnabled()) {
-    const why = 'skipped — GUARDIAN_READS_ENABLED is not true on this runtime; guardian reads are denied unconditionally, so neither case is meaningful';
+    const why = process.env.GUARDIAN_READS_ENABLED === 'true'
+      ? 'skipped — GUARDIAN_READS_ENABLED is true but GUARDIAN_READS_ALLOWLIST does not include this guardian fixture, so the read path still denies it'
+      : 'skipped — GUARDIAN_READS_ENABLED is not true on this runtime; guardian reads are denied unconditionally, so neither case is meaningful';
+
     skip(label.pos, why);
     skip(label.neg, why);
     return;
