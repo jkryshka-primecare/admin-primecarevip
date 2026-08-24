@@ -332,7 +332,14 @@ function Runner({ def, canApply }: { def: RunnerDef; canApply: boolean }) {
             Run again to continue from the cursor.
           </span>
         )}
+
+        {def.needsIds && progress && (
+          <span className="font-mono text-[11px] text-muted-foreground">
+            {progress.done}/{progress.total} ids processed
+          </span>
+        )}
       </div>
+
 
 
       {run.error && (
