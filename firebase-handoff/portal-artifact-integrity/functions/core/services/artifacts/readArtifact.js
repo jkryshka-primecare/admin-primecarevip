@@ -57,27 +57,36 @@ const { enqueueRepair, PREPARING } = require('./repairQueue');
  * complete and the red-team is green. OFF means a guardian read is treated
  * exactly like a stranger read — absence, never "forbidden".
  *
- * CANARY SCOPING. `GUARDIAN_READS_ENABLED` alone is a global flip. When
- * `GUARDIAN_READS_ALLOWLIST` is non-empty the flag is additionally scoped to
- * that set, so exactly one canary guardian can be enabled in production while
- * every other guardian keeps hitting the OFF path. Entries may be Firebase
- * uids (lower-cased) or the guardian's OWN elation record id — matching either
- * is enough, so the operator does not have to know which id space to use.
- * Empty/unset allowlist = the flag's original global behaviour, so widening to
- * all guardians is a one-line clear of the variable, not a code change.
+ * CANARY SCOPING — FAIL CLOSED. `GUARDIAN_READS_ENABLED=true` is necessary but
+ * NEVER sufficient: the caller must also match `GUARDIAN_READS_ALLOWLIST`.
+ *
+ *   - empty / unset allowlist  -> DENY ALL (a dropped or clobbered variable can
+ *     never silently widen a canary into a global flip)
+ *   - `*` (or `ALL`)           -> deliberate global widen, one explicit token
+ *   - comma list               -> exactly those guardians
+ *
+ * Entries may be Firebase uids (lower-cased) or the guardian's OWN elation
+ * record id — matching either is enough, so the operator does not have to know
+ * which id space to use.
  */
 function guardianAllowlist() {
   return (process.env.GUARDIAN_READS_ALLOWLIST || '')
     .split(',').map((s) => s.trim().toLowerCase()).filter(Boolean);
 }
 
+function guardianAllowlistIsGlobal(allow) {
+  return allow.includes('*') || allow.includes('all');
+}
+
 function guardianReadsEnabledFor(uid, callerElationId) {
   if (process.env.GUARDIAN_READS_ENABLED !== 'true') return false;
   const allow = guardianAllowlist();
-  if (allow.length === 0) return true; // unscoped: flag governs alone
+  if (allow.length === 0) return false; // fail closed: no scope = no guardian reads
+  if (guardianAllowlistIsGlobal(allow)) return true;
   return allow.includes(String(uid || '').toLowerCase())
     || (callerElationId ? allow.includes(String(callerElationId).toLowerCase()) : false);
 }
+
 
 
 /**

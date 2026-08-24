@@ -61,19 +61,24 @@ function guardianAllowlist() {
     .split(',').map((s) => s.trim().toLowerCase()).filter(Boolean);
 }
 
+function guardianAllowlistIsGlobal(allow) {
+  return allow.includes('*') || allow.includes('all');
+}
+
 /**
- * Mirrors `readArtifact.guardianReadsEnabledFor`. During a canary the flag is
- * true but scoped, so the arm must ask "is it on FOR THIS FIXTURE" — otherwise
- * a canary run would assert against a guardian the read path still denies and
- * report a false FAIL.
+ * Mirrors `readArtifact.guardianReadsEnabledFor`, including its FAIL-CLOSED
+ * semantics: an empty/missing allowlist denies every guardian even with the
+ * flag on, and `*` is the one explicit token that widens globally.
  */
 function guardianReadsEnabled() {
   if (process.env.GUARDIAN_READS_ENABLED !== 'true') return false;
   const allow = guardianAllowlist();
-  if (allow.length === 0) return true;
+  if (allow.length === 0) return false;
+  if (guardianAllowlistIsGlobal(allow)) return true;
   return allow.includes(GUARDIAN_UID.toLowerCase())
     || (GUARDIAN_ELATION_ID ? allow.includes(GUARDIAN_ELATION_ID.toLowerCase()) : false);
 }
+
 
 
 const FN_BY_MODULE = { labs: 'getLabs', imaging: 'getImaging', records: 'getMedicalRecords' };
