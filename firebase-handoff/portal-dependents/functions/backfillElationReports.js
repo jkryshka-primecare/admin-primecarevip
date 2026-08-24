@@ -46,6 +46,32 @@ const {
 const { ensureInternalUid, objectPathFor } = require('./core/services/patient/internalUid');
 const { ingestEligibility, isMinorRecord } = require('./core/services/patient/ingestEligibility');
 
+// --- error observability (Part B) ---------------------------------------
+// The per-patient counters told us THAT a patient failed but never WHY, so a
+// live failure meant a Cloud Logging dig. Capture a short, PHI-safe brief of
+// each caught error onto the per-patient summary. Message is truncated and the
+// Elation response body is NEVER echoed (only status + reason code).
+function errBrief(stage, err) {
+  const e = err || {};
+  const message = String(e.message || e).slice(0, 300);
+  return {
+    stage,
+    message,
+    reason: e.reason ? String(e.reason) : null,
+    status: Number.isFinite(e.status) ? e.status : (Number.isFinite(e.statusCode) ? e.statusCode : null),
+    code: e.code ? String(e.code) : null,
+  };
+}
+
+function noteError(pc, stage, err, extra) {
+  const brief = errBrief(stage, err);
+  if (extra) Object.assign(brief, extra);
+  if (!Array.isArray(pc.errorDetails)) pc.errorDetails = [];
+  if (pc.errorDetails.length < 5) pc.errorDetails.push(brief);
+  pc.lastError = brief;
+  return brief;
+}
+
 const REPORTS_PAGE_CAP = 200; // safety cap; loud failure > silent partial pull.
 
 // Pull ALL reports for one patient, following cursors to exhaustion. Mirrors the
@@ -80,6 +106,7 @@ async function backfillPatient(db, FieldValue, bucket, elationPatientId, counter
     skippedNotAllowlisted: false, skippedNonActive: false, noPatientDoc: false,
     skippedRecordsDeferred: 0,
     artifactsStored: 0, artifactErrors: 0, artifactSkippedUnclaimed: 0,
+    errorDetails: [], lastError: null,
   };
 
   // D-068 HARD containment gate.
@@ -101,6 +128,7 @@ async function backfillPatient(db, FieldValue, bucket, elationPatientId, counter
   } catch (err) {
     counters.patientsErrored += 1;
     pc.errors += 1;
+    noteError(pc, 'patient-doc-lookup', err);
     logError('backfillElationReports', 'patient-doc-lookup-failed', err, { elationPatientId: pid });
     return pc;
   }
@@ -131,6 +159,7 @@ async function backfillPatient(db, FieldValue, bucket, elationPatientId, counter
   } catch (err) {
     counters.patientsErrored += 1;
     pc.errors += 1;
+    noteError(pc, 'list-reports', err);
     logError('backfillElationReports', 'list-failed', err, { elationPatientId: pid });
     return pc;
   }
@@ -163,6 +192,7 @@ async function backfillPatient(db, FieldValue, bucket, elationPatientId, counter
         continue;
       }
       pc.errors += 1; counters.errors += 1;
+      noteError(pc, 'refetch-report', err, { reportId });
       logError('backfillElationReports', 'refetch-failed', err, { elationPatientId: pid, reportId });
       continue; // re-runnable; straggler picked up next run
     }
@@ -211,6 +241,7 @@ async function backfillPatient(db, FieldValue, bucket, elationPatientId, counter
       });
     } catch (err) {
       pc.errors += 1; counters.errors += 1;
+      noteError(pc, 'audit-write', err, { reportId });
       logError('backfillElationReports', 'audit-write-failed', err, { elationPatientId: pid, reportId });
       continue; // no store without audit
     }
@@ -299,6 +330,7 @@ async function backfillPatient(db, FieldValue, bucket, elationPatientId, counter
       }
     } catch (err) {
       pc.errors += 1; counters.errors += 1;
+      noteError(pc, 'store-report', err, { reportId });
       logError('backfillElationReports', 'store-failed', err, { elationPatientId: pid, reportId });
       continue;
     }
