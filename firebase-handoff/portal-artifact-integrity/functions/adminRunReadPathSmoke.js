@@ -383,7 +383,10 @@ async function runGuardianArm({ record, skip, fx }) {
 
 
 
-async function runSmoke() {
+async function runSmoke(options) {
+  const opts = options || {};
+  const fx = opts.fx || resolveFixtures(null).fx;
+  const sources = opts.sources || {};
   const results = [];
   const record = (name, pass, detail) => {
     results.push({ name, pass, detail: detail || '' });
