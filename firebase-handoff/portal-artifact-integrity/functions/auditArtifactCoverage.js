@@ -230,15 +230,23 @@ async function runAudit() {
           documentId: doc.id,
           cohort,
           chartBacked,
-          reason: 'no artifactPath and patient has no internalUid (or legacy uid)',
+          reason: 'no internalUid and no explicit artifactPath',
         });
         continue;
       }
-      pathed.push({ patientId, documentId: doc.id, path, cohort, chartBacked });
+      pathed.push({
+        patientId,
+        documentId: doc.id,
+        path,
+        legacyPath: legacyPathOf(doc, keys),
+        cohort,
+        chartBacked,
+      });
     }
 
 
     const probes = await chunkedExists(pathed.map((p) => p.path));
+    const absent = [];
     pathed.forEach((p, i) => {
       const probe = probes[i] || { state: 'error', status: null, message: 'no probe result' };
       if (probe.state === 'present') {
@@ -254,16 +262,28 @@ async function runAudit() {
         errored.push({ ...p, status: probe.status, message: probe.message });
         return;
       }
+      absent.push(p);
+    });
+
+    // Diagnostic second pass: does the object exist under the OLD key? Never
+    // counted as present — it only tells the operator whether the miss is
+    // "never ingested" or "ingested, still legacy-keyed" (a re-key, not a refetch).
+    const legacyProbes = await chunkedExists(absent.map((p) => p.legacyPath || '__none__'));
+    absent.forEach((p, i) => {
+      const legacyPresent = Boolean(p.legacyPath) && legacyProbes[i] && legacyProbes[i].state === 'present';
+      if (legacyPresent) legacyOnlyCount += 1;
       const known = prior.get(`${p.patientId}:${p.documentId}`) || {};
       bump(p.cohort, 'missing', p.chartBacked);
       missing.push({
         ...p,
+        legacyPresent,
         firstSeenAt: known.firstSeenAt || new Date().toISOString(),
         failures: known.failures || 0,
         parked: known.parked === true,
       });
     });
   });
+
 
   const missingCount = missing.length;
   const erroredCount = errored.length;
