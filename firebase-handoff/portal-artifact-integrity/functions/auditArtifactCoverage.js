@@ -43,6 +43,23 @@ const EXISTS_CONCURRENCY = 50;
 /** Never walk more than this in one run; the run ends with work remaining. */
 const MAX_DOCS = 50000;
 
+/**
+ * The live read-path smoke (`adminRunReadPathSmoke`) depends on a reference
+ * that deliberately has NO object behind it — `SMOKE-LAB-2` — to prove case 2
+ * ("missing object answers a calm `preparing` state"). It must therefore keep
+ * existing with `hasArtifact: true`, and it can never be "repaired".
+ *
+ * Left in the denominator it is a permanent miss: it burns its repair budget,
+ * parks, and then alerts forever, putting a floor under coverage and making the
+ * alerting count meaningless. Fixture references are excluded from the
+ * percentage, never queued, and reported on their own line instead.
+ */
+const FIXTURE_DOC_ID_PREFIX = 'SMOKE-';
+
+function isFixtureReference(documentId) {
+  return String(documentId || '').startsWith(FIXTURE_DOC_ID_PREFIX);
+}
+
 function bucket() {
   // Never bare: the default bucket is not where artifacts live (see config).
   return admin.storage().bucket(artifactBucketName());
