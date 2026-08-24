@@ -184,7 +184,21 @@ async function runAudit() {
   const prior = new Map(priorSnap.docs.map((d) => [d.id, d.data()]));
   const uidFor = makeUidResolver(db);
 
-  const { seen, truncated } = await walk(db, async (docs) => {
+  const { seen, truncated } = await walk(db, async (allDocs) => {
+    // Smoke fixtures are removed BEFORE anything is counted: they are neither
+    // referenced clinical data nor a storage miss.
+    const docs = [];
+    for (const doc of allDocs) {
+      if (isFixtureReference(doc.id)) {
+        fixtures.push({
+          patientId: doc.ref.parent.parent ? doc.ref.parent.parent.id : null,
+          documentId: doc.id,
+          reason: 'read-path smoke fixture — intentionally has no object',
+        });
+        continue;
+      }
+      docs.push(doc);
+    }
     totalReferenced += docs.length;
 
     const pathed = [];
