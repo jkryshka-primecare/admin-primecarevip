@@ -61,19 +61,24 @@ function guardianAllowlist() {
     .split(',').map((s) => s.trim().toLowerCase()).filter(Boolean);
 }
 
+function guardianAllowlistIsGlobal(allow) {
+  return allow.includes('*') || allow.includes('all');
+}
+
 /**
- * Mirrors `readArtifact.guardianReadsEnabledFor`. During a canary the flag is
- * true but scoped, so the arm must ask "is it on FOR THIS FIXTURE" — otherwise
- * a canary run would assert against a guardian the read path still denies and
- * report a false FAIL.
+ * Mirrors `readArtifact.guardianReadsEnabledFor`, including its FAIL-CLOSED
+ * semantics: an empty/missing allowlist denies every guardian even with the
+ * flag on, and `*` is the one explicit token that widens globally.
  */
 function guardianReadsEnabled() {
   if (process.env.GUARDIAN_READS_ENABLED !== 'true') return false;
   const allow = guardianAllowlist();
-  if (allow.length === 0) return true;
+  if (allow.length === 0) return false;
+  if (guardianAllowlistIsGlobal(allow)) return true;
   return allow.includes(GUARDIAN_UID.toLowerCase())
     || (GUARDIAN_ELATION_ID ? allow.includes(GUARDIAN_ELATION_ID.toLowerCase()) : false);
 }
+
 
 
 const FN_BY_MODULE = { labs: 'getLabs', imaging: 'getImaging', records: 'getMedicalRecords' };
@@ -243,8 +248,9 @@ async function runGuardianArm({ record, skip }) {
 
   if (!guardianReadsEnabled()) {
     const why = process.env.GUARDIAN_READS_ENABLED === 'true'
-      ? 'skipped — GUARDIAN_READS_ENABLED is true but GUARDIAN_READS_ALLOWLIST does not include this guardian fixture, so the read path still denies it'
+      ? 'skipped — GUARDIAN_READS_ENABLED is true but GUARDIAN_READS_ALLOWLIST is empty or does not include this guardian fixture; the read path fails closed and still denies it'
       : 'skipped — GUARDIAN_READS_ENABLED is not true on this runtime; guardian reads are denied unconditionally, so neither case is meaningful';
+
 
     skip(label.pos, why);
     skip(label.neg, why);
@@ -473,12 +479,15 @@ async function runSmoke() {
     guardianFixture: {
       enabled: guardianReadsEnabled(),
       flag: process.env.GUARDIAN_READS_ENABLED === 'true',
-      // Non-empty = CANARY scope: a green run certifies only these guardians.
+      // Empty = DENY ALL (fail closed). '*' = deliberate global widen.
       allowlistSize: guardianAllowlist().length,
-      scoped: guardianAllowlist().length > 0,
+      scoped: guardianAllowlist().length > 0 && !guardianAllowlistIsGlobal(guardianAllowlist()),
+      global: guardianAllowlistIsGlobal(guardianAllowlist()),
+      failClosed: guardianAllowlist().length === 0,
 
       guardianUid: GUARDIAN_UID || null,
       guardianElationId: GUARDIAN_ELATION_ID || null,
+
       childPatientId: CHILD_PATIENT_ID || null,
       otherChildPatientId: OTHER_CHILD_ID || null,
     },
