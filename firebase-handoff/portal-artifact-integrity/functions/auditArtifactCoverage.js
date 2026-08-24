@@ -33,7 +33,6 @@ const {
   makeInternalUidResolver,
   objectPathFor: internalPathFor,
   legacyObjectPathFor: legacyPathFor,
-  legacyFallbackEnabled,
 } = require('./core/services/patient/internalUid');
 
 const REGION = 'us-central1';
@@ -70,25 +69,36 @@ function bucket() {
  * never on a Firebase Auth uid. Minors have no auth uid at all, so the old
  * uid-keyed scheme could not express a dependent's artifact.
  *
- * During the dual-read window a record with no `internalUid` yet falls back to
- * the legacy `firebaseUid`; a record with neither stays `unpathed` — reported
+ * The audit is ALWAYS STRICT and deliberately ignores
+ * `ARTIFACT_LEGACY_UID_FALLBACK`. Its whole job is to prove the internalUid
+ * path, so an env flip could only ever make the number less true; honouring it
+ * meant a routine nightly run could read 100% off legacy objects. A record with
+ * no `internalUid` and no explicit `artifactPath` is `unpathed` — reported
  * separately, never queued, so the sweep can never "heal" junk at
- * `elation-artifacts/null/...`. Coverage must reach 100% with the fallback
- * DISABLED (`ARTIFACT_LEGACY_UID_FALLBACK=false`) before the legacy branch is
- * deleted from the read path.
+ * `elation-artifacts/null/...`.
  */
 function expectedPath(doc, keys) {
-  if (doc.artifactPath) return doc.artifactPath;
   const k = keys || {};
   if (k.internalUid) return internalPathFor(k.internalUid, doc.id);
-  if (legacyFallbackEnabled() && k.legacyUid) return legacyPathFor(k.legacyUid, doc.id);
+  if (doc.artifactPath) return doc.artifactPath;
   return null;
+}
+
+/**
+ * Diagnostic only. When a strict path is absent we probe the legacy uid path so
+ * the report can say "this one exists, but only under the old key" — the exact
+ * set the re-key backfill must move. It never counts as present.
+ */
+function legacyPathOf(doc, keys) {
+  const k = keys || {};
+  return k.legacyUid ? legacyPathFor(k.legacyUid, doc.id) : null;
 }
 
 /** patientId -> { internalUid, legacyUid }. One patient doc read per patient. */
 function makeUidResolver(db) {
   return makeInternalUidResolver(db);
 }
+
 
 
 async function walk(db, onPage) {
@@ -153,6 +163,8 @@ async function runAudit() {
   const unpathed = [];
   const errored = [];
   const fixtures = [];
+  // Misses that exist under the legacy uid key (re-key work, not refetch work).
+  let legacyOnlyCount = 0;
   const errorStatusCounts = {};
   // Release 2b Part B: adult and minor are reported SEPARATELY. A single
   // rounded "100%" must never be able to hide a cohort the minor-ingest track
@@ -219,15 +231,23 @@ async function runAudit() {
           documentId: doc.id,
           cohort,
           chartBacked,
-          reason: 'no artifactPath and patient has no internalUid (or legacy uid)',
+          reason: 'no internalUid and no explicit artifactPath',
         });
         continue;
       }
-      pathed.push({ patientId, documentId: doc.id, path, cohort, chartBacked });
+      pathed.push({
+        patientId,
+        documentId: doc.id,
+        path,
+        legacyPath: legacyPathOf(doc, keys),
+        cohort,
+        chartBacked,
+      });
     }
 
 
     const probes = await chunkedExists(pathed.map((p) => p.path));
+    const absent = [];
     pathed.forEach((p, i) => {
       const probe = probes[i] || { state: 'error', status: null, message: 'no probe result' };
       if (probe.state === 'present') {
@@ -243,16 +263,28 @@ async function runAudit() {
         errored.push({ ...p, status: probe.status, message: probe.message });
         return;
       }
+      absent.push(p);
+    });
+
+    // Diagnostic second pass: does the object exist under the OLD key? Never
+    // counted as present — it only tells the operator whether the miss is
+    // "never ingested" or "ingested, still legacy-keyed" (a re-key, not a refetch).
+    const legacyProbes = await chunkedExists(absent.map((p) => p.legacyPath || '__none__'));
+    absent.forEach((p, i) => {
+      const legacyPresent = Boolean(p.legacyPath) && legacyProbes[i] && legacyProbes[i].state === 'present';
+      if (legacyPresent) legacyOnlyCount += 1;
       const known = prior.get(`${p.patientId}:${p.documentId}`) || {};
       bump(p.cohort, 'missing', p.chartBacked);
       missing.push({
         ...p,
+        legacyPresent,
         firstSeenAt: known.firstSeenAt || new Date().toISOString(),
         failures: known.failures || 0,
         parked: known.parked === true,
       });
     });
   });
+
 
   const missingCount = missing.length;
   const erroredCount = errored.length;
@@ -288,11 +320,16 @@ async function runAudit() {
   const report = {
     generatedAt: new Date().toISOString(),
     scope: 'referenced',
-    // Gate validity flag. With ARTIFACT_LEGACY_UID_FALLBACK ON, a legacy-path
-    // object counts as present, so a routine nightly run can read 100% while
-    // the uid-keyed path is still empty. Only a run with the fallback DISABLED
-    // is a valid go/no-go input for GUARDIAN_READS_ENABLED.
-    legacyFallbackDisabled: !legacyFallbackEnabled(),
+    // The audit is unconditionally strict: it evaluates ONLY the internalUid
+    // path and never lets a legacy object count as present. This is a constant
+    // so downstream gates keep a stable contract; it is no longer env-derived,
+    // so no per-function env juggling can invalidate a gate run.
+    legacyFallbackDisabled: true,
+    strictMode: true,
+    // Diagnostic: misses whose object DOES exist under the old uid key. These
+    // need a re-key/copy, not a refetch from Elation. Not counted as present.
+    legacyOnlyCount,
+
     elapsedMs: Date.now() - started,
     walked: seen,
     // A partial walk can never be read as complete coverage.
@@ -355,6 +392,8 @@ async function runAudit() {
         patientId: m.patientId,
         documentId: m.documentId,
         path: m.path,
+        legacyPath: m.legacyPath || null,
+        legacyPresent: m.legacyPresent === true,
         firstSeenAt: m.firstSeenAt,
         failures: m.failures,
         parked: m.parked,
