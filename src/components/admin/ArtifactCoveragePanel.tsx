@@ -31,6 +31,9 @@ export default function ArtifactCoveragePanel() {
   // Patient-level rows are PHI. Counts and pass/fail are the default view;
   // the row detail takes a second, deliberate step under the same audited read.
   const [revealMisses, setRevealMisses] = useState(false);
+  const [handoffPhi, setHandoffPhi] = useState(false);
+  const [handoffBusy, setHandoffBusy] = useState(false);
+
 
   const pct = report?.coveragePct;
   const healthy = pct !== null && pct !== undefined && pct >= 100;
