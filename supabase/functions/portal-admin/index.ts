@@ -95,6 +95,14 @@ const BATCH_ACTIONS: Action[] = [
 /** Upper bound on one minor-track ingest call. The 2b cohort is ~175. */
 const MAX_MINOR_IDS = 500;
 
+/**
+ * An apply actually calls Elation per report and can take ~5s per patient, so a
+ * large batch blows the 150s edge idle timeout (504 IDLE_TIMEOUT) and the whole
+ * page's work is lost. Applies are therefore capped hard; the console walks the
+ * cohort in chunks of this size.
+ */
+const MAX_MINOR_IDS_APPLY = 8;
+
 
 /**
  * Elation chart ids for the minor-track ingest. Shape-validated here and
@@ -102,14 +110,16 @@ const MAX_MINOR_IDS = 500;
  * `backfillElationReports` HTTP wrapper — that wrapper is the authority; this
  * list is a convenience and a fast failure.
  */
-function parseMinorIds(raw: unknown): string[] | string {
+function parseMinorIds(raw: unknown, apply = false): string[] | string {
   if (!Array.isArray(raw) || raw.length === 0) {
     return "Provide at least one minor Elation patient id.";
   }
-  if (raw.length > MAX_MINOR_IDS) {
-    return `Ingest at most ${MAX_MINOR_IDS} patients at a time (received ${raw.length}).`;
+  const cap = apply ? MAX_MINOR_IDS_APPLY : MAX_MINOR_IDS;
+  if (raw.length > cap) {
+    return `Ingest at most ${cap} patients at a time (received ${raw.length}).`;
   }
   const out: string[] = [];
+
   const seen = new Set<string>();
   for (const item of raw) {
     const id = String(item ?? "").trim();
@@ -838,7 +848,7 @@ Deno.serve(async (req) => {
       }
     }
     if (action === "backfillMinorReports") {
-      const parsed = parseMinorIds(body.patientIds);
+      const parsed = parseMinorIds(body.patientIds, bulkApply);
       if (typeof parsed === "string") return deny(400, parsed);
       minorIds = parsed;
     }
