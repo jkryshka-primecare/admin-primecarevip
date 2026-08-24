@@ -29,6 +29,14 @@
  *   SMOKE_PATIENT_ID    default 816455979040769  (Test Kieffer fixture)
  *   SMOKE_FIREBASE_UID  default d8h7h6xc6axkq3k3tgnoz6ytxmx1
  *   SMOKE_MISSING_ID    default SMOKE-LAB-2 (known reference with no object)
+ *
+ * GUARDIAN ARM (Release 2b Part B) — only runs when GUARDIAN_READS_ENABLED is
+ * 'true' on THIS runtime AND the fixtures below are configured. Otherwise every
+ * guardian assertion is SKIPPED with the reason, never silently passed.
+ *   SMOKE_GUARDIAN_UID          Firebase uid of the guardian fixture account
+ *   SMOKE_GUARDIAN_ELATION_ID   the guardian's OWN patients/{id} doc id
+ *   SMOKE_CHILD_PATIENT_ID      minor LINKED to that guardian (positive case)
+ *   SMOKE_OTHER_CHILD_ID        minor NOT linked to that guardian (isolation)
  */
 
 const functions = require('firebase-functions');
@@ -43,7 +51,17 @@ const FIXTURE_PATIENT_ID = String(process.env.SMOKE_PATIENT_ID || '8164559790407
 const FIXTURE_UID = String(process.env.SMOKE_FIREBASE_UID || 'd8h7h6xc6axkq3k3tgnoz6ytxmx1');
 const MISSING_ID = process.env.SMOKE_MISSING_ID || 'SMOKE-LAB-2';
 
+const GUARDIAN_UID = String(process.env.SMOKE_GUARDIAN_UID || '');
+const GUARDIAN_ELATION_ID = String(process.env.SMOKE_GUARDIAN_ELATION_ID || '');
+const CHILD_PATIENT_ID = String(process.env.SMOKE_CHILD_PATIENT_ID || '');
+const OTHER_CHILD_ID = String(process.env.SMOKE_OTHER_CHILD_ID || '');
+
+function guardianReadsEnabled() {
+  return process.env.GUARDIAN_READS_ENABLED === 'true';
+}
+
 const FN_BY_MODULE = { labs: 'getLabs', imaging: 'getImaging', records: 'getMedicalRecords' };
+
 
 function webApiKey() {
   if (process.env.SMOKE_WEB_API_KEY) return process.env.SMOKE_WEB_API_KEY;
@@ -57,7 +75,7 @@ function webApiKey() {
 
 // ----------------------------------------------------------------- auth ----
 
-async function mintPatientIdToken() {
+async function mintPatientIdToken(uid) {
   const key = webApiKey();
   if (!key) {
     throw new Error(
@@ -65,7 +83,8 @@ async function mintPatientIdToken() {
       'custom-token exchange cannot run.',
     );
   }
-  const customToken = await admin.auth().createCustomToken(FIXTURE_UID, { role: 'patient' });
+  const subject = String(uid || FIXTURE_UID);
+  const customToken = await admin.auth().createCustomToken(subject, { role: 'patient' });
   const res = await fetch(
     `https://identitytoolkit.googleapis.com/v1/accounts:signInWithCustomToken?key=${key}`,
     {
@@ -83,11 +102,20 @@ async function mintPatientIdToken() {
 
 // -------------------------------------------------------------- calling ----
 
-async function callRead(token, moduleKey, reportId) {
+/**
+ * `childElationId` is the ONLY body field that can point the read at another
+ * record, and the read path treats it as a request, not as identity: it is
+ * accepted solely after `resolveGuardianAccess` authorizes the caller for that
+ * child. Passing it here is exactly what the portal does for a dependent.
+ */
+async function callRead(token, moduleKey, reportId, childElationId) {
+  const payload = {};
+  if (reportId) payload.reportId = reportId;
+  if (childElationId) payload.childElationId = String(childElationId);
   const res = await fetch(`${BASE}/${FN_BY_MODULE[moduleKey]}`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-    body: JSON.stringify(reportId ? { reportId } : {}),
+    body: JSON.stringify(payload),
   });
   const text = await res.text();
   let json = null;
@@ -116,9 +144,9 @@ function reasonOf(r) {
  */
 const CATEGORY_BY_MODULE = { labs: 'lab', imaging: 'imaging', records: 'medical_records' };
 
-async function discover(moduleKey) {
+async function discover(moduleKey, patientId) {
   const snap = await admin.firestore()
-    .collection('patients').doc(FIXTURE_PATIENT_ID).collection('labs')
+    .collection('patients').doc(String(patientId || FIXTURE_PATIENT_ID)).collection('labs')
     .where('category', '==', CATEGORY_BY_MODULE[moduleKey])
     .where('hasArtifact', '==', true)
     .limit(10)
@@ -128,6 +156,35 @@ async function discover(moduleKey) {
   const hit = snap.docs.find((d) => d.id !== MISSING_ID);
   return hit ? hit.id : null;
 }
+
+// ------------------------------------------------------ guardian fixtures ----
+
+/**
+ * Read-only precondition check. The guardian arm asserts the READ PATH; it must
+ * never create or repair a guardian link to make itself pass, so a missing or
+ * non-active link is reported as SKIP (fixture gap) rather than FAIL, and a
+ * link that exists on the WRONG child (the isolation fixture) is a hard FAIL
+ * because it would invalidate the negative case.
+ */
+async function guardianFixtureState() {
+  const db = admin.firestore();
+  const linkedOn = async (childId) => {
+    if (!childId) return null;
+    const snap = await db.collection('patients').doc(String(childId)).get().catch(() => null);
+    if (!snap || !snap.exists) return { exists: false, active: false };
+    const guardians = Array.isArray(snap.data().guardians) ? snap.data().guardians : [];
+    const active = guardians.some((g) => g
+      && g.status === 'active'
+      && ((g.guardianUid && g.guardianUid === GUARDIAN_UID)
+        || (g.guardianElationId && String(g.guardianElationId) === GUARDIAN_ELATION_ID)));
+    return { exists: true, active };
+  };
+  return {
+    child: await linkedOn(CHILD_PATIENT_ID),
+    other: await linkedOn(OTHER_CHILD_ID),
+  };
+}
+
 
 
 // ------------------------------------------------- portalAccess toggling ----
@@ -144,7 +201,110 @@ async function restoreAccess(saved) {
   await accessRef().set(saved.data); // full overwrite — byte-for-byte restore
 }
 
+// ------------------------------------------------------- guardian arm ----
+
+/**
+ * Guardian -> minor read, both directions.
+ *
+ * POSITIVE  the guardian's own token, plus `childElationId` of their LINKED
+ *           child, returns 200 + a signed URL that serves real `%PDF-` bytes.
+ * NEGATIVE  the SAME token, pointed at a child they are NOT linked to, is
+ *           denied. This is the containment assertion: anything other than a
+ *           denial (403/404) — including a 200, a signed URL, or a calm
+ *           `preparing` state, which would confirm the record exists — is a
+ *           leak and fails the run.
+ *
+ * The whole arm is gated on GUARDIAN_READS_ENABLED being true ON THIS RUNTIME.
+ * With the flag off the read path denies guardians unconditionally, so the
+ * negative case would "pass" for the wrong reason and the positive case would
+ * fail for the wrong reason — neither tells us anything, so both are skipped.
+ */
+async function runGuardianArm({ record, skip }) {
+  const label = {
+    pos: '6. guardian -> linked minor: 200 + signed URL serves PDF bytes',
+    neg: '7. guardian -> UNLINKED minor: denied (cross-child isolation)',
+  };
+
+  if (!guardianReadsEnabled()) {
+    const why = 'skipped — GUARDIAN_READS_ENABLED is not true on this runtime; guardian reads are denied unconditionally, so neither case is meaningful';
+    skip(label.pos, why);
+    skip(label.neg, why);
+    return;
+  }
+  if (!GUARDIAN_UID || !CHILD_PATIENT_ID || !OTHER_CHILD_ID) {
+    const why = 'skipped — SMOKE_GUARDIAN_UID / SMOKE_CHILD_PATIENT_ID / SMOKE_OTHER_CHILD_ID are not all configured';
+    skip(label.pos, why);
+    skip(label.neg, why);
+    return;
+  }
+  if (CHILD_PATIENT_ID === OTHER_CHILD_ID) {
+    record(label.neg, false, 'fixture error — the linked and unlinked child ids are the same, so isolation cannot be tested');
+    return;
+  }
+
+  const state = await guardianFixtureState();
+
+  // A link on the ISOLATION child would silently turn the negative case into a
+  // second positive case. That is a fixture defect, and it fails loudly.
+  if (state.other && state.other.active) {
+    record(
+      label.neg,
+      false,
+      `fixture error — guardian IS actively linked to ${OTHER_CHILD_ID}; pick an unrelated minor for SMOKE_OTHER_CHILD_ID`,
+    );
+    return;
+  }
+
+  let token;
+  try {
+    token = await mintPatientIdToken(GUARDIAN_UID);
+  } catch (err) {
+    const why = `could not mint the guardian token: ${String((err && err.message) || err)}`;
+    record(label.pos, false, why);
+    record(label.neg, false, why);
+    return;
+  }
+
+  // --- positive ---
+  if (!state.child || !state.child.exists) {
+    skip(label.pos, `skipped — patients/${CHILD_PATIENT_ID} does not exist`);
+  } else if (!state.child.active) {
+    skip(label.pos, `skipped — no ACTIVE guardian entry for this guardian on ${CHILD_PATIENT_ID} (the smoke never creates one)`);
+  } else {
+    const childLabId = await discover('labs', CHILD_PATIENT_ID);
+    if (!childLabId) {
+      skip(label.pos, `skipped — minor ${CHILD_PATIENT_ID} holds no lab with hasArtifact:true`);
+    } else {
+      const r = await callRead(token, 'labs', childLabId, CHILD_PATIENT_ID);
+      const url = r.json && r.json.signedUrl;
+      if (effectiveStatus(r) !== 200 || !url) {
+        record(label.pos, false, `${effectiveStatus(r)} ${reasonOf(r) || r.raw}`);
+      } else {
+        const got = await fetch(url);
+        const buf = Buffer.from(await got.arrayBuffer());
+        const magic = buf.slice(0, 5).toString('latin1');
+        record(label.pos, got.ok && magic === '%PDF-', `GET ${got.status}, ${buf.length} bytes, magic=${magic}`);
+      }
+    }
+  }
+
+  // --- negative (the gate) ---
+  const otherLabId = (await discover('labs', OTHER_CHILD_ID)) || MISSING_ID;
+  const n = await callRead(token, 'labs', otherLabId, OTHER_CHILD_ID);
+  const status = effectiveStatus(n);
+  const leaked = Boolean(n.json && (n.json.signedUrl || n.json.state === 'preparing'));
+  record(
+    label.neg,
+    (status === 403 || status === 404) && !leaked,
+    leaked
+      ? `LEAK — ${status} but the response carried ${n.json.signedUrl ? 'a signed URL' : "a 'preparing' state"} for a child this guardian is not linked to`
+      : `${status} ${reasonOf(n) || n.raw}`,
+  );
+}
+
 // ----------------------------------------------------------------- run ----
+
+
 
 async function runSmoke() {
   const results = [];
@@ -264,6 +424,17 @@ async function runSmoke() {
       );
     }
 
+    // 6 — GUARDIAN ARM (Release 2b Part B). Proves the dependent read end to
+    //     end, and — the case that actually gates the flip — proves a guardian
+    //     is CONTAINED to their own child.
+    //
+    //     It is read-only: it never creates, binds or revokes a guardian entry,
+    //     and it writes nothing on either child. The only state this whole
+    //     function mutates remains portalAccess/{FIXTURE_PATIENT_ID}, restored
+    //     in the `finally` below. A guardian assertion that cannot be made
+    //     honestly is SKIPPED with its reason — never recorded as a pass.
+    await runGuardianArm({ record, skip });
+
   } finally {
     await restoreAccess(saved);
     const after = await snapshotAccess();
@@ -280,6 +451,13 @@ async function runSmoke() {
   const skipped = results.filter((r) => r.skipped).length;
   return {
     fixture: { patientId: FIXTURE_PATIENT_ID, uid: FIXTURE_UID, missingId: MISSING_ID },
+    guardianFixture: {
+      enabled: guardianReadsEnabled(),
+      guardianUid: GUARDIAN_UID || null,
+      guardianElationId: GUARDIAN_ELATION_ID || null,
+      childPatientId: CHILD_PATIENT_ID || null,
+      otherChildPatientId: OTHER_CHILD_ID || null,
+    },
     base: BASE,
     ranAt: new Date().toISOString(),
     total: results.length,
@@ -288,6 +466,7 @@ async function runSmoke() {
     skipped,
     results,
   };
+
 
 }
 
