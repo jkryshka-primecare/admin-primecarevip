@@ -70,25 +70,36 @@ function bucket() {
  * never on a Firebase Auth uid. Minors have no auth uid at all, so the old
  * uid-keyed scheme could not express a dependent's artifact.
  *
- * During the dual-read window a record with no `internalUid` yet falls back to
- * the legacy `firebaseUid`; a record with neither stays `unpathed` — reported
+ * The audit is ALWAYS STRICT and deliberately ignores
+ * `ARTIFACT_LEGACY_UID_FALLBACK`. Its whole job is to prove the internalUid
+ * path, so an env flip could only ever make the number less true; honouring it
+ * meant a routine nightly run could read 100% off legacy objects. A record with
+ * no `internalUid` and no explicit `artifactPath` is `unpathed` — reported
  * separately, never queued, so the sweep can never "heal" junk at
- * `elation-artifacts/null/...`. Coverage must reach 100% with the fallback
- * DISABLED (`ARTIFACT_LEGACY_UID_FALLBACK=false`) before the legacy branch is
- * deleted from the read path.
+ * `elation-artifacts/null/...`.
  */
 function expectedPath(doc, keys) {
-  if (doc.artifactPath) return doc.artifactPath;
   const k = keys || {};
   if (k.internalUid) return internalPathFor(k.internalUid, doc.id);
-  if (legacyFallbackEnabled() && k.legacyUid) return legacyPathFor(k.legacyUid, doc.id);
+  if (doc.artifactPath) return doc.artifactPath;
   return null;
+}
+
+/**
+ * Diagnostic only. When a strict path is absent we probe the legacy uid path so
+ * the report can say "this one exists, but only under the old key" — the exact
+ * set the re-key backfill must move. It never counts as present.
+ */
+function legacyPathOf(doc, keys) {
+  const k = keys || {};
+  return k.legacyUid ? legacyPathFor(k.legacyUid, doc.id) : null;
 }
 
 /** patientId -> { internalUid, legacyUid }. One patient doc read per patient. */
 function makeUidResolver(db) {
   return makeInternalUidResolver(db);
 }
+
 
 
 async function walk(db, onPage) {
