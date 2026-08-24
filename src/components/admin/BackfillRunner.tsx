@@ -128,6 +128,7 @@ function Runner({ def, canApply }: { def: RunnerDef; canApply: boolean }) {
   const [cursor, setCursor] = useState<string | null>(null);
   const [report, setReport] = useState<BackfillReport | null>(null);
   const [mode, setMode] = useState<"dry" | "apply" | null>(null);
+  const [progress, setProgress] = useState<{ done: number; total: number } | null>(null);
 
   const ids = idsText
     .split(/[\s,]+/)
@@ -136,10 +137,48 @@ function Runner({ def, canApply }: { def: RunnerDef; canApply: boolean }) {
   const badIds = ids.filter((id) => !/^\d{6,25}$/.test(id));
   const idsReady = !def.needsIds || (ids.length > 0 && badIds.length === 0);
 
+  // An apply hits Elation per patient (~5s each), so a big batch blows the
+  // 150s edge idle timeout (504 IDLE_TIMEOUT). Walk the cohort in small
+  // chunks and merge the reports — the server refuses anything larger.
+  const APPLY_CHUNK = 8;
+  const DRY_CHUNK = 100;
+
+  function mergeReports(a: BackfillReport | null, b: BackfillReport): BackfillReport {
+    if (!a) return b;
+    const num = (x: unknown, y: unknown) =>
+      (typeof x === "number" ? x : 0) + (typeof y === "number" ? y : 0);
+    return {
+      ...a,
+      ...b,
+      ingested: num(a.ingested, b.ingested),
+      skipped: num(a.skipped, b.skipped),
+      failed: [...(a.failed ?? []), ...(b.failed ?? [])],
+      rejected: [...(a.rejected ?? []), ...(b.rejected ?? [])],
+    };
+  }
+
   async function go(apply: boolean, runToEnd = false) {
     setMode(apply ? "apply" : "dry");
     let cur = cursor;
     try {
+      if (def.needsIds) {
+        const size = apply ? APPLY_CHUNK : DRY_CHUNK;
+        let merged: BackfillReport | null = null;
+        setReport(null);
+        setProgress({ done: 0, total: ids.length });
+        for (let i = 0; i < ids.length; i += size) {
+          const chunk = ids.slice(i, i + size);
+          const res = await run.mutateAsync({
+            apply,
+            reason: reason.trim(),
+            patientIds: chunk,
+          });
+          merged = mergeReports(merged, res);
+          setReport(merged);
+          setProgress({ done: Math.min(i + size, ids.length), total: ids.length });
+        }
+        return;
+      }
       // Batches are capped server-side (100) so a page always finishes inside
       // the 150s function window. "Run to completion" just walks the cursor.
       for (let page = 0; page < 500; page += 1) {
@@ -148,7 +187,6 @@ function Runner({ def, canApply }: { def: RunnerDef; canApply: boolean }) {
           reason: reason.trim(),
           ...(limit ? { limit: Number(limit) } : {}),
           ...(cur ? { cursor: cur } : {}),
-          ...(def.needsIds ? { patientIds: ids } : {}),
         });
         setReport(res);
         cur = def.paged ? (res.nextCursor ?? null) : null;
@@ -163,6 +201,7 @@ function Runner({ def, canApply }: { def: RunnerDef; canApply: boolean }) {
   }
 
   const busy = run.isPending;
+
 
 
   return (
