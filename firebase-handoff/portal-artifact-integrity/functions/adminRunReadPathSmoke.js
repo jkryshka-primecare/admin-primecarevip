@@ -238,7 +238,7 @@ async function discover(moduleKey, patientId) {
  * link that exists on the WRONG child (the isolation fixture) is a hard FAIL
  * because it would invalidate the negative case.
  */
-async function guardianFixtureState() {
+async function guardianFixtureState(fx) {
   const db = admin.firestore();
   const linkedOn = async (childId) => {
     if (!childId) return null;
@@ -247,13 +247,14 @@ async function guardianFixtureState() {
     const guardians = Array.isArray(snap.data().guardians) ? snap.data().guardians : [];
     const active = guardians.some((g) => g
       && g.status === 'active'
-      && ((g.guardianUid && g.guardianUid === GUARDIAN_UID)
-        || (g.guardianElationId && String(g.guardianElationId) === GUARDIAN_ELATION_ID)));
+      && ((g.guardianUid && fx.guardianUid && g.guardianUid === fx.guardianUid)
+        || (g.guardianElationId && fx.guardianElationId
+          && String(g.guardianElationId) === fx.guardianElationId)));
     return { exists: true, active };
   };
   return {
-    child: await linkedOn(CHILD_PATIENT_ID),
-    other: await linkedOn(OTHER_CHILD_ID),
+    child: await linkedOn(fx.childPatientId),
+    other: await linkedOn(fx.otherChildId),
   };
 }
 
