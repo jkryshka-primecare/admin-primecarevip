@@ -29,6 +29,14 @@
  *   SMOKE_PATIENT_ID    default 816455979040769  (Test Kieffer fixture)
  *   SMOKE_FIREBASE_UID  default d8h7h6xc6axkq3k3tgnoz6ytxmx1
  *   SMOKE_MISSING_ID    default SMOKE-LAB-2 (known reference with no object)
+ *
+ * GUARDIAN ARM (Release 2b Part B) — only runs when GUARDIAN_READS_ENABLED is
+ * 'true' on THIS runtime AND the fixtures below are configured. Otherwise every
+ * guardian assertion is SKIPPED with the reason, never silently passed.
+ *   SMOKE_GUARDIAN_UID          Firebase uid of the guardian fixture account
+ *   SMOKE_GUARDIAN_ELATION_ID   the guardian's OWN patients/{id} doc id
+ *   SMOKE_CHILD_PATIENT_ID      minor LINKED to that guardian (positive case)
+ *   SMOKE_OTHER_CHILD_ID        minor NOT linked to that guardian (isolation)
  */
 
 const functions = require('firebase-functions');
@@ -43,7 +51,17 @@ const FIXTURE_PATIENT_ID = String(process.env.SMOKE_PATIENT_ID || '8164559790407
 const FIXTURE_UID = String(process.env.SMOKE_FIREBASE_UID || 'd8h7h6xc6axkq3k3tgnoz6ytxmx1');
 const MISSING_ID = process.env.SMOKE_MISSING_ID || 'SMOKE-LAB-2';
 
+const GUARDIAN_UID = String(process.env.SMOKE_GUARDIAN_UID || '');
+const GUARDIAN_ELATION_ID = String(process.env.SMOKE_GUARDIAN_ELATION_ID || '');
+const CHILD_PATIENT_ID = String(process.env.SMOKE_CHILD_PATIENT_ID || '');
+const OTHER_CHILD_ID = String(process.env.SMOKE_OTHER_CHILD_ID || '');
+
+function guardianReadsEnabled() {
+  return process.env.GUARDIAN_READS_ENABLED === 'true';
+}
+
 const FN_BY_MODULE = { labs: 'getLabs', imaging: 'getImaging', records: 'getMedicalRecords' };
+
 
 function webApiKey() {
   if (process.env.SMOKE_WEB_API_KEY) return process.env.SMOKE_WEB_API_KEY;
