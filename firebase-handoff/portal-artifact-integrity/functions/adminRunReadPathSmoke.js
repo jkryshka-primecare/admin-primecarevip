@@ -513,7 +513,7 @@ async function runSmoke(options) {
     //     function mutates remains portalAccess/{FIXTURE_PATIENT_ID}, restored
     //     in the `finally` below. A guardian assertion that cannot be made
     //     honestly is SKIPPED with its reason — never recorded as a pass.
-    await runGuardianArm({ record, skip });
+    await runGuardianArm({ record, skip, fx });
 
   } finally {
     await restoreAccess(saved);
@@ -532,7 +532,7 @@ async function runSmoke(options) {
   return {
     fixture: { patientId: FIXTURE_PATIENT_ID, uid: FIXTURE_UID, missingId: MISSING_ID },
     guardianFixture: {
-      enabled: guardianReadsEnabled(),
+      enabled: guardianReadsEnabled(fx),
       flag: process.env.GUARDIAN_READS_ENABLED === 'true',
       // Empty = DENY ALL (fail closed). '*' = deliberate global widen.
       allowlistSize: guardianAllowlist().length,
@@ -540,11 +540,14 @@ async function runSmoke(options) {
       global: guardianAllowlistIsGlobal(guardianAllowlist()),
       failClosed: guardianAllowlist().length === 0,
 
-      guardianUid: GUARDIAN_UID || null,
-      guardianElationId: GUARDIAN_ELATION_ID || null,
+      guardianUid: fx.guardianUid || null,
+      guardianElationId: fx.guardianElationId || null,
 
-      childPatientId: CHILD_PATIENT_ID || null,
-      otherChildPatientId: OTHER_CHILD_ID || null,
+      childPatientId: fx.childPatientId || null,
+      otherChildPatientId: fx.otherChildId || null,
+
+      // Where each fixture came from this run: 'body' | 'env' | 'unset'.
+      fixtureSources: sources,
     },
     base: BASE,
     ranAt: new Date().toISOString(),
