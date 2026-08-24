@@ -848,7 +848,7 @@ Deno.serve(async (req) => {
       }
     }
     if (action === "backfillMinorReports") {
-      const parsed = parseMinorIds(body.patientIds);
+      const parsed = parseMinorIds(body.patientIds, bulkApply);
       if (typeof parsed === "string") return deny(400, parsed);
       minorIds = parsed;
     }
