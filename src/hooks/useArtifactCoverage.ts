@@ -60,6 +60,8 @@ export type CoverageReport = {
   parkedCount: number;
   /** Referenced docs that cannot be keyed yet — excluded from the percentage. */
   unpathedCount: number;
+  /** Read-path smoke fixtures, excluded from every other count. */
+  fixtureExcludedCount: number;
   /** Storage probes that FAILED (e.g. 403). "Couldn't check" is not "absent". */
   erroredCount: number;
   errorStatusCounts: Record<string, number>;
@@ -168,6 +170,7 @@ function toReport(doc: FirestoreDoc): CoverageReport {
     missingCount: doc.missingCount !== undefined ? num(doc.missingCount) : misses.length,
     parkedCount: misses.filter((m) => m.parked).length,
     unpathedCount: num(doc.unpathedCount),
+    fixtureExcludedCount: num(doc.fixtureExcludedCount),
     erroredCount: num(doc.erroredCount),
     errorStatusCounts: (doc.errorStatusCounts ?? {}) as Record<string, number>,
     systemicStorageFailure: doc.systemicStorageFailure === true,

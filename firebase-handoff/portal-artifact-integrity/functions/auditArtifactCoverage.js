@@ -43,6 +43,23 @@ const EXISTS_CONCURRENCY = 50;
 /** Never walk more than this in one run; the run ends with work remaining. */
 const MAX_DOCS = 50000;
 
+/**
+ * The live read-path smoke (`adminRunReadPathSmoke`) depends on a reference
+ * that deliberately has NO object behind it — `SMOKE-LAB-2` — to prove case 2
+ * ("missing object answers a calm `preparing` state"). It must therefore keep
+ * existing with `hasArtifact: true`, and it can never be "repaired".
+ *
+ * Left in the denominator it is a permanent miss: it burns its repair budget,
+ * parks, and then alerts forever, putting a floor under coverage and making the
+ * alerting count meaningless. Fixture references are excluded from the
+ * percentage, never queued, and reported on their own line instead.
+ */
+const FIXTURE_DOC_ID_PREFIX = 'SMOKE-';
+
+function isFixtureReference(documentId) {
+  return String(documentId || '').startsWith(FIXTURE_DOC_ID_PREFIX);
+}
+
 function bucket() {
   // Never bare: the default bucket is not where artifacts live (see config).
   return admin.storage().bucket(artifactBucketName());
@@ -135,6 +152,7 @@ async function runAudit() {
   const missing = [];
   const unpathed = [];
   const errored = [];
+  const fixtures = [];
   const errorStatusCounts = {};
   // Release 2b Part B: adult and minor are reported SEPARATELY. A single
   // rounded "100%" must never be able to hide a cohort the minor-ingest track
@@ -166,7 +184,21 @@ async function runAudit() {
   const prior = new Map(priorSnap.docs.map((d) => [d.id, d.data()]));
   const uidFor = makeUidResolver(db);
 
-  const { seen, truncated } = await walk(db, async (docs) => {
+  const { seen, truncated } = await walk(db, async (allDocs) => {
+    // Smoke fixtures are removed BEFORE anything is counted: they are neither
+    // referenced clinical data nor a storage miss.
+    const docs = [];
+    for (const doc of allDocs) {
+      if (isFixtureReference(doc.id)) {
+        fixtures.push({
+          patientId: doc.ref.parent.parent ? doc.ref.parent.parent.id : null,
+          documentId: doc.id,
+          reason: 'read-path smoke fixture — intentionally has no object',
+        });
+        continue;
+      }
+      docs.push(doc);
+    }
     totalReferenced += docs.length;
 
     const pathed = [];
@@ -268,6 +300,10 @@ async function runAudit() {
     totalReferenced,
     presentCount,
     missingCount,
+    // Read-path smoke fixtures, excluded from every count above. Reported so the
+    // exclusion is visible rather than silent.
+    fixtureExcludedCount: fixtures.length,
+    fixtureExcluded: fixtures.slice(0, 50),
     // Referenced docs we cannot even key yet — excluded from the percentage and
     // never queued. They are a data-quality item, not a storage miss.
     unpathedCount: unpathed.length,
@@ -303,6 +339,14 @@ async function runAudit() {
 
   // Feed the healer: one queue row per miss, keyed (patientId, documentId).
   const batch = db.batch();
+
+  // Retire any queue row a PREVIOUS run created for a fixture reference. Those
+  // rows can never be repaired, so left behind they keep the parked/alerting
+  // count permanently non-zero.
+  for (const f of fixtures) {
+    batch.delete(db.collection('artifact_repair_queue').doc(`${f.patientId}:${f.documentId}`));
+  }
+
   missing.slice(0, 500).forEach((m) => {
     const ref = db.collection('artifact_repair_queue').doc(`${m.patientId}:${m.documentId}`);
     batch.set(
