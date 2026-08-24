@@ -300,6 +300,10 @@ async function runAudit() {
     totalReferenced,
     presentCount,
     missingCount,
+    // Read-path smoke fixtures, excluded from every count above. Reported so the
+    // exclusion is visible rather than silent.
+    fixtureExcludedCount: fixtures.length,
+    fixtureExcluded: fixtures.slice(0, 50),
     // Referenced docs we cannot even key yet — excluded from the percentage and
     // never queued. They are a data-quality item, not a storage miss.
     unpathedCount: unpathed.length,
