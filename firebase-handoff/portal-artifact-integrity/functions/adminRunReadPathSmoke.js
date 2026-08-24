@@ -33,10 +33,15 @@
  * GUARDIAN ARM (Release 2b Part B) — only runs when GUARDIAN_READS_ENABLED is
  * 'true' on THIS runtime AND the fixtures below are configured. Otherwise every
  * guardian assertion is SKIPPED with the reason, never silently passed.
- *   SMOKE_GUARDIAN_UID          Firebase uid of the guardian fixture account
- *   SMOKE_GUARDIAN_ELATION_ID   the guardian's OWN patients/{id} doc id
- *   SMOKE_CHILD_PATIENT_ID      minor LINKED to that guardian (positive case)
- *   SMOKE_OTHER_CHILD_ID        minor NOT linked to that guardian (isolation)
+ * Each fixture may be supplied EITHER in the request body (preferred in prod —
+ * minors' patient ids stay out of GitHub Secrets and the persistent .env) or
+ * via its env var, which remains the fallback:
+ *   guardianUid        / SMOKE_GUARDIAN_UID        guardian fixture account uid
+ *   guardianElationId  / SMOKE_GUARDIAN_ELATION_ID guardian's own patients/{id}
+ *   childPatientId     / SMOKE_CHILD_PATIENT_ID    LINKED minor (positive case)
+ *   otherChildId       / SMOKE_OTHER_CHILD_ID      UNLINKED minor (isolation)
+ * Overrides are validated as plain opaque id strings and are never interpolated
+ * into a resolver expression or query.
  */
 
 const functions = require('firebase-functions');
