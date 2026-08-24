@@ -51,10 +51,59 @@ const FIXTURE_PATIENT_ID = String(process.env.SMOKE_PATIENT_ID || '8164559790407
 const FIXTURE_UID = String(process.env.SMOKE_FIREBASE_UID || 'd8h7h6xc6axkq3k3tgnoz6ytxmx1');
 const MISSING_ID = process.env.SMOKE_MISSING_ID || 'SMOKE-LAB-2';
 
-const GUARDIAN_UID = String(process.env.SMOKE_GUARDIAN_UID || '');
-const GUARDIAN_ELATION_ID = String(process.env.SMOKE_GUARDIAN_ELATION_ID || '');
-const CHILD_PATIENT_ID = String(process.env.SMOKE_CHILD_PATIENT_ID || '');
-const OTHER_CHILD_ID = String(process.env.SMOKE_OTHER_CHILD_ID || '');
+// ------------------------------------------------ guardian fixture input ----
+
+/**
+ * The guardian fixtures point at MINOR patient ids, which we deliberately keep
+ * out of GitHub Secrets and the persistent prod `.env`. They may therefore be
+ * supplied in the request body at invoke time; each one falls back to its
+ * existing env var when absent, so a runtime that already has them configured
+ * behaves exactly as before.
+ *
+ * Every override is treated as an OPAQUE STRING. It is validated against a
+ * conservative id charset and never interpolated into a resolver expression or
+ * a query string — it is only ever passed as a Firestore document id or as a
+ * JSON body field the read path re-authorizes on its own.
+ */
+const ID_RE = /^[A-Za-z0-9_.:@-]{1,128}$/;
+
+function readOverride(body, key, envValue) {
+  const raw = body && Object.prototype.hasOwnProperty.call(body, key) ? body[key] : undefined;
+  if (raw === undefined || raw === null || raw === '') {
+    return { value: String(envValue || ''), source: envValue ? 'env' : 'unset' };
+  }
+  if (typeof raw !== 'string' && typeof raw !== 'number') {
+    return { value: '', source: 'invalid', error: `${key} must be a string` };
+  }
+  const value = String(raw).trim();
+  if (!ID_RE.test(value)) {
+    return { value: '', source: 'invalid', error: `${key} is not a valid identifier` };
+  }
+  return { value, source: 'body' };
+}
+
+/**
+ * Returns { fx, sources, errors }. `fx` carries the four guardian fixtures for
+ * this run; nothing about the flag/allowlist gate is overridable.
+ */
+function resolveFixtures(body) {
+  const spec = [
+    ['guardianUid', process.env.SMOKE_GUARDIAN_UID],
+    ['guardianElationId', process.env.SMOKE_GUARDIAN_ELATION_ID],
+    ['childPatientId', process.env.SMOKE_CHILD_PATIENT_ID],
+    ['otherChildId', process.env.SMOKE_OTHER_CHILD_ID],
+  ];
+  const fx = {};
+  const sources = {};
+  const errors = [];
+  for (const pair of spec) {
+    const r = readOverride(body, pair[0], pair[1]);
+    if (r.error) errors.push(r.error);
+    fx[pair[0]] = r.value;
+    sources[pair[0]] = r.source;
+  }
+  return { fx, sources, errors };
+}
 
 function guardianAllowlist() {
   return (process.env.GUARDIAN_READS_ALLOWLIST || '')
@@ -70,13 +119,15 @@ function guardianAllowlistIsGlobal(allow) {
  * semantics: an empty/missing allowlist denies every guardian even with the
  * flag on, and `*` is the one explicit token that widens globally.
  */
-function guardianReadsEnabled() {
+function guardianReadsEnabled(fx) {
   if (process.env.GUARDIAN_READS_ENABLED !== 'true') return false;
   const allow = guardianAllowlist();
   if (allow.length === 0) return false;
   if (guardianAllowlistIsGlobal(allow)) return true;
-  return allow.includes(GUARDIAN_UID.toLowerCase())
-    || (GUARDIAN_ELATION_ID ? allow.includes(GUARDIAN_ELATION_ID.toLowerCase()) : false);
+  const uid = String((fx && fx.guardianUid) || '').toLowerCase();
+  const elationId = String((fx && fx.guardianElationId) || '').toLowerCase();
+  return (uid ? allow.includes(uid) : false)
+    || (elationId ? allow.includes(elationId) : false);
 }
 
 
