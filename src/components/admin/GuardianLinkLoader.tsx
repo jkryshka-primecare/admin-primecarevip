@@ -189,8 +189,10 @@ export default function GuardianLinkLoader() {
             className="mt-1 w-44 rounded-md border border-border bg-background px-3 py-1.5 font-mono text-xs text-foreground"
           />
           <p className="mt-1 text-[11px] text-muted-foreground">
-            {onlyChildValid ? "blank = the whole CSV" : "not a valid chart id"}
+            {onlyChildValid ? "blank = the whole CSV" : "not a valid chart id"} · filters the pasted
+            CSV, it does not replace it
           </p>
+
         </div>
         <div className="text-xs text-muted-foreground">
           Resume offset: <span className="font-mono">{offset}</span>
