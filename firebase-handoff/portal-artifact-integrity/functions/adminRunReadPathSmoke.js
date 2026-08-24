@@ -321,6 +321,17 @@ async function runSmoke() {
       );
     }
 
+    // 6 — GUARDIAN ARM (Release 2b Part B). Proves the dependent read end to
+    //     end, and — the case that actually gates the flip — proves a guardian
+    //     is CONTAINED to their own child.
+    //
+    //     It is read-only: it never creates, binds or revokes a guardian entry,
+    //     and it writes nothing on either child. The only state this whole
+    //     function mutates remains portalAccess/{FIXTURE_PATIENT_ID}, restored
+    //     in the `finally` below. A guardian assertion that cannot be made
+    //     honestly is SKIPPED with its reason — never recorded as a pass.
+    await runGuardianArm({ record, skip });
+
   } finally {
     await restoreAccess(saved);
     const after = await snapshotAccess();
@@ -337,6 +348,13 @@ async function runSmoke() {
   const skipped = results.filter((r) => r.skipped).length;
   return {
     fixture: { patientId: FIXTURE_PATIENT_ID, uid: FIXTURE_UID, missingId: MISSING_ID },
+    guardianFixture: {
+      enabled: guardianReadsEnabled(),
+      guardianUid: GUARDIAN_UID || null,
+      guardianElationId: GUARDIAN_ELATION_ID || null,
+      childPatientId: CHILD_PATIENT_ID || null,
+      otherChildPatientId: OTHER_CHILD_ID || null,
+    },
     base: BASE,
     ranAt: new Date().toISOString(),
     total: results.length,
@@ -345,6 +363,7 @@ async function runSmoke() {
     skipped,
     results,
   };
+
 
 }
 
