@@ -201,7 +201,110 @@ async function restoreAccess(saved) {
   await accessRef().set(saved.data); // full overwrite — byte-for-byte restore
 }
 
+// ------------------------------------------------------- guardian arm ----
+
+/**
+ * Guardian -> minor read, both directions.
+ *
+ * POSITIVE  the guardian's own token, plus `childElationId` of their LINKED
+ *           child, returns 200 + a signed URL that serves real `%PDF-` bytes.
+ * NEGATIVE  the SAME token, pointed at a child they are NOT linked to, is
+ *           denied. This is the containment assertion: anything other than a
+ *           denial (403/404) — including a 200, a signed URL, or a calm
+ *           `preparing` state, which would confirm the record exists — is a
+ *           leak and fails the run.
+ *
+ * The whole arm is gated on GUARDIAN_READS_ENABLED being true ON THIS RUNTIME.
+ * With the flag off the read path denies guardians unconditionally, so the
+ * negative case would "pass" for the wrong reason and the positive case would
+ * fail for the wrong reason — neither tells us anything, so both are skipped.
+ */
+async function runGuardianArm({ record, skip }) {
+  const label = {
+    pos: '6. guardian -> linked minor: 200 + signed URL serves PDF bytes',
+    neg: '7. guardian -> UNLINKED minor: denied (cross-child isolation)',
+  };
+
+  if (!guardianReadsEnabled()) {
+    const why = 'skipped — GUARDIAN_READS_ENABLED is not true on this runtime; guardian reads are denied unconditionally, so neither case is meaningful';
+    skip(label.pos, why);
+    skip(label.neg, why);
+    return;
+  }
+  if (!GUARDIAN_UID || !CHILD_PATIENT_ID || !OTHER_CHILD_ID) {
+    const why = 'skipped — SMOKE_GUARDIAN_UID / SMOKE_CHILD_PATIENT_ID / SMOKE_OTHER_CHILD_ID are not all configured';
+    skip(label.pos, why);
+    skip(label.neg, why);
+    return;
+  }
+  if (CHILD_PATIENT_ID === OTHER_CHILD_ID) {
+    record(label.neg, false, 'fixture error — the linked and unlinked child ids are the same, so isolation cannot be tested');
+    return;
+  }
+
+  const state = await guardianFixtureState();
+
+  // A link on the ISOLATION child would silently turn the negative case into a
+  // second positive case. That is a fixture defect, and it fails loudly.
+  if (state.other && state.other.active) {
+    record(
+      label.neg,
+      false,
+      `fixture error — guardian IS actively linked to ${OTHER_CHILD_ID}; pick an unrelated minor for SMOKE_OTHER_CHILD_ID`,
+    );
+    return;
+  }
+
+  let token;
+  try {
+    token = await mintPatientIdToken(GUARDIAN_UID);
+  } catch (err) {
+    const why = `could not mint the guardian token: ${String((err && err.message) || err)}`;
+    record(label.pos, false, why);
+    record(label.neg, false, why);
+    return;
+  }
+
+  // --- positive ---
+  if (!state.child || !state.child.exists) {
+    skip(label.pos, `skipped — patients/${CHILD_PATIENT_ID} does not exist`);
+  } else if (!state.child.active) {
+    skip(label.pos, `skipped — no ACTIVE guardian entry for this guardian on ${CHILD_PATIENT_ID} (the smoke never creates one)`);
+  } else {
+    const childLabId = await discover('labs', CHILD_PATIENT_ID);
+    if (!childLabId) {
+      skip(label.pos, `skipped — minor ${CHILD_PATIENT_ID} holds no lab with hasArtifact:true`);
+    } else {
+      const r = await callRead(token, 'labs', childLabId, CHILD_PATIENT_ID);
+      const url = r.json && r.json.signedUrl;
+      if (effectiveStatus(r) !== 200 || !url) {
+        record(label.pos, false, `${effectiveStatus(r)} ${reasonOf(r) || r.raw}`);
+      } else {
+        const got = await fetch(url);
+        const buf = Buffer.from(await got.arrayBuffer());
+        const magic = buf.slice(0, 5).toString('latin1');
+        record(label.pos, got.ok && magic === '%PDF-', `GET ${got.status}, ${buf.length} bytes, magic=${magic}`);
+      }
+    }
+  }
+
+  // --- negative (the gate) ---
+  const otherLabId = (await discover('labs', OTHER_CHILD_ID)) || MISSING_ID;
+  const n = await callRead(token, 'labs', otherLabId, OTHER_CHILD_ID);
+  const status = effectiveStatus(n);
+  const leaked = Boolean(n.json && (n.json.signedUrl || n.json.state === 'preparing'));
+  record(
+    label.neg,
+    (status === 403 || status === 404) && !leaked,
+    leaked
+      ? `LEAK — ${status} but the response carried ${n.json.signedUrl ? 'a signed URL' : "a 'preparing' state"} for a child this guardian is not linked to`
+      : `${status} ${reasonOf(n) || n.raw}`,
+  );
+}
+
 // ----------------------------------------------------------------- run ----
+
+
 
 async function runSmoke() {
   const results = [];
