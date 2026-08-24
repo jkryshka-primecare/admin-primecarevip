@@ -582,8 +582,16 @@ exports.adminRunReadPathSmoke = functions
       });
     }
 
+    // Guardian fixtures may arrive in the body (minor ids are deliberately kept
+    // out of the durable prod env); each falls back to its SMOKE_* env var.
+    const { fx, sources, errors } = resolveFixtures(req.body);
+    if (errors.length) {
+      return res.status(400).json({ ok: false, error: 'invalid_fixture_override', details: errors });
+    }
+    functions.logger.info('adminRunReadPathSmoke fixture sources', { sources });
+
     try {
-      const report = await runSmoke();
+      const report = await runSmoke({ fx, sources });
       return res.status(200).json({ ok: true, ...report });
     } catch (err) {
       functions.logger.error('adminRunReadPathSmoke failed', err);
