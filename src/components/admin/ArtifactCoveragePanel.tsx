@@ -203,11 +203,28 @@ export default function ArtifactCoveragePanel() {
           <button
             onClick={exportCsv}
             disabled={exporting || !report?.misses.length}
-            className="inline-flex items-center gap-1.5 rounded-lg bg-primary px-3 py-2 text-xs font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-50"
+            className="inline-flex items-center gap-1.5 rounded-lg border border-border px-3 py-2 text-xs font-medium text-foreground hover:bg-muted disabled:opacity-50"
           >
             <Download className="h-3 w-3" /> Export misses (audited)
           </button>
+
+          <button
+            onClick={downloadHandoff}
+            disabled={handoffBusy || !report}
+            className="inline-flex items-center gap-1.5 rounded-lg bg-primary px-3 py-2 text-xs font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-50"
+          >
+            <FileText className="h-3 w-3" /> {handoffBusy ? "Building…" : "Hand-off report"}
+          </button>
+          <button
+            onClick={copyHandoff}
+            disabled={handoffBusy || !report}
+            title="Copy the hand-off report as Markdown"
+            className="inline-flex items-center gap-1.5 rounded-lg border border-border px-3 py-2 text-xs font-medium text-muted-foreground hover:bg-muted disabled:opacity-50"
+          >
+            <Copy className="h-3 w-3" /> Copy
+          </button>
         </div>
+
       </div>
 
       {smoke && (
