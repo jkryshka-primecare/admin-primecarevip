@@ -220,7 +220,7 @@ async function handleArtifactRead(req, params = {}) {
   let guardianAccess = null;
   if (selfElationId && selfElationId === elationPatientId) {
     mode = 'self';
-  } else if (guardianReadsEnabled()) {
+  } else if (guardianReadsEnabledFor(uid, selfElationId)) {
     // Phase 1 (chart-backed): authorization is the strict, both-non-empty match
     // of the caller's OWN elation record id against the entry's
     // guardianElationId, plus status === 'active'. A caller with no owned
