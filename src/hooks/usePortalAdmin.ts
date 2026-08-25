@@ -327,8 +327,16 @@ export function useRunArtifactAudit() {
 
 
 export type SmokeCase = { name: string; pass: boolean; detail: string; skipped?: boolean };
+export type SmokeGuardianFixture = {
+  fixtureSources?: Record<string, "body" | "env" | "unset" | string>;
+  enabled?: boolean;
+  scoped?: boolean;
+  allowlistSize?: number;
+  failClosed?: boolean;
+};
 export type SmokeReport = {
   fixture?: { patientId: string; uid: string; missingId: string };
+  guardianFixture?: SmokeGuardianFixture;
   base?: string;
   ranAt?: string;
   total?: number;
@@ -337,6 +345,7 @@ export type SmokeReport = {
   skipped?: number;
   results?: SmokeCase[];
 };
+
 
 /**
  * Runs the live read-path smoke against the DEPLOYED patient endpoints, using
@@ -380,17 +389,33 @@ export function useUnclaimedGuardians() {
   });
 }
 
+export type SmokeFixtureOverrides = {
+  guardianUid?: string;
+  guardianElationId?: string;
+  childPatientId?: string;
+  otherChildId?: string;
+};
+
 export function useRunReadPathSmoke() {
   return useMutation({
-    mutationFn: async (vars?: { reason?: string }) => {
+    mutationFn: async (vars?: { reason?: string } & SmokeFixtureOverrides) => {
+      const fixtures: Record<string, string> = {};
+      (["guardianUid", "guardianElationId", "childPatientId", "otherChildId"] as const).forEach(
+        (k) => {
+          const v = vars?.[k]?.trim();
+          if (v) fixtures[k] = v;
+        },
+      );
       const res = await callPortalAdmin<SmokeReport>({
         action: "smoke",
         reason: vars?.reason ?? "Manual read-path smoke from the admin OS",
+        ...fixtures,
       });
       return res.data ?? {};
     },
   });
 }
+
 
 // --- Release 2b Part B — bulk migration runners -----------------------------
 //

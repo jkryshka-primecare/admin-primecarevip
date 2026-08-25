@@ -1087,6 +1087,22 @@ Deno.serve(async (req) => {
     // refuses to send anything; this makes the intent explicit on the wire.
     upstreamPayload.sendInvite = false;
   }
+  if (action === "smoke") {
+    // Optional guardian-arm fixtures, supplied at invoke time so minors' ids
+    // never have to live in a durable prod .env. Forwarded verbatim as opaque
+    // strings; the Cloud Function re-validates them in `resolveFixtures` and
+    // falls back to its own SMOKE_* env vars when a field is absent.
+    const FIXTURE_RE = /^[A-Za-z0-9_.:@-]{1,128}$/;
+    for (const key of ["guardianUid", "guardianElationId", "childPatientId", "otherChildId"]) {
+      const raw = body[key];
+      if (typeof raw !== "string") continue;
+      const val = raw.trim();
+      if (!val) continue;
+      if (!FIXTURE_RE.test(val)) return deny(400, `"${key}" is not a valid smoke fixture id.`);
+      upstreamPayload[key] = val;
+    }
+  }
+
   if (isBulk) {
     // Dry run unless the caller explicitly asked to apply AND cleared the
     // super-admin gate above.

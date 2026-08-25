@@ -3,7 +3,7 @@ import { motion } from "framer-motion";
 import { ShieldCheck, RefreshCw, Download, AlertTriangle, FileWarning, PlayCircle, Stethoscope, Check, X, MinusCircle, Eye, EyeOff, FileText, Copy } from "lucide-react";
 import { useArtifactCoverage, missesToCsv } from "@/hooks/useArtifactCoverage";
 import CoverageGate from "@/components/admin/CoverageGate";
-import { useRunArtifactAudit, useRunReadPathSmoke, type SmokeReport } from "@/hooks/usePortalAdmin";
+import { useRunArtifactAudit, useRunReadPathSmoke, type SmokeReport, type SmokeFixtureOverrides } from "@/hooks/usePortalAdmin";
 import { buildCoverageHandoff } from "@/lib/portal/coverageHandoff";
 import { useToast } from "@/hooks/use-toast";
 
@@ -33,6 +33,15 @@ export default function ArtifactCoveragePanel() {
   const [revealMisses, setRevealMisses] = useState(false);
   const [handoffPhi, setHandoffPhi] = useState(false);
   const [handoffBusy, setHandoffBusy] = useState(false);
+  /**
+   * Optional guardian-arm fixtures, typed in at invoke time so minors' ids stay
+   * out of the durable prod env. Empty fields are omitted from the request and
+   * the Cloud Function falls back to its SMOKE_* env vars (or skips the arm).
+   */
+  const [fixtures, setFixtures] = useState<SmokeFixtureOverrides>({});
+  const setFixture = (key: keyof SmokeFixtureOverrides) => (v: string) =>
+    setFixtures((f) => ({ ...f, [key]: v }));
+
 
 
   const pct = report?.coveragePct;
@@ -60,7 +69,7 @@ export default function ArtifactCoveragePanel() {
   const triggerSmoke = async () => {
     setSmoke(null);
     try {
-      const res = await runSmoke.mutateAsync({});
+      const res = await runSmoke.mutateAsync({ ...fixtures });
       setSmoke(res);
       toast({
         title: res.failed ? "Read-path smoke finished with failures" : "Read-path smoke passed",
@@ -75,6 +84,7 @@ export default function ArtifactCoveragePanel() {
       });
     }
   };
+
 
   const exportCsv = async () => {
     setExporting(true);
@@ -243,6 +253,72 @@ export default function ArtifactCoveragePanel() {
           Include patient detail (PHI, audited)
         </label>
       </div>
+
+      <div className="mt-3 rounded-lg border border-border bg-background px-3 py-3">
+        <p className="text-xs font-medium text-foreground">Guardian arm fixtures (optional)</p>
+        <p className="mt-1 text-xs text-muted-foreground">
+          Passed in the request body at invoke time — nothing is stored. Leave blank to use the
+          function's <span className="font-mono">SMOKE_*</span> env values, or skip arms 6 &amp; 7
+          when neither is set.
+        </p>
+        <div className="mt-3 grid gap-2 sm:grid-cols-2 lg:grid-cols-4">
+          {([
+            ["guardianUid", "guardianUid (Firebase uid)"],
+            ["guardianElationId", "guardianElationId"],
+            ["childPatientId", "childPatientId (linked)"],
+            ["otherChildId", "otherChildId (unlinked)"],
+          ] as const).map(([key, label]) => (
+            <label key={key} className="text-xs text-muted-foreground">
+              {label}
+              <input
+                value={fixtures[key] ?? ""}
+                onChange={(e) => setFixture(key)(e.target.value)}
+                placeholder="—"
+                spellCheck={false}
+                className="mt-1 w-full rounded-lg border border-border bg-card px-2.5 py-1.5 font-mono text-xs text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring"
+              />
+            </label>
+          ))}
+        </div>
+      </div>
+
+      {smoke?.guardianFixture && (
+        <div className="mt-3 rounded-lg border border-border bg-muted/40 px-3 py-2">
+          <p className="text-xs font-medium text-foreground">Guardian gate</p>
+          <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1 font-mono text-xs text-muted-foreground">
+            <span>enabled: {String(smoke.guardianFixture.enabled ?? "—")}</span>
+            <span>scoped: {String(smoke.guardianFixture.scoped ?? "—")}</span>
+            <span>allowlistSize: {String(smoke.guardianFixture.allowlistSize ?? "—")}</span>
+            <span
+              className={smoke.guardianFixture.failClosed ? "text-destructive" : undefined}
+            >
+              failClosed: {String(smoke.guardianFixture.failClosed ?? "—")}
+            </span>
+          </div>
+          {smoke.guardianFixture.fixtureSources && (
+            <div className="mt-1.5 flex flex-wrap gap-x-4 gap-y-1 font-mono text-xs text-muted-foreground">
+              {Object.entries(smoke.guardianFixture.fixtureSources).map(([k, v]) => (
+                <span key={k}>
+                  {k}: {String(v)}
+                </span>
+              ))}
+            </div>
+          )}
+          <div className="mt-2 space-y-1">
+            {(smoke.results ?? [])
+              .filter((c) => /^[67]\./.test(c.name))
+              .map((c) => (
+                <p
+                  key={c.name}
+                  className={`text-xs ${c.skipped ? "text-muted-foreground" : c.pass ? "text-success" : "text-destructive"}`}
+                >
+                  {c.skipped ? "SKIPPED" : c.pass ? "PASS" : "FAIL"} · {c.name} —{" "}
+                  <span className="font-mono">{c.detail}</span>
+                </p>
+              ))}
+          </div>
+        </div>
+      )}
 
 
       {smoke && (
