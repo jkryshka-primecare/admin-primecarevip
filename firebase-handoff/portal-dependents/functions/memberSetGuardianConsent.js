@@ -11,7 +11,7 @@ const functions = require('firebase-functions');
 const admin = require('firebase-admin');
 const { log, logError } = require('./middleware/logger');
 const { verifyPatientToken } = require('./middleware/verifyAuth');
-const { guardianKey } = require('./core/services/patient/guardians');
+const { guardianKey, normalizeUid } = require('./core/services/patient/guardians');
 
 function jsonError(res, status, code, reason, message) {
   return res.status(status).json({
@@ -63,9 +63,27 @@ exports.memberSetGuardianConsent = functions
     // taken from the request body — that would be the whole vulnerability.
     let ref;
     try {
-      const own = await db.collection('patients').where('firebaseUid', '==', uid).limit(1).get();
-      if (own.empty) return jsonError(res, 404, 'NOT_FOUND', 'NO_RECORD');
-      ref = own.docs[0].ref;
+      // UID CASE: roster docs store `firebaseUid` lower-cased (the
+      // internalUid convention), while the Auth token carries the original
+      // mixed-case uid. Try the raw form first for legacy docs, then the
+      // normalized form, then `authUid`, so no member is locked out by case.
+      const lowered = normalizeUid(uid);
+      const attempts = [
+        ['firebaseUid', uid],
+        ...(lowered !== uid ? [['firebaseUid', lowered]] : []),
+        ['authUid', uid],
+      ];
+      let found = null;
+      for (const [field, value] of attempts) {
+        // eslint-disable-next-line no-await-in-loop
+        const snap = await db.collection('patients').where(field, '==', value).limit(1).get();
+        if (!snap.empty) {
+          found = snap.docs[0].ref;
+          break;
+        }
+      }
+      if (!found) return jsonError(res, 404, 'NOT_FOUND', 'NO_RECORD');
+      ref = found;
     } catch (e) {
       logError('memberSetGuardianConsent', 'lookup-failed', { message: e.message });
       return jsonError(res, 500, 'INTERNAL', 'LOOKUP_FAILED');
