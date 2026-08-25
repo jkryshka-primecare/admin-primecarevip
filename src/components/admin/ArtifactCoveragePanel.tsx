@@ -33,6 +33,15 @@ export default function ArtifactCoveragePanel() {
   const [revealMisses, setRevealMisses] = useState(false);
   const [handoffPhi, setHandoffPhi] = useState(false);
   const [handoffBusy, setHandoffBusy] = useState(false);
+  /**
+   * Optional guardian-arm fixtures, typed in at invoke time so minors' ids stay
+   * out of the durable prod env. Empty fields are omitted from the request and
+   * the Cloud Function falls back to its SMOKE_* env vars (or skips the arm).
+   */
+  const [fixtures, setFixtures] = useState<SmokeFixtureOverrides>({});
+  const setFixture = (key: keyof SmokeFixtureOverrides) => (v: string) =>
+    setFixtures((f) => ({ ...f, [key]: v }));
+
 
 
   const pct = report?.coveragePct;
