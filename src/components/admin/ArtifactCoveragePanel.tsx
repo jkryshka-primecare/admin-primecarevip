@@ -254,6 +254,72 @@ export default function ArtifactCoveragePanel() {
         </label>
       </div>
 
+      <div className="mt-3 rounded-lg border border-border bg-background px-3 py-3">
+        <p className="text-xs font-medium text-foreground">Guardian arm fixtures (optional)</p>
+        <p className="mt-1 text-xs text-muted-foreground">
+          Passed in the request body at invoke time — nothing is stored. Leave blank to use the
+          function's <span className="font-mono">SMOKE_*</span> env values, or skip arms 6 &amp; 7
+          when neither is set.
+        </p>
+        <div className="mt-3 grid gap-2 sm:grid-cols-2 lg:grid-cols-4">
+          {([
+            ["guardianUid", "guardianUid (Firebase uid)"],
+            ["guardianElationId", "guardianElationId"],
+            ["childPatientId", "childPatientId (linked)"],
+            ["otherChildId", "otherChildId (unlinked)"],
+          ] as const).map(([key, label]) => (
+            <label key={key} className="text-xs text-muted-foreground">
+              {label}
+              <input
+                value={fixtures[key] ?? ""}
+                onChange={(e) => setFixture(key)(e.target.value)}
+                placeholder="—"
+                spellCheck={false}
+                className="mt-1 w-full rounded-lg border border-border bg-card px-2.5 py-1.5 font-mono text-xs text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring"
+              />
+            </label>
+          ))}
+        </div>
+      </div>
+
+      {smoke?.guardianFixture && (
+        <div className="mt-3 rounded-lg border border-border bg-muted/40 px-3 py-2">
+          <p className="text-xs font-medium text-foreground">Guardian gate</p>
+          <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1 font-mono text-xs text-muted-foreground">
+            <span>enabled: {String(smoke.guardianFixture.enabled ?? "—")}</span>
+            <span>scoped: {String(smoke.guardianFixture.scoped ?? "—")}</span>
+            <span>allowlistSize: {String(smoke.guardianFixture.allowlistSize ?? "—")}</span>
+            <span
+              className={smoke.guardianFixture.failClosed ? "text-destructive" : undefined}
+            >
+              failClosed: {String(smoke.guardianFixture.failClosed ?? "—")}
+            </span>
+          </div>
+          {smoke.guardianFixture.fixtureSources && (
+            <div className="mt-1.5 flex flex-wrap gap-x-4 gap-y-1 font-mono text-xs text-muted-foreground">
+              {Object.entries(smoke.guardianFixture.fixtureSources).map(([k, v]) => (
+                <span key={k}>
+                  {k}: {String(v)}
+                </span>
+              ))}
+            </div>
+          )}
+          <div className="mt-2 space-y-1">
+            {(smoke.results ?? [])
+              .filter((c) => /^[67]\./.test(c.name))
+              .map((c) => (
+                <p
+                  key={c.name}
+                  className={`text-xs ${c.skipped ? "text-muted-foreground" : c.pass ? "text-success" : "text-destructive"}`}
+                >
+                  {c.skipped ? "SKIPPED" : c.pass ? "PASS" : "FAIL"} · {c.name} —{" "}
+                  <span className="font-mono">{c.detail}</span>
+                </p>
+              ))}
+          </div>
+        </div>
+      )}
+
 
       {smoke && (
         <div className="mt-4 overflow-hidden rounded-xl border border-border">
