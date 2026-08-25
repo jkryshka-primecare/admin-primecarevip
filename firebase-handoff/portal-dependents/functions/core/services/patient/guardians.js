@@ -31,6 +31,21 @@ const SOURCES = ['hint_household', 'inferred_email_name', 'manual', 'email_on_fi
 const SOURCE_ALIASES = { manual_search: 'manual' };
 const STATUSES = ['active', 'pending_adult_consent', 'revoked'];
 
+/**
+ * UID CASE NORMALIZATION (non-negotiable).
+ *
+ * `readArtifact.js` lowercases `user.uid` at the door, and `internalUid.js`
+ * derives `legacyUid` from `lower(firebaseUid || authUid)`, so every uid that
+ * reaches a read check is already lower-cased. Guardian entries, however, were
+ * written from admin/CSV paths that stored the raw mixed-case Auth uid. A bare
+ * `===` between the two forms silently denies a legitimate guardian.
+ *
+ * Every uid crossing this module — stored or compared — goes through here.
+ */
+function normalizeUid(uid) {
+  return String(uid || '').trim().toLowerCase();
+}
+
 function normalizeSource(source) {
   const s = String(source || '').trim();
   return SOURCE_ALIASES[s] || s;
@@ -69,7 +84,7 @@ function sanitizeEntry(entry) {
     guardianHintId: entry.guardianHintId ? String(entry.guardianHintId) : null,
     guardianEmail: String(entry.guardianEmail || '').trim().toLowerCase(),
     guardianName: entry.guardianName ? String(entry.guardianName).slice(0, 200) : null,
-    guardianUid: entry.guardianUid ? String(entry.guardianUid) : null,
+    guardianUid: entry.guardianUid ? normalizeUid(entry.guardianUid) : null,
     source: entry.source,
     status: entry.status,
     confirmedBy: entry.confirmedBy,
@@ -237,14 +252,17 @@ async function revokeGuardian(childElationId, selector, actor, reason) {
  *
  * Fails CLOSED: any error, missing doc, or non-active status denies.
  */
-async function isActiveGuardian(childElationId, uid) {
+async function isActiveGuardian(childElationId, rawUid) {
+  const uid = normalizeUid(rawUid);
   if (!uid) return false;
   try {
     const snap = await admin.firestore().collection('patients').doc(String(childElationId)).get();
     if (!snap.exists) return false;
     const guardians = snap.data().guardians;
     if (!Array.isArray(guardians)) return false;
-    return guardians.some((g) => g && g.status === 'active' && g.guardianUid === uid);
+    return guardians.some(
+      (g) => g && g.status === 'active' && normalizeUid(g.guardianUid) === uid,
+    );
   } catch (_e) {
     return false;
   }
@@ -264,7 +282,8 @@ async function isActiveGuardian(childElationId, uid) {
  * Only 'active' or 'pending_adult_consent' entries are bindable; a revoked
  * entry never gains a uid.
  */
-async function bindGuardianUid(childElationId, selector, uid) {
+async function bindGuardianUid(childElationId, selector, rawUid) {
+  const uid = normalizeUid(rawUid);
   const db = admin.firestore();
   const ref = db.collection('patients').doc(String(childElationId));
   const key = typeof selector === 'string' ? selector : guardianKey(selector || {});
@@ -291,10 +310,17 @@ async function bindGuardianUid(childElationId, selector, uid) {
       return { bound: false, reason: 'GUARDIAN_NOT_BINDABLE' };
     }
     if (g.guardianUid) {
-      return { bound: g.guardianUid === uid, reason: g.guardianUid === uid ? null : 'ALREADY_BOUND' };
+      const same = normalizeUid(g.guardianUid) === uid;
+      // Heal a legacy mixed-case binding in place so later fast-path checks
+      // (which compare normalized) keep matching without a re-bind.
+      if (same && g.guardianUid !== uid) {
+        guardians[i] = { ...g, guardianUid: uid };
+        tx.set(ref, { guardians }, { merge: true });
+      }
+      return { bound: same, reason: same ? null : 'ALREADY_BOUND' };
     }
 
-    guardians[i] = { ...g, guardianUid: String(uid) };
+    guardians[i] = { ...g, guardianUid: uid };
     tx.set(ref, { guardians }, { merge: true });
     return { bound: true, guardianKey: key };
   });
@@ -323,7 +349,8 @@ async function bindGuardianUid(childElationId, selector, uid) {
  * @returns {Promise<{ authorized: boolean, reason?: string, guardianKey?: string,
  *                     bound?: boolean, bindReason?: string }>}
  */
-async function resolveGuardianAccess(childElationId, { uid, callerElationId } = {}) {
+async function resolveGuardianAccess(childElationId, { uid: rawUid, callerElationId } = {}) {
+  const uid = normalizeUid(rawUid);
   const callerId = String(callerElationId || '').trim();
   const childId = String(childElationId || '').trim();
   if (!uid) return { authorized: false, reason: 'NO_UID' };
@@ -344,7 +371,11 @@ async function resolveGuardianAccess(childElationId, { uid, callerElationId } = 
   if (!Array.isArray(guardians)) return { authorized: false, reason: 'NO_GUARDIANS' };
 
   // Fast path: an already-bound active entry (what isActiveGuardian sees).
-  if (guardians.some((g) => g && g.status === 'active' && g.guardianUid && g.guardianUid === uid)) {
+  if (
+    guardians.some(
+      (g) => g && g.status === 'active' && g.guardianUid && normalizeUid(g.guardianUid) === uid,
+    )
+  ) {
     return { authorized: true, reason: 'BOUND_UID', bound: true };
   }
 
@@ -361,7 +392,7 @@ async function resolveGuardianAccess(childElationId, { uid, callerElationId } = 
   if (matches.length === 0) return { authorized: false, reason: 'NOT_A_GUARDIAN' };
 
   const entry = matches[0];
-  if (entry.guardianUid && entry.guardianUid !== uid) {
+  if (entry.guardianUid && normalizeUid(entry.guardianUid) !== uid) {
     // The chart says this caller is the guardian, but the entry is already
     // bound to a different account. Fail closed and let an admin sort it out.
     return { authorized: false, reason: 'ALREADY_BOUND_TO_OTHER_UID' };
@@ -392,6 +423,7 @@ module.exports = {
   SOURCES,
   SOURCE_ALIASES,
   normalizeSource,
+  normalizeUid,
   STATUSES,
   guardianKey,
 
