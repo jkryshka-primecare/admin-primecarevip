@@ -327,8 +327,16 @@ export function useRunArtifactAudit() {
 
 
 export type SmokeCase = { name: string; pass: boolean; detail: string; skipped?: boolean };
+export type SmokeGuardianFixture = {
+  fixtureSources?: Record<string, "body" | "env" | "unset" | string>;
+  enabled?: boolean;
+  scoped?: boolean;
+  allowlistSize?: number;
+  failClosed?: boolean;
+};
 export type SmokeReport = {
   fixture?: { patientId: string; uid: string; missingId: string };
+  guardianFixture?: SmokeGuardianFixture;
   base?: string;
   ranAt?: string;
   total?: number;
@@ -337,6 +345,7 @@ export type SmokeReport = {
   skipped?: number;
   results?: SmokeCase[];
 };
+
 
 /**
  * Runs the live read-path smoke against the DEPLOYED patient endpoints, using
