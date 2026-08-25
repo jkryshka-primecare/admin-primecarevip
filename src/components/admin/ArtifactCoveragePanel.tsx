@@ -60,7 +60,7 @@ export default function ArtifactCoveragePanel() {
   const triggerSmoke = async () => {
     setSmoke(null);
     try {
-      const res = await runSmoke.mutateAsync({});
+      const res = await runSmoke.mutateAsync({ ...fixtures });
       setSmoke(res);
       toast({
         title: res.failed ? "Read-path smoke finished with failures" : "Read-path smoke passed",
@@ -75,6 +75,7 @@ export default function ArtifactCoveragePanel() {
       });
     }
   };
+
 
   const exportCsv = async () => {
     setExporting(true);
