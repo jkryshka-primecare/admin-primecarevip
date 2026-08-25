@@ -3,7 +3,7 @@ import { motion } from "framer-motion";
 import { ShieldCheck, RefreshCw, Download, AlertTriangle, FileWarning, PlayCircle, Stethoscope, Check, X, MinusCircle, Eye, EyeOff, FileText, Copy } from "lucide-react";
 import { useArtifactCoverage, missesToCsv } from "@/hooks/useArtifactCoverage";
 import CoverageGate from "@/components/admin/CoverageGate";
-import { useRunArtifactAudit, useRunReadPathSmoke, type SmokeReport } from "@/hooks/usePortalAdmin";
+import { useRunArtifactAudit, useRunReadPathSmoke, type SmokeReport, type SmokeFixtureOverrides } from "@/hooks/usePortalAdmin";
 import { buildCoverageHandoff } from "@/lib/portal/coverageHandoff";
 import { useToast } from "@/hooks/use-toast";
 
