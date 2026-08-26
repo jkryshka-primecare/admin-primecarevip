@@ -1,5 +1,5 @@
 import { useMemo, useState } from "react";
-import { AlertCircle, Loader2, RefreshCw, Search, UserPlus, Users } from "lucide-react";
+import { AlertCircle, Download, Loader2, RefreshCw, Search, UserPlus, Users } from "lucide-react";
 import {
   useMemberReconciliation,
   BUCKET_LABELS,
