@@ -30,7 +30,10 @@ type RequestBody = {
   parentPatientId?: string;
   /** Aggregate COUNT only — returns no documents, so no PHI leaves Firestore. */
   count?: boolean;
+  /** List subcollection ids under patients/{parentPatientId} — names only, no PHI. */
+  listCollections?: boolean;
 };
+
 
 // Per-patient subcollections readable only via `parentPatientId`.
 const ALLOWED_SUBCOLLECTIONS = new Set(["labs", "imaging", "medical_records"]);
