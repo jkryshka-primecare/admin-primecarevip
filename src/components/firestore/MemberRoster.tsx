@@ -1,5 +1,5 @@
 import { useMemo, useState } from "react";
-import { AlertCircle, Loader2, RefreshCw, Search, UserPlus, Users } from "lucide-react";
+import { AlertCircle, Download, Loader2, RefreshCw, Search, UserPlus, Users } from "lucide-react";
 import {
   useMemberReconciliation,
   BUCKET_LABELS,
@@ -77,6 +77,33 @@ export default function MemberRoster() {
 
   const countFor = (f: Filter) => (f === "all" ? rows.length : counts[f]);
 
+  /**
+   * Elation ids for every active member (adult or minor) that has a portal
+   * record — the ingest allowlist. Former members are excluded; fixtures are
+   * already filtered out upstream.
+   */
+  const allowlistIds = useMemo(() => {
+    const ids = new Set<string>();
+    for (const r of rows) {
+      if (r.bucket !== "member_active" && r.bucket !== "member_invited") continue;
+      const id = String(r.elationId ?? "").trim();
+      if (id) ids.add(id);
+    }
+    return Array.from(ids).sort();
+  }, [rows]);
+
+  const downloadAllowlist = () => {
+    const blob = new Blob([allowlistIds.join("\n") + "\n"], {
+      type: "text/plain;charset=utf-8",
+    });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = "active-member-elation-ids.txt";
+    a.click();
+    URL.revokeObjectURL(url);
+  };
+
 
   return (
     <div className="space-y-4">
@@ -95,6 +122,17 @@ export default function MemberRoster() {
               <span className="ml-1 text-muted-foreground">of {missingMembers.length} missing</span>
             </Button>
           )}
+
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={downloadAllowlist}
+            disabled={loading || allowlistIds.length === 0}
+            title="active-member-elation-ids.txt — one Elation id per line"
+          >
+            <Download className="mr-1 h-3.5 w-3.5" />
+            Export {allowlistIds.length.toLocaleString()} Elation IDs
+          </Button>
 
           <Button variant="outline" size="icon" onClick={() => refetch()} disabled={loading}>
             <RefreshCw className={cn("h-4 w-4", loading && "animate-spin")} />
