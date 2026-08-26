@@ -44,9 +44,9 @@ const RUNNERS: RunnerDef[] = [
   },
   {
     action: "backfillMinorReports",
-    title: "Minor-track report ingest",
+    title: "Report ingest (minors / adults)",
     blurb:
-      "Ingests Elation reports for guardian-proxied minors only. The id list is re-validated against the minor set upstream.",
+      "Ingests Elation reports into the store. Pick the cohort — every id is re-validated upstream against the minor rule or the soft-adult rule. Dry run returns the report-type census.",
     paged: false,
     needsIds: true,
   },
@@ -68,6 +68,13 @@ function ReportView({ report }: { report: BackfillReport }) {
   push("Would mint", report.wouldMint);
   push("Copied", report.copied);
   push("Would copy", report.wouldCopy);
+  push("Eligible", report.eligible);
+  push("Would ingest", report.wouldIngest);
+  push("Already stored", report.alreadyStored);
+  push("Skipped (unsigned)", report.skippedUnsigned);
+  push("Skipped (deleted)", report.skippedDeleted);
+  push("Skipped (not allowlisted)", report.skippedNotAllowlisted);
+  push("Skipped (records deferred)", report.skippedRecordsDeferred);
   push("Ingested", report.ingested);
   push("Skipped", report.skipped);
   push("No legacy object", report.noLegacyObject);
@@ -102,10 +109,42 @@ function ReportView({ report }: { report: BackfillReport }) {
         )}
       </div>
 
+      {Array.isArray(report.reportTypeCensus) && report.reportTypeCensus.length > 0 && (
+        <div className="rounded-md border border-border bg-muted/30 p-3">
+          <p className="text-xs font-medium text-foreground">
+            Report-type census ({report.reportTypeCensus.length} distinct types)
+          </p>
+          <table className="mt-2 w-full font-mono text-[11px]">
+            <thead className="text-muted-foreground">
+              <tr className="text-left">
+                <th className="py-0.5 pr-3 font-normal">report_type</th>
+                <th className="py-0.5 pr-3 font-normal">count</th>
+                <th className="py-0.5 font-normal">mapped category</th>
+              </tr>
+            </thead>
+            <tbody className="text-foreground">
+              {report.reportTypeCensus.slice(0, 60).map((row) => (
+                <tr key={row.reportType} className="border-t border-border/60">
+                  <td className="py-0.5 pr-3">{row.reportType}</td>
+                  <td className="py-0.5 pr-3">{row.count.toLocaleString()}</td>
+                  <td className="py-0.5">
+                    {row.unmappedType ? (
+                      <span className="text-warning">unmapped</span>
+                    ) : (
+                      (row.category ?? "—")
+                    )}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+
       {rejected.length > 0 && (
         <div className="rounded-md border border-warning/40 bg-warning/10 p-3 text-xs">
           <p className="font-medium text-foreground">
-            {rejected.length} id(s) refused upstream — not in the minor set:
+            {rejected.length} id(s) refused upstream — not in the requested cohort:
           </p>
           <ul className="mt-1 space-y-0.5 font-mono text-[11px] text-muted-foreground">
             {rejected.slice(0, 20).map((r) => (
@@ -129,6 +168,8 @@ function Runner({ def, canApply }: { def: RunnerDef; canApply: boolean }) {
   const [report, setReport] = useState<BackfillReport | null>(null);
   const [mode, setMode] = useState<"dry" | "apply" | null>(null);
   const [progress, setProgress] = useState<{ done: number; total: number } | null>(null);
+  const [cohort, setCohort] = useState<"minors" | "adults">("minors");
+  const [skipExisting, setSkipExisting] = useState(true);
 
   const ids = idsText
     .split(/[\s,]+/)
@@ -143,6 +184,20 @@ function Runner({ def, canApply }: { def: RunnerDef; canApply: boolean }) {
   const APPLY_CHUNK = 8;
   const DRY_CHUNK = 100;
 
+  function mergeCensus(
+    a: BackfillReport["reportTypeCensus"],
+    b: BackfillReport["reportTypeCensus"],
+  ): BackfillReport["reportTypeCensus"] {
+    if (!a && !b) return undefined;
+    const byType = new Map<string, { reportType: string; count: number; category?: string | null; unmappedType?: boolean }>();
+    [...(a ?? []), ...(b ?? [])].forEach((row) => {
+      const prev = byType.get(row.reportType);
+      if (prev) prev.count += row.count;
+      else byType.set(row.reportType, { ...row });
+    });
+    return [...byType.values()].sort((x, y) => y.count - x.count);
+  }
+
   function mergeReports(a: BackfillReport | null, b: BackfillReport): BackfillReport {
     if (!a) return b;
     const num = (x: unknown, y: unknown) =>
@@ -154,6 +209,14 @@ function Runner({ def, canApply }: { def: RunnerDef; canApply: boolean }) {
       skipped: num(a.skipped, b.skipped),
       failed: [...(a.failed ?? []), ...(b.failed ?? [])],
       rejected: [...(a.rejected ?? []), ...(b.rejected ?? [])],
+      eligible: num(a.eligible, b.eligible),
+      wouldIngest: num(a.wouldIngest, b.wouldIngest),
+      alreadyStored: num(a.alreadyStored, b.alreadyStored),
+      skippedUnsigned: num(a.skippedUnsigned, b.skippedUnsigned),
+      skippedDeleted: num(a.skippedDeleted, b.skippedDeleted),
+      skippedNotAllowlisted: num(a.skippedNotAllowlisted, b.skippedNotAllowlisted),
+      skippedRecordsDeferred: num(a.skippedRecordsDeferred, b.skippedRecordsDeferred),
+      reportTypeCensus: mergeCensus(a.reportTypeCensus, b.reportTypeCensus),
     };
   }
 
@@ -172,6 +235,8 @@ function Runner({ def, canApply }: { def: RunnerDef; canApply: boolean }) {
             apply,
             reason: reason.trim(),
             patientIds: chunk,
+            cohort,
+            skipExisting,
           });
           merged = mergeReports(merged, res);
           setReport(merged);
@@ -217,9 +282,41 @@ function Runner({ def, canApply }: { def: RunnerDef; canApply: boolean }) {
       </div>
 
       {def.needsIds && (
+        <div className="mt-3 flex flex-wrap items-center gap-3">
+          <div>
+            <label className="text-xs font-medium text-foreground">Cohort</label>
+            <div className="mt-1 flex rounded-md border border-border p-0.5">
+              {(["minors", "adults"] as const).map((c) => (
+                <button
+                  key={c}
+                  onClick={() => setCohort(c)}
+                  className={`rounded px-3 py-1 text-xs font-medium capitalize transition-colors ${
+                    cohort === c
+                      ? "bg-primary text-primary-foreground"
+                      : "text-muted-foreground hover:text-foreground"
+                  }`}
+                >
+                  {c}
+                </button>
+              ))}
+            </div>
+          </div>
+          <label className="flex items-center gap-2 text-xs text-foreground">
+            <input
+              type="checkbox"
+              checked={skipExisting}
+              onChange={(e) => setSkipExisting(e.target.checked)}
+              className="h-3.5 w-3.5 accent-[hsl(var(--primary))]"
+            />
+            Skip reports already stored
+          </label>
+        </div>
+      )}
+
+      {def.needsIds && (
         <div className="mt-3">
           <label className="text-xs font-medium text-foreground">
-            Minor Elation patient ids
+            {cohort === "adults" ? "Adult" : "Minor"} Elation patient ids
           </label>
           <textarea
             value={idsText}
@@ -234,7 +331,11 @@ function Runner({ def, canApply }: { def: RunnerDef; canApply: boolean }) {
               <span className="text-destructive"> · {badIds.length} malformed</span>
             )}
             {" · "}
-            re-validated against <span className="font-mono">dependent.isMinor</span> upstream.
+            re-validated upstream against{" "}
+            <span className="font-mono">
+              {cohort === "adults" ? "the soft-adult rule" : "dependent.isMinor"}
+            </span>
+            .
           </p>
         </div>
       )}

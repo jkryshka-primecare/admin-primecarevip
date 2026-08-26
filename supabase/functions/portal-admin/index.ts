@@ -833,6 +833,10 @@ Deno.serve(async (req) => {
   const isBulk = BULK_MIGRATIONS.includes(action);
   const bulkApply = isBulk && body.apply === true;
   let minorIds: string[] = [];
+  // Report-ingest cohort switch. The Cloud Function wrapper is the authority
+  // (it re-validates every id against isMinorRecord / the soft-adult rule);
+  // this only forwards the operator's choice. Default stays 'minors'.
+  const cohort = body.cohort === "adults" ? "adults" : "minors";
 
   if (isBulk) {
     if (!(await isAdmin(ctx))) {
@@ -1119,7 +1123,14 @@ Deno.serve(async (req) => {
       : MAX_BATCH;
 
     if (typeof body.cursor === "string" && body.cursor) upstreamPayload.cursor = body.cursor;
-    if (action === "backfillMinorReports") upstreamPayload.patientIds = minorIds;
+    if (action === "backfillMinorReports") {
+      upstreamPayload.patientIds = minorIds;
+      upstreamPayload.cohort = cohort;
+      if (typeof body.storeMedicalRecords === "boolean") {
+        upstreamPayload.storeMedicalRecords = body.storeMedicalRecords;
+      }
+      if (body.skipExisting === true) upstreamPayload.skipExisting = true;
+    }
   }
 
   const fnName = FUNCTION_BY_ACTION[action];
@@ -1137,6 +1148,7 @@ Deno.serve(async (req) => {
         cursor: upstreamPayload.cursor ?? null,
         patientIds: action === "backfillMinorReports" ? minorIds : undefined,
         patientCount: action === "backfillMinorReports" ? minorIds.length : undefined,
+        cohort: action === "backfillMinorReports" ? cohort : undefined,
       },
     });
     if (!attributed) {

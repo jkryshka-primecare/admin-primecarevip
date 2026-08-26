@@ -444,6 +444,22 @@ export type BackfillReport = {
   rejected?: { patientId: string; reason: string }[];
   ingested?: number;
   skipped?: number;
+  cohort?: "minors" | "adults";
+  eligible?: number;
+  wouldIngest?: number;
+  alreadyStored?: number;
+  skippedUnsigned?: number;
+  skippedDeleted?: number;
+  skippedNotAllowlisted?: number;
+  skippedRecordsDeferred?: number;
+  runId?: string;
+  async?: boolean;
+  reportTypeCensus?: {
+    reportType: string;
+    count: number;
+    category?: string | null;
+    unmappedType?: boolean;
+  }[];
 };
 
 export type BackfillVars = {
@@ -451,8 +467,12 @@ export type BackfillVars = {
   reason?: string;
   limit?: number;
   cursor?: string | null;
-  /** Minor-track only. Re-validated against `dependent.isMinor` in the wrapper. */
+  /** Report ingest only. Re-validated against the cohort rule in the wrapper. */
   patientIds?: string[];
+  /** Report ingest only. Defaults to the minor track. */
+  cohort?: "minors" | "adults";
+  skipExisting?: boolean;
+  storeMedicalRecords?: boolean;
 };
 
 export function useBackfillRunner(action: BackfillAction) {
@@ -465,6 +485,11 @@ export function useBackfillRunner(action: BackfillAction) {
         ...(vars.limit ? { limit: vars.limit } : {}),
         ...(vars.cursor ? { cursor: vars.cursor } : {}),
         ...(vars.patientIds ? { patientIds: vars.patientIds } : {}),
+        ...(vars.cohort ? { cohort: vars.cohort } : {}),
+        ...(vars.skipExisting ? { skipExisting: true } : {}),
+        ...(typeof vars.storeMedicalRecords === "boolean"
+          ? { storeMedicalRecords: vars.storeMedicalRecords }
+          : {}),
       });
       return res.data ?? ({} as BackfillReport);
     },
