@@ -218,8 +218,13 @@ Deno.serve(async (req) => {
     const body: RequestBody = req.method === "POST" ? await req.json() : {};
     const collection = (body.collection ?? "").trim();
     const parentId = String(body.parentPatientId ?? "").trim();
+    const listCollections = body.listCollections === true;
 
-    if (parentId) {
+    if (listCollections) {
+      if (!/^[A-Za-z0-9_-]+$/.test(parentId)) {
+        return json({ error: "Invalid parentPatientId." }, 400);
+      }
+    } else if (parentId) {
       if (!ALLOWED_SUBCOLLECTIONS.has(collection)) {
         return json({ error: `Subcollection "${collection}" is not readable through this bridge.` }, 400);
       }
@@ -230,8 +235,6 @@ Deno.serve(async (req) => {
       return json({ error: `Collection "${collection}" is not readable through this bridge.` }, 400);
     }
 
-    const sa = loadServiceAccount();
-    const token = await getAccessToken(sa);
     const base = `https://firestore.googleapis.com/v1/projects/${sa.project_id}/databases/(default)/documents`;
     const parentPath = parentId ? `${base}/patients/${encodeURIComponent(parentId)}` : base;
 
