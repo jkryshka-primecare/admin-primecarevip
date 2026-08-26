@@ -235,13 +235,23 @@ Deno.serve(async (req) => {
       return json({ error: `Collection "${collection}" is not readable through this bridge.` }, 400);
     }
 
+    const sa = loadServiceAccount();
+    const token = await getAccessToken(sa);
     const base = `https://firestore.googleapis.com/v1/projects/${sa.project_id}/databases/(default)/documents`;
     const parentPath = parentId ? `${base}/patients/${encodeURIComponent(parentId)}` : base;
 
     let upstream: Response;
     let url: string;
 
-    if (body.id) {
+    if (listCollections) {
+      url = `${parentPath}:listCollectionIds`;
+      upstream = await fetch(url, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+        body: JSON.stringify({ pageSize: 100 }),
+      });
+    } else if (body.id) {
+
       url = `${base}/${collection}/${encodeURIComponent(body.id)}`;
       upstream = await fetch(url, { headers: { Authorization: `Bearer ${token}` } });
     } else if (body.count) {
