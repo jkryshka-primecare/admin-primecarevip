@@ -8,8 +8,8 @@
 // backfill loads history. See D-079 (ingest locks) and D-080 (backfill soft-D-077).
 //
 // NOT a Firebase trigger. A plain exported function, invoked by a thin runner (D-072
-// keyless Admin SDK flow, Doppler-supplied Elation secrets) — matches how one-off
-// jobs already run. Not registered in index.js.
+// keyless Admin SDK flow, Doppler-supplied Elation secrets) or by
+// backfillElationReportsHttp.js (operator console). Not registered in index.js.
 //
 // LOCKED DECISIONS (see chat + DECISION-LOG):
 //   Driver: caller supplies an array of Elation patient ids (allowlist now, MK's
@@ -21,6 +21,8 @@
 //   Decision A: skip DELETED stubs (no tombstone in backfill) and UNSIGNED stubs
 //     BEFORE re-fetch — only signed, non-deleted reports are stored.
 //   D-068 containment: HARD. isIngestAllowed(id) gates every patient. Unchanged.
+//     NOTE (adult backfill): isIngestAllowed now reads ELATION_INGEST_ALLOWLIST
+//     when set, falling back to ELATION_READ_ALLOWLIST. See reportIngest.js.
 //   D-080 soft-D-077: the active-member check is SOFT here. An explicitly non-active
 //     patients doc is skipped; a MISSING doc or absent field PROCEEDS (+log), because
 //     MK's supplied list is the authority for "active" and the backfill may run before
@@ -28,14 +30,25 @@
 //     input list). Asymmetry is intentional; logged in D-080.
 //   Audit: phi_access_log per re-fetch, actor uid 'system:backfillElationReports',
 //     role 'system', source 'backfill', NO feedId (no feed event), action
-//     'report_ingested' (backfill never tombstones). Fail-fast PER RECORD: a failed
-//     audit write blocks THAT report's store but does not abort the batch.
+//     'report_ingested'. Fail-fast PER RECORD.
 //   Idempotent: store-once by reportId, merge:false overwrite — re-runs are safe.
-//   Resilience: a per-report or per-patient error logs + counts + CONTINUES (batch
-//     job, no watermark). Re-run picks up any straggler.
+//   Resilience: a per-report or per-patient error logs + counts + CONTINUES.
+//
+// ADULT BACKFILL AMENDMENTS (2026-08-26, "go-ahead" review items 2–4):
+//   * `options.skipExisting` — read labs/{reportId} first and skip the store +
+//     artifact when the stored copy is current. Unset => byte-identical legacy
+//     (minor-track) behaviour.
+//   * Streamed artifact upload with its OWN abort budget, and a RANGED first-8-byte
+//     read for the `%PDF-` invariant instead of a full download-back.
+//   * `medical_records` participate in artifact upload when MR storing is enabled
+//     (otherwise every MR doc lands hasArtifact:true with no object).
+//   * `options.dryRun` — no writes at all; returns eligibility + a `reportTypeCensus`.
+//   * `options.concurrency` + `options.onPatientComplete` — bounded parallelism and
+//     per-id checkpointing so a 540s timeout resumes at the next id.
 
 const admin = require('firebase-admin');
-const { elationGet, ELATION_BASE, getBinary } = require('./core/services/elation/client');
+const elationClient = require('./core/services/elation/client');
+const { elationGet, ELATION_BASE, getBinary } = elationClient;
 const { log, logError } = require('./middleware/logger');
 const {
   mapCategory,
@@ -74,38 +87,120 @@ function noteError(pc, stage, err, extra) {
 
 const REPORTS_PAGE_CAP = 200; // safety cap; loud failure > silent partial pull.
 
-// Pull ALL reports for one patient, following cursors to exhaustion. Mirrors the
-// poller's drainFeed cursor discipline. Returns the raw stub list (grids empty).
-async function listPatientReports(elationPatientId) {
-  const out = [];
-  let json = await elationGet('/reports/?patient=' + encodeURIComponent(elationPatientId));
-  let pages = 0;
-  while (true) {
-    const results = Array.isArray(json)
-      ? json
-      : (json && Array.isArray(json.results) ? json.results : null);
-    if (results === null) throw new Error('ELATION_BAD_REPORTS_RESPONSE');
-    results.forEach((r) => out.push(r));
-    pages += 1;
-    const next = (!Array.isArray(json) && json.next) ? json.next : null;
-    if (!next) break;
-    if (pages >= REPORTS_PAGE_CAP) throw new Error('ELATION_REPORTS_PAGE_CAP_EXCEEDED');
-    if (!String(next).startsWith(ELATION_BASE)) throw new Error('ELATION_BAD_CURSOR');
-    json = await elationGet(String(next).slice(ELATION_BASE.length));
+// A /printable fetch is a multi-MB PDF over a slow upstream and must NOT share the
+// JSON call's short budget — the 5.6MB / 16.4MB reports are exactly what timed the
+// repair sweep out. Deliberately a SEPARATE constant (go-ahead item 3).
+const ARTIFACT_FETCH_TIMEOUT_MS = Number(process.env.ELATION_ARTIFACT_TIMEOUT_MS || 120000);
+
+/** True when MR docs may be stored at all (poller uses the same env flag). */
+function storeMedicalRecordsEnabled(options) {
+  if (options && typeof options.storeMedicalRecords === 'boolean') return options.storeMedicalRecords;
+  return process.env.ELATION_STORE_MEDICAL_RECORDS === 'true';
+}
+
+/** Categories that carry a servable /printable PDF. MR included per MK's decision. */
+function categoryHasArtifact(category, options) {
+  if (category === 'lab' || category === 'imaging') return true;
+  if (category === 'medical_records') return storeMedicalRecordsEnabled(options);
+  return false;
+}
+
+/** Elation's own "last touched" marker for a report body, as ms since epoch. */
+function elationModifiedMs(report) {
+  const raw = (report && (report.last_modified || report.signed_date || report.document_date)) || null;
+  if (!raw) return null;
+  const t = Date.parse(raw);
+  return Number.isFinite(t) ? t : null;
+}
+
+/** Firestore Timestamp | Date | ISO -> ms, or null. */
+function toMs(value) {
+  if (!value) return null;
+  if (typeof value.toMillis === 'function') return value.toMillis();
+  if (value instanceof Date) return value.getTime();
+  const t = Date.parse(String(value));
+  return Number.isFinite(t) ? t : null;
+}
+
+/**
+ * skipExisting predicate: the stored doc is CURRENT when it exists, is not
+ * tombstoned, and was written after Elation last touched the report.
+ * Unknown timestamps are treated as stale (we re-store) — never the reverse.
+ */
+function storedCopyIsCurrent(snap, report) {
+  if (!snap || !snap.exists) return false;
+  const data = snap.data() || {};
+  if (data.deleted === true) return false;
+  const storedAt = toMs(data.updatedAt);
+  const elationAt = elationModifiedMs(report);
+  if (storedAt === null || elationAt === null) return false;
+  return storedAt >= elationAt;
+}
+
+/** Ranged first-8-bytes read. Replaces the full download-back verify (item 2). */
+async function verifyPdfHeader(file) {
+  const chunks = [];
+  await new Promise((resolve, reject) => {
+    const stream = file.createReadStream({ start: 0, end: 7 });
+    stream.on('data', (c) => chunks.push(c));
+    stream.on('error', reject);
+    stream.on('end', resolve);
+  });
+  const head = Buffer.concat(chunks).subarray(0, 5).toString();
+  if (head !== '%PDF-') throw new Error('ARTIFACT_NOT_PDF');
+}
+
+/**
+ * Fetch the printable and write it to Storage. Streams when the shared Elation
+ * client exposes a stream helper; otherwise falls back to the buffered getBinary
+ * (still with the dedicated artifact budget). Returns bytes written when known.
+ */
+async function uploadArtifact(file, reportId) {
+  const path = '/reports/' + reportId + '/printable';
+  const writeOpts = { contentType: 'application/pdf', resumable: false };
+
+  if (typeof elationClient.getBinaryStream === 'function') {
+    const source = await elationClient.getBinaryStream(path, { timeoutMs: ARTIFACT_FETCH_TIMEOUT_MS });
+    const body = source && source.stream ? source.stream : source;
+    await new Promise((resolve, reject) => {
+      const dest = file.createWriteStream(writeOpts);
+      body.on('error', reject);
+      dest.on('error', reject);
+      dest.on('finish', resolve);
+      body.pipe(dest);
+    });
+    return null; // size unknown on the streamed path; GCS metadata has it
   }
-  return out;
+
+  const { buffer } = await getBinary(path, { timeoutMs: ARTIFACT_FETCH_TIMEOUT_MS });
+  await file.save(buffer, writeOpts);
+  return buffer.byteLength;
+}
+
+/** Census accumulator: distinct report_type -> count + mapped category. */
+function noteCensus(census, reportType) {
+  const key = reportType == null ? '(null)' : String(reportType);
+  if (!census[key]) {
+    const { category, subCategory, unmappedType } = mapCategory(reportType);
+    census[key] = { reportType: key, count: 0, category, subCategory, unmappedType };
+  }
+  census[key].count += 1;
 }
 
 // Backfill one patient. Never throws — accumulates into counters and returns a
 // per-patient summary. A patient-level failure (e.g. list call) is logged + counted.
-async function backfillPatient(db, FieldValue, bucket, elationPatientId, counters) {
+async function backfillPatient(db, FieldValue, bucket, elationPatientId, counters, options) {
+  const opts = options || {};
+  const dryRun = opts.dryRun === true;
+  const skipExisting = opts.skipExisting === true;
+  const cohort = opts.cohort === 'adults' ? 'adults' : 'minors';
   const pid = String(elationPatientId);
   const pc = {
     elationPatientId: pid, listed: 0, stored: 0,
     skippedDeleted: 0, skippedUnsigned: 0, notFound: 0, mismatched: 0, unresolved: 0, errors: 0,
     skippedNotAllowlisted: false, skippedNonActive: false, noPatientDoc: false,
-    skippedRecordsDeferred: 0,
-    artifactsStored: 0, artifactErrors: 0, artifactSkippedUnclaimed: 0,
+    skippedRecordsDeferred: 0, alreadyStored: 0, wouldStore: 0,
+    artifactsStored: 0, artifactErrors: 0, artifactSkippedUnclaimed: 0, artifactsAlreadyPresent: 0,
     errorDetails: [], lastError: null,
   };
 
@@ -119,9 +214,6 @@ async function backfillPatient(db, FieldValue, bucket, elationPatientId, counter
 
   // D-080 SOFT active-member check. Skip only an EXPLICITLY non-active doc; a missing
   // doc or absent field proceeds (+log) — MK's list is the "active" authority.
-  // Guarded like every other I/O in this function: a transient Firestore error here
-  // must not throw out of backfillPatient and abort the whole batch (D-080 resilience:
-  // per-patient error logs + counts + CONTINUES; backfillPatient never throws).
   let pSnap;
   try {
     pSnap = await db.collection('patients').doc(pid).get();
@@ -138,8 +230,16 @@ async function backfillPatient(db, FieldValue, bucket, elationPatientId, counter
     // D-080 stays SOFT for ADULTS: an existing doc with no `status` field proceeds,
     // exactly as before. MINORS are ALWAYS subject to the guardian check, whatever
     // their `status` — so a guardian revoked between batch load and run is honoured
-    // by the code, not by the input list.
-    if (!gate.eligible && (data.status !== undefined || isMinorRecord(data))) {
+    // by the code, not by the input list. In the `adults` cohort a minor record has
+    // already been rejected by the wrapper's partition, but re-check defensively.
+    const minor = isMinorRecord(data);
+    if (cohort === 'adults' && minor) {
+      counters.patientsSkippedNonActive += 1;
+      pc.skippedNonActive = true;
+      log('backfillElationReports', 'skip-minor-in-adult-cohort', { elationPatientId: pid });
+      return pc;
+    }
+    if (!gate.eligible && (data.status !== undefined || minor)) {
       counters.patientsSkippedNonActive += 1;
       pc.skippedNonActive = true;
       log('backfillElationReports', gate.reason, {
@@ -171,14 +271,57 @@ async function backfillPatient(db, FieldValue, bucket, elationPatientId, counter
     // Decision A — skip deleted BEFORE re-fetch (no tombstone in backfill).
     if (stub.deleted_date) {
       pc.skippedDeleted += 1; counters.skippedDeleted += 1;
-      log('backfillElationReports', 'skip-deleted', { elationPatientId: pid, reportId });
+      if (!dryRun) log('backfillElationReports', 'skip-deleted', { elationPatientId: pid, reportId });
       continue;
     }
     // Decision A — skip unsigned BEFORE re-fetch.
     if (!stub.signed_date) {
       pc.skippedUnsigned += 1; counters.skippedUnsigned += 1;
-      log('backfillElationReports', 'skip-unsigned', { elationPatientId: pid, reportId });
+      if (!dryRun) log('backfillElationReports', 'skip-unsigned', { elationPatientId: pid, reportId });
       continue;
+    }
+
+    // ---- DRY RUN -------------------------------------------------------
+    // No PHI re-fetch, no audit row, no write. The stub carries `report_type`,
+    // which is all the census needs; eligibility is decided from the stub plus
+    // the existing stored doc.
+    if (dryRun) {
+      noteCensus(counters.reportTypeCensus, stub.report_type);
+      const { category } = mapCategory(stub.report_type);
+      if (category === 'medical_records' && !storeMedicalRecordsEnabled(opts)) {
+        pc.skippedRecordsDeferred += 1; counters.skippedRecordsDeferred += 1;
+        continue;
+      }
+      let existing = null;
+      try {
+        existing = await db.collection('patients').doc(pid).collection('labs').doc(reportId).get();
+      } catch (err) {
+        pc.errors += 1; counters.errors += 1;
+        noteError(pc, 'dry-run-existing-lookup', err, { reportId });
+        continue;
+      }
+      if (existing.exists && (existing.data() || {}).deleted !== true) {
+        pc.alreadyStored += 1; counters.alreadyStored += 1;
+      } else {
+        pc.wouldStore += 1; counters.wouldStore += 1;
+      }
+      continue;
+    }
+    // --------------------------------------------------------------------
+
+    // skipExisting fast path — avoid the re-fetch entirely when the stored doc is
+    // already newer than the stub's own signed/modified marker.
+    let existingSnap = null;
+    if (skipExisting) {
+      try {
+        existingSnap = await db.collection('patients').doc(pid).collection('labs').doc(reportId).get();
+      } catch (err) {
+        existingSnap = null; // treat a lookup failure as "unknown" -> re-store
+      }
+      if (storedCopyIsCurrent(existingSnap, stub)) {
+        pc.alreadyStored += 1; counters.alreadyStored += 1;
+        continue;
+      }
     }
 
     // Re-fetch full body (stub grids are empty; verified live 2026-07-06).
@@ -197,10 +340,7 @@ async function backfillPatient(db, FieldValue, bucket, elationPatientId, counter
       continue; // re-runnable; straggler picked up next run
     }
 
-    // Ownership guard — never store under an unconfirmed or wrong patient. A missing
-    // patient on the re-fetched report is UNRESOLVED (matches the poller's skip-on-no-
-    // patient), logged distinctly from a real cross-patient mismatch. Both skip before
-    // any store, so no report is persisted unless report.patient === pid.
+    // Ownership guard — never store under an unconfirmed or wrong patient.
     const owner = report && report.patient != null ? String(report.patient) : null;
     if (owner === null) {
       pc.unresolved += 1; counters.unresolved += 1;
@@ -225,6 +365,20 @@ async function backfillPatient(db, FieldValue, bucket, elationPatientId, counter
     }
 
     const { category, subCategory, unmappedType } = mapCategory(report.report_type);
+    noteCensus(counters.reportTypeCensus, report.report_type);
+
+    // Type exclusions (census review outcome): drop before the audit + store.
+    if (opts.excludeReportTypes && opts.excludeReportTypes.has(String(report.report_type ?? '(null)'))) {
+      pc.skippedRecordsDeferred += 1; counters.skippedExcludedType += 1;
+      log('backfillElationReports', 'skip-excluded-type', { elationPatientId: pid, reportId });
+      continue;
+    }
+
+    // Second skipExisting check, now against the authoritative full body.
+    if (skipExisting && storedCopyIsCurrent(existingSnap, report)) {
+      pc.alreadyStored += 1; counters.alreadyStored += 1;
+      continue;
+    }
 
     // phi_access_log FAIL-FAST (per record). A failed audit write blocks THIS store
     // but does not abort the batch — re-run re-attempts idempotently.
@@ -246,10 +400,10 @@ async function backfillPatient(db, FieldValue, bucket, elationPatientId, counter
       continue; // no store without audit
     }
 
-    // #317 Records deferral (MVP): same guard as the poller. The PHI read (re-fetch)
-    // already happened and is audited above; we skip only the STORE for medical_records
-    // unless re-enabled. Placed after the audit so deferred reads keep an audit trail.
-    if (category === 'medical_records' && process.env.ELATION_STORE_MEDICAL_RECORDS !== 'true') {
+    // #317 Records deferral: same guard as the poller. The PHI read (re-fetch) already
+    // happened and is audited above; we skip only the STORE for medical_records unless
+    // re-enabled (ELATION_STORE_MEDICAL_RECORDS / options.storeMedicalRecords).
+    if (category === 'medical_records' && !storeMedicalRecordsEnabled(opts)) {
       pc.skippedRecordsDeferred += 1; counters.skippedRecordsDeferred += 1;
       log('backfillElationReports', 'skip-records-deferred', { elationPatientId: pid, reportId });
       continue;
@@ -258,9 +412,7 @@ async function backfillPatient(db, FieldValue, bucket, elationPatientId, counter
     // Store-once (idempotent) at patients/{id}/labs/{reportId}.
     try {
       // Write-once reverse index (reportId -> patient) so a later poller 404 can
-      // resolve the owner after the object is gone from Elation (D-107, #324). Zero
-      // PHI; idempotent set. Backfill has no delete branch of its own (it skips
-      // deleted stubs pre-fetch, D-080) — it only maintains the index for the poller.
+      // resolve the owner after the object is gone from Elation (D-107, #324).
       await db.collection('reportIndex').doc(reportId).set({ patient: pid });
 
       const payload = buildStoredPayload(report, category);
@@ -276,18 +428,13 @@ async function backfillPatient(db, FieldValue, bucket, elationPatientId, counter
       }, { merge: false });
       pc.stored += 1; counters.stored += 1;
 
-      // #372 (D-119): upload the report PDF artifact to Storage so getLabs/getImaging
-      // artifact mode can serve it. Metadata alone (above) leaves hasArtifact:true with
-      // no object -> the read CF 404s ARTIFACT_NOT_SYNCED and the chip dead-ends.
-      // Only lab/imaging carry a servable printable; medical_records are store-deferred
-      // above (D-102) and never reach here. Never store the Bearer-gated URL — fetch the
-      // bytes server-side and store only the bytes (D-102).
-      if ((category === 'lab' || category === 'imaging') && computeHasArtifact(report)) {
+      // #372 (D-119): upload the report PDF artifact to Storage so the read path can
+      // serve it. Metadata alone leaves hasArtifact:true with no object -> the read CF
+      // 404s ARTIFACT_NOT_SYNCED and the chip dead-ends. medical_records are included
+      // whenever MR storing is on (go-ahead: required, not optional). Never store the
+      // Bearer-gated URL — fetch the bytes server-side and store only the bytes (D-102).
+      if (categoryHasArtifact(category, opts) && computeHasArtifact(report)) {
         // 2b re-key: the RECORD's internalUid, never the caller's / claimant's auth uid.
-        // Minors have no auth uid at all, so an auth-keyed path cannot express a
-        // dependent's artifact and would mislocate PHI under a guardian's prefix.
-        // ensureInternalUid is a FALLBACK only — backfillInternalUids has already
-        // minted for every id (Part B runbook step 1).
         const { internalUid } = await ensureInternalUid(pid, db);
         if (!internalUid) {
           // A mint gap, NOT "no artifact": do not flip hasArtifact:false.
@@ -295,27 +442,38 @@ async function backfillPatient(db, FieldValue, bucket, elationPatientId, counter
           log('backfillElationReports', 'artifact-skip-no-internal-uid', { elationPatientId: pid, reportId });
         } else {
           const objectPath = objectPathFor(internalUid, reportId);
+          const file = bucket.file(objectPath);
           try {
-            const { buffer } = await getBinary('/reports/' + reportId + '/printable');
-            await bucket.file(objectPath).save(buffer, { contentType: 'application/pdf', resumable: false });
-            // Self-check: a successful save does NOT prove valid bytes (a prior seed
-            // shipped a corrupt PDF that only surfaced on download-back). GCS is
-            // read-after-write consistent, so an immediate download is safe.
-            const [back] = await bucket.file(objectPath).download();
-            if (back.subarray(0, 5).toString() !== '%PDF-') {
-              throw new Error('ARTIFACT_NOT_PDF');
+            // skipExisting: a present, valid object is not re-fetched from Elation.
+            let present = false;
+            if (skipExisting) {
+              const [exists] = await file.exists();
+              if (exists) {
+                try {
+                  await verifyPdfHeader(file);
+                  present = true;
+                } catch (_) {
+                  present = false; // corrupt -> re-upload below
+                }
+              }
             }
-            pc.artifactsStored += 1; counters.artifactsStored += 1;
-            log('backfillElationReports', 'artifact-stored', { elationPatientId: pid, reportId, bytes: buffer.byteLength });
+            if (present) {
+              pc.artifactsAlreadyPresent += 1; counters.artifactsAlreadyPresent += 1;
+            } else {
+              const bytes = await uploadArtifact(file, reportId);
+              // Self-check: a successful save does NOT prove valid bytes. GCS is
+              // read-after-write consistent, so an immediate RANGED read is safe and
+              // does not pull a 16MB PDF back down.
+              await verifyPdfHeader(file);
+              pc.artifactsStored += 1; counters.artifactsStored += 1;
+              log('backfillElationReports', 'artifact-stored', { elationPatientId: pid, reportId, bytes });
+            }
           } catch (artErr) {
-            // Coverage-gate era: do NOT flip hasArtifact:false. That would drop the
-            // report out of the audit denominator AND the repair queue, so a
-            // persistently-failing report silently reads as 100%. Instead delete any
-            // partial/corrupt object and leave hasArtifact:true — the audit sees an
-            // honest MISS and sweepArtifactRepairs heals it (or parks + alerts after
-            // MAX_FAILURES).
+            // Coverage-gate era: do NOT flip hasArtifact:false. Delete any partial or
+            // corrupt object and leave hasArtifact:true — the audit sees an honest MISS
+            // and sweepArtifactRepairs heals it (or parks + alerts after MAX_FAILURES).
             try {
-              await bucket.file(objectPath).delete({ ignoreNotFound: true });
+              await file.delete({ ignoreNotFound: true });
             } catch (delErr) {
               log('backfillElationReports', 'artifact-cleanup-failed', {
                 elationPatientId: pid, reportId, error: delErr.message,
@@ -337,15 +495,40 @@ async function backfillPatient(db, FieldValue, bucket, elationPatientId, counter
   }
 
   counters.patientsProcessed += 1;
-  log('backfillElationReports', 'patient-complete', pc);
+  log('backfillElationReports', dryRun ? 'patient-dry-run-complete' : 'patient-complete', pc);
   return pc;
+}
+
+// Pull ALL reports for one patient, following cursors to exhaustion.
+async function listPatientReports(elationPatientId) {
+  const out = [];
+  let json = await elationGet('/reports/?patient=' + encodeURIComponent(elationPatientId));
+  let pages = 0;
+  while (true) {
+    const results = Array.isArray(json)
+      ? json
+      : (json && Array.isArray(json.results) ? json.results : null);
+    if (results === null) throw new Error('ELATION_BAD_REPORTS_RESPONSE');
+    results.forEach((r) => out.push(r));
+    pages += 1;
+    const next = (!Array.isArray(json) && json.next) ? json.next : null;
+    if (!next) break;
+    if (pages >= REPORTS_PAGE_CAP) throw new Error('ELATION_REPORTS_PAGE_CAP_EXCEEDED');
+    if (!String(next).startsWith(ELATION_BASE)) throw new Error('ELATION_BAD_CURSOR');
+    json = await elationGet(String(next).slice(ELATION_BASE.length));
+  }
+  return out;
 }
 
 // Orchestrator. db = Firestore instance (caller-initialized Admin SDK).
 // FieldValue must come from the SAME firebase-admin require as db (cross-instance
 // sentinels are rejected by Firestore — #345, mirrors bindMember/D-083).
 // elationPatientIds = array of Elation patient ids to backfill.
-async function backfillElationReports(db, FieldValue, elationPatientIds) {
+// options (all optional; unset === legacy minor-track behaviour):
+//   { cohort, dryRun, skipExisting, storeMedicalRecords, excludeReportTypes: Set,
+//     concurrency, onPatientComplete(pc, counters) }
+async function backfillElationReports(db, FieldValue, elationPatientIds, options) {
+  const opts = options || {};
   if (!Array.isArray(elationPatientIds) || elationPatientIds.length === 0) {
     throw new Error('BACKFILL_NO_IDS');
   }
@@ -361,24 +544,48 @@ async function backfillElationReports(db, FieldValue, elationPatientIds) {
     patientsSkippedNonActive: 0,
     patientsErrored: 0,
     stored: 0, skippedDeleted: 0, skippedUnsigned: 0, notFound: 0, mismatched: 0, unresolved: 0, errors: 0,
-    skippedRecordsDeferred: 0,
-    artifactsStored: 0, artifactErrors: 0, artifactSkippedUnclaimed: 0,
+    skippedRecordsDeferred: 0, skippedExcludedType: 0, alreadyStored: 0, wouldStore: 0,
+    artifactsStored: 0, artifactErrors: 0, artifactSkippedUnclaimed: 0, artifactsAlreadyPresent: 0,
+    reportTypeCensus: {},
   };
 
   // Explicit bucket MUST match the read side (getLabs.js/getImaging.js:
   // 'prive-care-vip.firebasestorage.app'). A bare admin.storage().bucket() resolves
-  // to the runtime default, which is NOT this bucket — artifacts would upload to the
-  // wrong bucket and the read CFs would 404 ARTIFACT_NOT_SYNCED (root cause, #372 v2).
+  // to the runtime default, which is NOT this bucket.
   const bucket = admin.storage().bucket('prive-care-vip.firebasestorage.app');
 
   const perPatient = [];
-  for (const id of ids) {
-    const pc = await backfillPatient(db, FieldValue, bucket, id, counters);
-    perPatient.push(pc);
+  const concurrency = Math.max(1, Math.min(10, Number(opts.concurrency) || 1));
+  let cursor = 0;
+
+  async function worker() {
+    while (cursor < ids.length) {
+      const id = ids[cursor++];
+      const pc = await backfillPatient(db, FieldValue, bucket, id, counters, opts);
+      perPatient.push(pc);
+      if (typeof opts.onPatientComplete === 'function') {
+        // Checkpoint per COMPLETED id — a 540s kill resumes at the next id.
+        try { await opts.onPatientComplete(pc, counters); } catch (_) { /* never fatal */ }
+      }
+    }
   }
 
-  log('backfillElationReports', 'backfill-complete', counters);
-  return { counters, perPatient };
+  await Promise.all(Array.from({ length: concurrency }, worker));
+
+  log('backfillElationReports', opts.dryRun ? 'dry-run-complete' : 'backfill-complete', {
+    ...counters, reportTypeCensus: Object.keys(counters.reportTypeCensus).length,
+  });
+  return {
+    counters,
+    perPatient,
+    reportTypeCensus: Object.values(counters.reportTypeCensus).sort((a, b) => b.count - a.count),
+  };
 }
 
-module.exports = { backfillElationReports, listPatientReports };
+module.exports = {
+  backfillElationReports,
+  listPatientReports,
+  // exported for unit tests
+  _storedCopyIsCurrent: storedCopyIsCurrent,
+  _categoryHasArtifact: categoryHasArtifact,
+};
