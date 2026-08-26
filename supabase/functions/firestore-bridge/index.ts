@@ -26,7 +26,15 @@ type RequestBody = {
   limit?: number;
   cursor?: number; // simple offset cursor
   includeRaw?: boolean; // keep verbose upstream payload blobs
+  /** Read a per-patient subcollection: patients/{parentPatientId}/{collection}. */
+  parentPatientId?: string;
+  /** Aggregate COUNT only — returns no documents, so no PHI leaves Firestore. */
+  count?: boolean;
 };
+
+// Per-patient subcollections readable only via `parentPatientId`.
+const ALLOWED_SUBCOLLECTIONS = new Set(["labs", "imaging", "medical_records"]);
+
 
 // Verbatim Stripe payloads mirrored into Firestore. Multi-KB per document and
 // never rendered — dropped unless explicitly requested.
@@ -206,14 +214,23 @@ Deno.serve(async (req) => {
   try {
     const body: RequestBody = req.method === "POST" ? await req.json() : {};
     const collection = (body.collection ?? "").trim();
+    const parentId = String(body.parentPatientId ?? "").trim();
 
-    if (!ALLOWED_COLLECTIONS.has(collection)) {
+    if (parentId) {
+      if (!ALLOWED_SUBCOLLECTIONS.has(collection)) {
+        return json({ error: `Subcollection "${collection}" is not readable through this bridge.` }, 400);
+      }
+      if (!/^[A-Za-z0-9_-]+$/.test(parentId)) {
+        return json({ error: "Invalid parentPatientId." }, 400);
+      }
+    } else if (!ALLOWED_COLLECTIONS.has(collection)) {
       return json({ error: `Collection "${collection}" is not readable through this bridge.` }, 400);
     }
 
     const sa = loadServiceAccount();
     const token = await getAccessToken(sa);
     const base = `https://firestore.googleapis.com/v1/projects/${sa.project_id}/databases/(default)/documents`;
+    const parentPath = parentId ? `${base}/patients/${encodeURIComponent(parentId)}` : base;
 
     let upstream: Response;
     let url: string;
@@ -221,8 +238,22 @@ Deno.serve(async (req) => {
     if (body.id) {
       url = `${base}/${collection}/${encodeURIComponent(body.id)}`;
       upstream = await fetch(url, { headers: { Authorization: `Bearer ${token}` } });
+    } else if (body.count) {
+      // Aggregate COUNT: returns a number, never documents.
+      url = `${parentPath}:runAggregationQuery`;
+      upstream = await fetch(url, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+        body: JSON.stringify({
+          structuredAggregationQuery: {
+            structuredQuery: { from: [{ collectionId: collection }] },
+            aggregations: [{ alias: "count", count: {} }],
+          },
+        }),
+      });
     } else {
-      url = `${base}:runQuery`;
+      url = `${parentPath}:runQuery`;
+
       const filters = (body.where ?? []).map((f) => ({
         fieldFilter: {
           field: { fieldPath: f.field },
@@ -270,8 +301,14 @@ Deno.serve(async (req) => {
     };
 
     if (upstream.ok) {
-      if (body.id) {
+      if (body.count) {
+        const res = (parsed as { result?: { aggregateFields?: { count?: Record<string, unknown> } } }[]) ?? [];
+        const raw = res[0]?.result?.aggregateFields?.count;
+        rowCount = raw ? Number(decodeValue(raw as Record<string, unknown>)) : 0;
+        data = { count: rowCount };
+      } else if (body.id) {
         data = strip(decodeDoc(parsed as never));
+
         rowCount = 1;
       } else {
         const rows = (parsed as { document?: never }[])
