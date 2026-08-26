@@ -77,6 +77,33 @@ export default function MemberRoster() {
 
   const countFor = (f: Filter) => (f === "all" ? rows.length : counts[f]);
 
+  /**
+   * Elation ids for every active member (adult or minor) that has a portal
+   * record — the ingest allowlist. Former members are excluded; fixtures are
+   * already filtered out upstream.
+   */
+  const allowlistIds = useMemo(() => {
+    const ids = new Set<string>();
+    for (const r of rows) {
+      if (r.bucket !== "member_active" && r.bucket !== "member_invited") continue;
+      const id = String(r.elationId ?? "").trim();
+      if (id) ids.add(id);
+    }
+    return Array.from(ids).sort();
+  }, [rows]);
+
+  const downloadAllowlist = () => {
+    const blob = new Blob([allowlistIds.join("\n") + "\n"], {
+      type: "text/plain;charset=utf-8",
+    });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = "active-member-elation-ids.txt";
+    a.click();
+    URL.revokeObjectURL(url);
+  };
+
 
   return (
     <div className="space-y-4">
