@@ -123,6 +123,17 @@ export default function MemberRoster() {
             </Button>
           )}
 
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={downloadAllowlist}
+            disabled={loading || allowlistIds.length === 0}
+            title="active-member-elation-ids.txt — one Elation id per line"
+          >
+            <Download className="mr-1 h-3.5 w-3.5" />
+            Export {allowlistIds.length.toLocaleString()} Elation IDs
+          </Button>
+
           <Button variant="outline" size="icon" onClick={() => refetch()} disabled={loading}>
             <RefreshCw className={cn("h-4 w-4", loading && "animate-spin")} />
           </Button>
