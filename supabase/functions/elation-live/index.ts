@@ -38,6 +38,7 @@ const ALLOWED_RESOURCES: Record<Scope, Set<string>> = {
     "medications",
     "lab_orders",
     "lab_reports",
+    "reports",
     "vitals",
     "visit_notes",
     "insurances",
