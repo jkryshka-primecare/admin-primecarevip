@@ -317,8 +317,13 @@ Deno.serve(async (req) => {
     };
 
     if (upstream.ok) {
-      if (body.count) {
+      if (listCollections) {
+        const ids = (parsed as { collectionIds?: string[] })?.collectionIds ?? [];
+        data = { collectionIds: ids };
+        rowCount = ids.length;
+      } else if (body.count) {
         const res = (parsed as { result?: { aggregateFields?: { count?: Record<string, unknown> } } }[]) ?? [];
+
         const raw = res[0]?.result?.aggregateFields?.count;
         rowCount = raw ? Number(decodeValue(raw as Record<string, unknown>)) : 0;
         data = { count: rowCount };
