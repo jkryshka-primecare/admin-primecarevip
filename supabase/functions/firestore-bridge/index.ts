@@ -30,7 +30,10 @@ type RequestBody = {
   parentPatientId?: string;
   /** Aggregate COUNT only — returns no documents, so no PHI leaves Firestore. */
   count?: boolean;
+  /** List subcollection ids under patients/{parentPatientId} — names only, no PHI. */
+  listCollections?: boolean;
 };
+
 
 // Per-patient subcollections readable only via `parentPatientId`.
 const ALLOWED_SUBCOLLECTIONS = new Set(["labs", "imaging", "medical_records"]);
@@ -215,8 +218,13 @@ Deno.serve(async (req) => {
     const body: RequestBody = req.method === "POST" ? await req.json() : {};
     const collection = (body.collection ?? "").trim();
     const parentId = String(body.parentPatientId ?? "").trim();
+    const listCollections = body.listCollections === true;
 
-    if (parentId) {
+    if (listCollections) {
+      if (!/^[A-Za-z0-9_-]+$/.test(parentId)) {
+        return json({ error: "Invalid parentPatientId." }, 400);
+      }
+    } else if (parentId) {
       if (!ALLOWED_SUBCOLLECTIONS.has(collection)) {
         return json({ error: `Subcollection "${collection}" is not readable through this bridge.` }, 400);
       }
@@ -235,7 +243,15 @@ Deno.serve(async (req) => {
     let upstream: Response;
     let url: string;
 
-    if (body.id) {
+    if (listCollections) {
+      url = `${parentPath}:listCollectionIds`;
+      upstream = await fetch(url, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+        body: JSON.stringify({ pageSize: 100 }),
+      });
+    } else if (body.id) {
+
       url = `${base}/${collection}/${encodeURIComponent(body.id)}`;
       upstream = await fetch(url, { headers: { Authorization: `Bearer ${token}` } });
     } else if (body.count) {
@@ -301,8 +317,13 @@ Deno.serve(async (req) => {
     };
 
     if (upstream.ok) {
-      if (body.count) {
+      if (listCollections) {
+        const ids = (parsed as { collectionIds?: string[] })?.collectionIds ?? [];
+        data = { collectionIds: ids };
+        rowCount = ids.length;
+      } else if (body.count) {
         const res = (parsed as { result?: { aggregateFields?: { count?: Record<string, unknown> } } }[]) ?? [];
+
         const raw = res[0]?.result?.aggregateFields?.count;
         rowCount = raw ? Number(decodeValue(raw as Record<string, unknown>)) : 0;
         data = { count: rowCount };
