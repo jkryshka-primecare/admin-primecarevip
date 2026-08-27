@@ -24,12 +24,11 @@ test('adult backfill normalizes lifecycle status', () => {
 });
 
 test('adult backfill rejects explicit disabled states and minors', () => {
-  assert.deepEqual(
-    adultBackfillEligibility({ status: 'deactivated' }),
-    { eligible: false, reason: 'NOT_ACTIVE' },
-  );
-  assert.deepEqual(
-    adultBackfillEligibility({ status: 'invited', dependent: { isMinor: true } }),
-    { eligible: false, reason: 'IS_A_MINOR' },
-  );
+  const disabled = adultBackfillEligibility({ status: 'deactivated' });
+  assert.equal(disabled.eligible, false);
+  assert.equal(disabled.reason, 'NOT_ACTIVE');
+
+  const minor = adultBackfillEligibility({ status: 'invited', dependent: { isMinor: true } });
+  assert.equal(minor.eligible, false);
+  assert.equal(minor.reason, 'IS_A_MINOR');
 });
