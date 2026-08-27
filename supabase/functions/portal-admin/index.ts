@@ -833,7 +833,23 @@ Deno.serve(async (req) => {
   }
 
   const isBulk = BULK_MIGRATIONS.includes(action);
-  const bulkApply = isBulk && body.apply === true;
+
+  /**
+   * Progress poll for an async report-ingest run. It writes nothing and reads
+   * no PHI — only the run doc's counters — so it needs admin (like a dry run),
+   * never super-admin, and it carries no reason.
+   */
+  const RUN_ID_RE = /^[A-Za-z0-9_-]{6,64}$/;
+  const statusPoll = action === "backfillMinorReports" && body.statusOnly === true;
+  const runId = typeof body.runId === "string" ? body.runId.trim() : "";
+  if (statusPoll && !RUN_ID_RE.test(runId)) {
+    return deny(400, "A valid runId is required to check run progress.");
+  }
+  if (!statusPoll && runId && !RUN_ID_RE.test(runId)) {
+    return deny(400, "That runId is not valid.");
+  }
+
+  const bulkApply = isBulk && !statusPoll && body.apply === true;
   let minorIds: string[] = [];
   // Report-ingest cohort switch. The Cloud Function wrapper is the authority
   // (it re-validates every id against isMinorRecord / the soft-adult rule);
@@ -853,12 +869,13 @@ Deno.serve(async (req) => {
         return deny(400, "A written reason is required to apply a bulk migration.");
       }
     }
-    if (action === "backfillMinorReports") {
+    if (action === "backfillMinorReports" && !statusPoll) {
       const parsed = parseMinorIds(body.patientIds, bulkApply);
       if (typeof parsed === "string") return deny(400, parsed);
       minorIds = parsed;
     }
   }
+
 
   let provisionMembers: ProvisionMember[] = [];
   if (action === "provision") {
