@@ -30,6 +30,34 @@ function isMinorRecord(data) {
   return Boolean(data && data.dependent && data.dependent.isMinor === true);
 }
 
+// Portal claim-lifecycle values that remain valid targets when an explicit,
+// externally-vetted adult roster drives a backfill. This is intentionally NOT
+// used by the event poller: the poller has no authoritative roster input and
+// must retain ingestEligibility's claimed-active rule.
+const ADULT_BACKFILL_ALLOWED_STATUSES = new Set([
+  'not_invited',
+  'invited',
+  'active',
+  'pending',
+  'claimed',
+]);
+
+/**
+ * D-081 adult backfill gate. The supplied roster is membership authority;
+ * `status` only describes the portal claim lifecycle. Missing/blank and known
+ * lifecycle states proceed. Minors and explicit terminal/disabled states fail.
+ */
+function adultBackfillEligibility(data) {
+  if (!data) return { eligible: false, reason: 'NO_PATIENT_DOC' };
+  if (isMinorRecord(data)) return { eligible: false, reason: 'IS_A_MINOR' };
+
+  const status = typeof data.status === 'string' ? data.status.trim().toLowerCase() : undefined;
+  if (status !== undefined && status !== '' && !ADULT_BACKFILL_ALLOWED_STATUSES.has(status)) {
+    return { eligible: false, reason: 'NOT_ACTIVE' };
+  }
+  return { eligible: true, reason: 'ADULT_ROSTER_ELIGIBLE' };
+}
+
 /**
  * `{ eligible, cohort, reason }` for a patient doc's data.
  * `reason` is a stable log tag, never PHI.
@@ -56,4 +84,9 @@ function ingestEligibility(data) {
   };
 }
 
-module.exports = { ingestEligibility, hasActiveGuardian, isMinorRecord };
+module.exports = {
+  ingestEligibility,
+  adultBackfillEligibility,
+  hasActiveGuardian,
+  isMinorRecord,
+};
