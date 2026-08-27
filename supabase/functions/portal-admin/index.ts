@@ -92,16 +92,18 @@ const BATCH_ACTIONS: Action[] = [
   ...BULK_MIGRATIONS,
 ];
 
-/** Upper bound on one minor-track ingest call. The 2b cohort is ~175. */
-const MAX_MINOR_IDS = 500;
+/** Upper bound on one report-ingest dry run (synchronous upstream). */
+const MAX_MINOR_IDS = 1000;
 
 /**
- * An apply actually calls Elation per report and can take ~5s per patient, so a
- * large batch blows the 150s edge idle timeout (504 IDLE_TIMEOUT) and the whole
- * page's work is lost. Applies are therefore capped hard; the console walks the
- * cohort in chunks of this size.
+ * An APPLY is asynchronous upstream: the wrapper claims a `backfill_runs/{runId}`
+ * doc, answers 202 immediately, and drains the pending list server-side with a
+ * per-id checkpoint. The edge idle timeout is therefore not a constraint, so a
+ * full cohort goes up in ONE call and the console polls `statusOnly` for
+ * progress. The upstream wrapper's own cap is 1000 ids.
  */
-const MAX_MINOR_IDS_APPLY = 8;
+const MAX_MINOR_IDS_APPLY = 1000;
+
 
 
 /**
@@ -831,7 +833,23 @@ Deno.serve(async (req) => {
   }
 
   const isBulk = BULK_MIGRATIONS.includes(action);
-  const bulkApply = isBulk && body.apply === true;
+
+  /**
+   * Progress poll for an async report-ingest run. It writes nothing and reads
+   * no PHI — only the run doc's counters — so it needs admin (like a dry run),
+   * never super-admin, and it carries no reason.
+   */
+  const RUN_ID_RE = /^[A-Za-z0-9_-]{6,64}$/;
+  const statusPoll = action === "backfillMinorReports" && body.statusOnly === true;
+  const runId = typeof body.runId === "string" ? body.runId.trim() : "";
+  if (statusPoll && !RUN_ID_RE.test(runId)) {
+    return deny(400, "A valid runId is required to check run progress.");
+  }
+  if (!statusPoll && runId && !RUN_ID_RE.test(runId)) {
+    return deny(400, "That runId is not valid.");
+  }
+
+  const bulkApply = isBulk && !statusPoll && body.apply === true;
   let minorIds: string[] = [];
   // Report-ingest cohort switch. The Cloud Function wrapper is the authority
   // (it re-validates every id against isMinorRecord / the soft-adult rule);
@@ -851,12 +869,13 @@ Deno.serve(async (req) => {
         return deny(400, "A written reason is required to apply a bulk migration.");
       }
     }
-    if (action === "backfillMinorReports") {
+    if (action === "backfillMinorReports" && !statusPoll) {
       const parsed = parseMinorIds(body.patientIds, bulkApply);
       if (typeof parsed === "string") return deny(400, parsed);
       minorIds = parsed;
     }
   }
+
 
   let provisionMembers: ProvisionMember[] = [];
   if (action === "provision") {
@@ -1107,7 +1126,7 @@ Deno.serve(async (req) => {
     }
   }
 
-  if (isBulk) {
+  if (isBulk && !statusPoll) {
     // Dry run unless the caller explicitly asked to apply AND cleared the
     // super-admin gate above.
     upstreamPayload.apply = bulkApply;
@@ -1130,8 +1149,21 @@ Deno.serve(async (req) => {
         upstreamPayload.storeMedicalRecords = body.storeMedicalRecords;
       }
       if (body.skipExisting === true) upstreamPayload.skipExisting = true;
+      // Resume: re-POSTing the same runId continues the run's pending list
+      // instead of starting a second job over the same cohort.
+      if (bulkApply && runId) upstreamPayload.runId = runId;
     }
   }
+
+  if (statusPoll) {
+    // Poll-only wire shape — the wrapper branches on `action: 'status'` before
+    // it looks at anything else.
+    for (const k of Object.keys(upstreamPayload)) delete upstreamPayload[k];
+    upstreamPayload.action = "status";
+    upstreamPayload.runId = runId;
+    upstreamPayload.actor = actor;
+  }
+
 
   const fnName = FUNCTION_BY_ACTION[action];
   const url = `${FUNCTIONS_BASE}/${fnName}`;
@@ -1146,6 +1178,7 @@ Deno.serve(async (req) => {
       after: {
         limit: upstreamPayload.limit ?? null,
         cursor: upstreamPayload.cursor ?? null,
+        runId: upstreamPayload.runId ?? null,
         patientIds: action === "backfillMinorReports" ? minorIds : undefined,
         patientCount: action === "backfillMinorReports" ? minorIds.length : undefined,
         cohort: action === "backfillMinorReports" ? cohort : undefined,
@@ -1275,12 +1308,15 @@ Deno.serve(async (req) => {
       httpStatus: status,
       errorMessage,
     });
+  } else if (isBulk && statusPoll) {
+    // A progress poll reads counters only. It is not audited per call —
+    // polling every few seconds would flood the audit table with no signal.
   } else if (isBulk) {
     // Outcome row. For an apply this pairs with the pre-call attribution row
     // written above, so an aborted run still leaves the human on the record.
     await recordAction(ctx, {
       elationPatientId: null,
-      action: `${action}:${bulkApply ? "apply-result" : "dry-run"}`,
+      action: `${action}:${statusPoll ? "status" : bulkApply ? "apply-result" : "dry-run"}`,
       reason: reason || null,
       after: payload,
       ok,
@@ -1293,7 +1329,7 @@ Deno.serve(async (req) => {
   await logPhiAccess(ctx, req, {
     source: "portal.admin",
     resource: fnName,
-    scope: `${action}${isBulk ? (bulkApply ? ":apply" : ":dry-run") : ""}`,
+    scope: `${action}${isBulk ? (statusPoll ? ":status" : bulkApply ? ":apply" : ":dry-run") : ""}`,
     resource_id: isBatch ? null : elationPatientId,
     http_status: status,
     row_count: action === "backfillMinorReports"

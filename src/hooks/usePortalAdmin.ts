@@ -454,6 +454,13 @@ export type BackfillReport = {
   skippedRecordsDeferred?: number;
   runId?: string;
   async?: boolean;
+  /** Async apply progress (from a `statusOnly` poll of `backfill_runs/{runId}`). */
+  status?: "claimed" | "running" | "complete" | "error" | "unknown" | string;
+  requested?: number;
+  completed?: number;
+  pending?: number;
+  counters?: Record<string, number>;
+  errorReason?: string | null;
   reportTypeCensus?: {
     reportType: string;
     count: number;
@@ -473,6 +480,11 @@ export type BackfillVars = {
   cohort?: "minors" | "adults";
   skipExisting?: boolean;
   storeMedicalRecords?: boolean;
+  /**
+   * Report ingest only. Supply on apply to RESUME an existing run — the
+   * wrapper continues that run's pending list instead of starting a new job.
+   */
+  runId?: string;
 };
 
 export function useBackfillRunner(action: BackfillAction) {
@@ -490,6 +502,31 @@ export function useBackfillRunner(action: BackfillAction) {
         ...(typeof vars.storeMedicalRecords === "boolean"
           ? { storeMedicalRecords: vars.storeMedicalRecords }
           : {}),
+        ...(vars.runId ? { runId: vars.runId } : {}),
+      });
+      return res.data ?? ({} as BackfillReport);
+    },
+  });
+}
+
+/**
+ * Progress poll for an async report-ingest run.
+ *
+ * Reads `backfill_runs/{runId}` counters only — no PHI, no writes — so it is
+ * admin-gated like a dry run and is not audited per call. The run keeps going
+ * server-side whether or not anyone is polling: closing the tab does not stop
+ * it, and re-attaching is just polling the same runId again.
+ */
+export function useBackfillRunStatus(runId: string | null, enabled: boolean) {
+  return useQuery({
+    queryKey: ["portal-admin", "backfill-run", runId],
+    enabled: Boolean(runId) && enabled,
+    refetchInterval: enabled ? 10_000 : false,
+    queryFn: async () => {
+      const res = await callPortalAdmin<BackfillReport>({
+        action: "backfillMinorReports",
+        statusOnly: true,
+        runId,
       });
       return res.data ?? ({} as BackfillReport);
     },
