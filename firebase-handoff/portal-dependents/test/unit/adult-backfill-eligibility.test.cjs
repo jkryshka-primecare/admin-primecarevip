@@ -1,9 +1,17 @@
 const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const path = require('node:path');
 const test = require('node:test');
+const vm = require('node:vm');
 
-const {
-  adultBackfillEligibility,
-} = require('../../functions/core/services/patient/ingestEligibility');
+const sourcePath = path.resolve(
+  __dirname,
+  '../../functions/core/services/patient/ingestEligibility.js',
+);
+const source = fs.readFileSync(sourcePath, 'utf8');
+const sandbox = { module: { exports: {} }, exports: {} };
+vm.runInNewContext(source, sandbox, { filename: sourcePath });
+const { adultBackfillEligibility } = sandbox.module.exports;
 
 test('adult backfill admits unclaimed portal lifecycle states', () => {
   for (const status of [undefined, '', 'not_invited', 'invited', 'active', 'pending', 'claimed']) {
