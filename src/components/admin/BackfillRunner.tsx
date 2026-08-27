@@ -356,6 +356,15 @@ function Runner({ def, canApply }: { def: RunnerDef; canApply: boolean }) {
             />
             Skip reports already stored
           </label>
+          <div>
+            <label className="text-xs font-medium text-foreground">Resume run id</label>
+            <input
+              value={resumeId}
+              onChange={(e) => setResumeId(e.target.value.trim())}
+              placeholder="optional"
+              className="mt-1 w-56 rounded-md border border-border bg-background px-3 py-1.5 font-mono text-xs text-foreground"
+            />
+          </div>
         </div>
       )}
 
@@ -488,6 +497,43 @@ function Runner({ def, canApply }: { def: RunnerDef; canApply: boolean }) {
       </div>
 
 
+
+      {def.needsIds && runId && (
+        <div className="mt-3 rounded-md border border-border bg-muted/40 p-3">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <div className="text-xs text-foreground">
+              Run <span className="font-mono">{runId}</span>{" "}
+              <span className="text-muted-foreground">· {live?.status ?? "starting"}</span>
+            </div>
+            <div className="flex items-center gap-2">
+              {!runFinished && <Loader2 className="h-3.5 w-3.5 animate-spin text-muted-foreground" />}
+              <button
+                onClick={() => runStatus.refetch()}
+                className="rounded-md border border-border bg-background px-2 py-1 text-[11px] text-foreground hover:bg-muted"
+              >
+                Refresh
+              </button>
+              <button
+                onClick={() => setRunId(null)}
+                className="text-[11px] text-muted-foreground underline hover:text-foreground"
+              >
+                Stop watching
+              </button>
+            </div>
+          </div>
+          <p className="mt-2 font-mono text-[11px] text-muted-foreground">
+            {live?.completed ?? 0}/{live?.requested ?? ids.length} patients
+            {typeof live?.pending === "number" && <> · {live.pending} pending</>}
+          </p>
+          {live?.errorReason && (
+            <p className="mt-1 text-[11px] text-destructive">{live.errorReason}</p>
+          )}
+          <p className="mt-2 text-[11px] text-muted-foreground">
+            The run continues on the server — closing this tab does not stop it. Paste this run id
+            into &ldquo;Resume run id&rdquo; to re-attach or continue a partial run.
+          </p>
+        </div>
+      )}
 
       {run.error && (
         <p className="mt-3 flex items-start gap-2 rounded-md bg-destructive/10 p-2 text-xs text-destructive">
