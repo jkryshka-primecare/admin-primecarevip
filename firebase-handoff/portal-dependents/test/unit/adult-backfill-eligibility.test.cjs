@@ -1,7 +1,6 @@
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
-const test = require('node:test');
 const vm = require('node:vm');
 
 const sourcePath = path.resolve(
@@ -31,4 +30,18 @@ test('adult backfill rejects explicit disabled states and minors', () => {
   const minor = adultBackfillEligibility({ status: 'invited', dependent: { isMinor: true } });
   assert.equal(minor.eligible, false);
   assert.equal(minor.reason, 'IS_A_MINOR');
+});
+
+test('adult backfill rejects suspended, disabled and removed lifecycle states', () => {
+  for (const status of ['suspended', 'disabled', 'removed']) {
+    const result = adultBackfillEligibility({ status });
+    assert.equal(result.eligible, false, status);
+    assert.equal(result.reason, 'NOT_ACTIVE', status);
+  }
+});
+
+test('adult backfill rejects a missing patient doc', () => {
+  const result = adultBackfillEligibility(null);
+  assert.equal(result.eligible, false);
+  assert.equal(result.reason, 'NO_PATIENT_DOC');
 });
