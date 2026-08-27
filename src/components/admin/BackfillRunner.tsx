@@ -3,6 +3,7 @@ import { AlertTriangle, Loader2, Play, ShieldAlert, Users } from "lucide-react";
 import { useAuth } from "@/hooks/useAuth";
 import {
   useBackfillRunner,
+  useBackfillRunStatus,
   type BackfillAction,
   type BackfillReport,
 } from "@/hooks/usePortalAdmin";
@@ -192,6 +193,14 @@ function Runner({ def, canApply }: { def: RunnerDef; canApply: boolean }) {
   const [progress, setProgress] = useState<{ done: number; total: number } | null>(null);
   const [cohort, setCohort] = useState<"minors" | "adults">("minors");
   const [skipExisting, setSkipExisting] = useState(true);
+  // Async apply: the upstream wrapper claims a run doc, answers 202, and keeps
+  // working server-side. This id is the handle for progress and for resuming.
+  const [runId, setRunId] = useState<string | null>(null);
+  const [resumeId, setResumeId] = useState("");
+
+  const runStatus = useBackfillRunStatus(runId, Boolean(runId));
+  const live = runStatus.data ?? null;
+  const runFinished = live?.status === "complete" || live?.status === "error";
 
   const ids = idsText
     .split(/[\s,]+/)
@@ -200,10 +209,9 @@ function Runner({ def, canApply }: { def: RunnerDef; canApply: boolean }) {
   const badIds = ids.filter((id) => !/^\d{6,25}$/.test(id));
   const idsReady = !def.needsIds || (ids.length > 0 && badIds.length === 0);
 
-  // An apply hits Elation per patient (~5s each), so a big batch blows the
-  // 150s edge idle timeout (504 IDLE_TIMEOUT). Walk the cohort in small
-  // chunks and merge the reports — the server refuses anything larger.
-  const APPLY_CHUNK = 8;
+  // A dry run is synchronous upstream, so it is still walked in pages. An
+  // APPLY is asynchronous: the whole cohort goes up in one call and the run
+  // continues server-side, checkpointed per patient.
   const DRY_CHUNK = 100;
 
   function mergeCensus(
@@ -247,14 +255,30 @@ function Runner({ def, canApply }: { def: RunnerDef; canApply: boolean }) {
     let cur = cursor;
     try {
       if (def.needsIds) {
-        const size = apply ? APPLY_CHUNK : DRY_CHUNK;
+        if (apply) {
+          // One call, one run. The server answers as soon as the run is
+          // claimed; the work then proceeds without this browser.
+          setReport(null);
+          setProgress(null);
+          const res = await run.mutateAsync({
+            apply: true,
+            reason: reason.trim(),
+            patientIds: ids,
+            cohort,
+            skipExisting,
+            ...(resumeId.trim() ? { runId: resumeId.trim() } : {}),
+          });
+          setReport(res);
+          if (res.runId) setRunId(res.runId);
+          return;
+        }
         let merged: BackfillReport | null = null;
         setReport(null);
         setProgress({ done: 0, total: ids.length });
-        for (let i = 0; i < ids.length; i += size) {
-          const chunk = ids.slice(i, i + size);
+        for (let i = 0; i < ids.length; i += DRY_CHUNK) {
+          const chunk = ids.slice(i, i + DRY_CHUNK);
           const res = await run.mutateAsync({
-            apply,
+            apply: false,
             reason: reason.trim(),
             patientIds: chunk,
             cohort,
@@ -262,7 +286,7 @@ function Runner({ def, canApply }: { def: RunnerDef; canApply: boolean }) {
           });
           merged = mergeReports(merged, res);
           setReport(merged);
-          setProgress({ done: Math.min(i + size, ids.length), total: ids.length });
+          setProgress({ done: Math.min(i + DRY_CHUNK, ids.length), total: ids.length });
         }
         return;
       }
