@@ -1126,7 +1126,7 @@ Deno.serve(async (req) => {
     }
   }
 
-  if (isBulk) {
+  if (isBulk && !statusPoll) {
     // Dry run unless the caller explicitly asked to apply AND cleared the
     // super-admin gate above.
     upstreamPayload.apply = bulkApply;
@@ -1149,8 +1149,21 @@ Deno.serve(async (req) => {
         upstreamPayload.storeMedicalRecords = body.storeMedicalRecords;
       }
       if (body.skipExisting === true) upstreamPayload.skipExisting = true;
+      // Resume: re-POSTing the same runId continues the run's pending list
+      // instead of starting a second job over the same cohort.
+      if (bulkApply && runId) upstreamPayload.runId = runId;
     }
   }
+
+  if (statusPoll) {
+    // Poll-only wire shape — the wrapper branches on `action: 'status'` before
+    // it looks at anything else.
+    for (const k of Object.keys(upstreamPayload)) delete upstreamPayload[k];
+    upstreamPayload.action = "status";
+    upstreamPayload.runId = runId;
+    upstreamPayload.actor = actor;
+  }
+
 
   const fnName = FUNCTION_BY_ACTION[action];
   const url = `${FUNCTIONS_BASE}/${fnName}`;
