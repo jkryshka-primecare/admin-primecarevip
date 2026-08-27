@@ -1178,6 +1178,7 @@ Deno.serve(async (req) => {
       after: {
         limit: upstreamPayload.limit ?? null,
         cursor: upstreamPayload.cursor ?? null,
+        runId: upstreamPayload.runId ?? null,
         patientIds: action === "backfillMinorReports" ? minorIds : undefined,
         patientCount: action === "backfillMinorReports" ? minorIds.length : undefined,
         cohort: action === "backfillMinorReports" ? cohort : undefined,
@@ -1307,6 +1308,9 @@ Deno.serve(async (req) => {
       httpStatus: status,
       errorMessage,
     });
+  } else if (isBulk && statusPoll) {
+    // A progress poll reads counters only. It is not audited per call —
+    // polling every few seconds would flood the audit table with no signal.
   } else if (isBulk) {
     // Outcome row. For an apply this pairs with the pre-call attribution row
     // written above, so an aborted run still leaves the human on the record.
