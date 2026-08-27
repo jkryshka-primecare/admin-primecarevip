@@ -92,16 +92,18 @@ const BATCH_ACTIONS: Action[] = [
   ...BULK_MIGRATIONS,
 ];
 
-/** Upper bound on one minor-track ingest call. The 2b cohort is ~175. */
-const MAX_MINOR_IDS = 500;
+/** Upper bound on one report-ingest dry run (synchronous upstream). */
+const MAX_MINOR_IDS = 1000;
 
 /**
- * An apply actually calls Elation per report and can take ~5s per patient, so a
- * large batch blows the 150s edge idle timeout (504 IDLE_TIMEOUT) and the whole
- * page's work is lost. Applies are therefore capped hard; the console walks the
- * cohort in chunks of this size.
+ * An APPLY is asynchronous upstream: the wrapper claims a `backfill_runs/{runId}`
+ * doc, answers 202 immediately, and drains the pending list server-side with a
+ * per-id checkpoint. The edge idle timeout is therefore not a constraint, so a
+ * full cohort goes up in ONE call and the console polls `statusOnly` for
+ * progress. The upstream wrapper's own cap is 1000 ids.
  */
-const MAX_MINOR_IDS_APPLY = 8;
+const MAX_MINOR_IDS_APPLY = 1000;
+
 
 
 /**
