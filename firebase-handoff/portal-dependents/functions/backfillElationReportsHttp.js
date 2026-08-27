@@ -40,7 +40,11 @@ const functions = require('firebase-functions');
 const admin = require('firebase-admin');
 const { log, logError } = require('./middleware/logger');
 const { requireAdminCaller, selfAudience } = require('./middleware/requireAdminCaller');
-const { ingestEligibility, isMinorRecord } = require('./core/services/patient/ingestEligibility');
+const {
+  ingestEligibility,
+  adultBackfillEligibility,
+  isMinorRecord,
+} = require('./core/services/patient/ingestEligibility');
 
 // The runner module. It exports its internal batch function; keep this require
 // pointing at the REAL file in the repo — this wrapper adds no ingest logic of
@@ -88,15 +92,6 @@ function parseIds(raw) {
  * exist to be targeted.
  */
 
-// Portal claim-lifecycle values that are still valid backfill targets.
-const ADULT_ALLOWED_PORTAL_STATUSES = new Set([
-  'not_invited',
-  'invited',
-  'active',
-  'pending',
-  'claimed',
-]);
-
 async function partitionByCohort(ids, cohort) {
   const db = admin.firestore();
   const eligible = [];
@@ -119,16 +114,12 @@ async function partitionByCohort(ids, cohort) {
     const minor = isMinorRecord(data);
 
     if (cohort === 'adults') {
-      if (minor) {
-        rejected.push({ patientId: id, reason: 'IS_A_MINOR' });
-        return;
-      }
       // Relaxed adult rule (D-081): portal claim state does not gate ingest.
       // Absent status proceeds; unclaimed lifecycle states proceed; anything
       // else (deactivated, removed, suspended, ...) rejects.
-      const status = typeof data.status === 'string' ? data.status.trim().toLowerCase() : undefined;
-      if (status !== undefined && status !== '' && !ADULT_ALLOWED_PORTAL_STATUSES.has(status)) {
-        rejected.push({ patientId: id, reason: 'NOT_ACTIVE' });
+      const adultGate = adultBackfillEligibility(data);
+      if (!adultGate.eligible) {
+        rejected.push({ patientId: id, reason: adultGate.reason });
         return;
       }
       eligible.push(id);

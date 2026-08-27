@@ -57,7 +57,11 @@ const {
   computeHasArtifact,
 } = require('./core/services/elation/ingest/reportIngest');
 const { ensureInternalUid, objectPathFor } = require('./core/services/patient/internalUid');
-const { ingestEligibility, isMinorRecord } = require('./core/services/patient/ingestEligibility');
+const {
+  ingestEligibility,
+  adultBackfillEligibility,
+  isMinorRecord,
+} = require('./core/services/patient/ingestEligibility');
 
 // --- error observability (Part B) ---------------------------------------
 // The per-patient counters told us THAT a patient failed but never WHY, so a
@@ -226,24 +230,22 @@ async function backfillPatient(db, FieldValue, bucket, elationPatientId, counter
   }
   if (pSnap.exists) {
     const data = pSnap.data() || {};
-    const gate = ingestEligibility(data);
-    // D-080 stays SOFT for ADULTS: an existing doc with no `status` field proceeds,
-    // exactly as before. MINORS are ALWAYS subject to the guardian check, whatever
-    // their `status` — so a guardian revoked between batch load and run is honoured
-    // by the code, not by the input list. In the `adults` cohort a minor record has
-    // already been rejected by the wrapper's partition, but re-check defensively.
     const minor = isMinorRecord(data);
-    if (cohort === 'adults' && minor) {
-      counters.patientsSkippedNonActive += 1;
-      pc.skippedNonActive = true;
-      log('backfillElationReports', 'skip-minor-in-adult-cohort', { elationPatientId: pid });
-      return pc;
-    }
-    if (!gate.eligible && (data.status !== undefined || minor)) {
+    // The runner must enforce the SAME D-081 rule as the wrapper. Previously it
+    // called ingestEligibility(), whose adult path requires status === 'active',
+    // so wrapper-approved invited/not_invited adults returned here before their
+    // reports were listed. Keep this re-check for status changes between the
+    // wrapper partition and processing, but share its definition with the wrapper.
+    const gate = cohort === 'adults'
+      ? adultBackfillEligibility(data)
+      : ingestEligibility(data);
+    // D-080 remains soft only for a missing adult status. Minors are always
+    // subject to the guardian check, whatever their status.
+    if (!gate.eligible && (cohort === 'adults' || data.status !== undefined || minor)) {
       counters.patientsSkippedNonActive += 1;
       pc.skippedNonActive = true;
       log('backfillElationReports', gate.reason, {
-        elationPatientId: pid, status: data.status, cohort: gate.cohort,
+        elationPatientId: pid, status: data.status, cohort: gate.cohort || cohort,
       });
       return pc;
     }
