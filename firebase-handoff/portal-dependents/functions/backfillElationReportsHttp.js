@@ -78,13 +78,25 @@ function parseIds(raw) {
  *
  * minors: the doc must exist, say it is a minor TODAY, and pass ingestEligibility
  *   (>= 1 active guardian).
- * adults: the doc must exist, must NOT be a minor, and follows the D-080 SOFT
- *   adult rule — an absent `status` proceeds (the supplied roster is the
- *   authority for "active"), an explicit non-active value rejects.
+ * adults: the doc must exist, must NOT be a minor, and follows the D-081 RELAXED
+ *   adult rule — `status` is a PORTAL CLAIM lifecycle field
+ *   (not_invited -> invited -> active), NOT a membership status. The supplied
+ *   roster is the authority for membership, so any un-claimed-but-rostered
+ *   member proceeds. Only an explicit deactivated/removed status rejects.
  *
  * A missing doc is rejected in both cohorts — an explicitly targeted id must
  * exist to be targeted.
  */
+
+// Portal claim-lifecycle values that are still valid backfill targets.
+const ADULT_ALLOWED_PORTAL_STATUSES = new Set([
+  'not_invited',
+  'invited',
+  'active',
+  'pending',
+  'claimed',
+]);
+
 async function partitionByCohort(ids, cohort) {
   const db = admin.firestore();
   const eligible = [];
@@ -111,14 +123,18 @@ async function partitionByCohort(ids, cohort) {
         rejected.push({ patientId: id, reason: 'IS_A_MINOR' });
         return;
       }
-      // Soft-adult rule: only an EXPLICIT non-active status rejects.
-      if (data.status !== undefined && !ingestEligibility(data).eligible) {
+      // Relaxed adult rule (D-081): portal claim state does not gate ingest.
+      // Absent status proceeds; unclaimed lifecycle states proceed; anything
+      // else (deactivated, removed, suspended, ...) rejects.
+      const status = typeof data.status === 'string' ? data.status.trim().toLowerCase() : undefined;
+      if (status !== undefined && status !== '' && !ADULT_ALLOWED_PORTAL_STATUSES.has(status)) {
         rejected.push({ patientId: id, reason: 'NOT_ACTIVE' });
         return;
       }
       eligible.push(id);
       return;
     }
+
 
     // cohort === 'minors' (unchanged)
     if (!minor) {
