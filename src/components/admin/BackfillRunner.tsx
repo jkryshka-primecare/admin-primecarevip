@@ -146,7 +146,28 @@ function ReportView({ report }: { report: BackfillReport }) {
           <p className="font-medium text-foreground">
             {rejected.length} id(s) refused upstream — not in the requested cohort:
           </p>
-          <ul className="mt-1 space-y-0.5 font-mono text-[11px] text-muted-foreground">
+          <div className="mt-2 flex flex-wrap gap-2">
+            {Object.entries(
+              rejected.reduce<Record<string, string[]>>((acc, r) => {
+                const key = r.reason || "UNKNOWN";
+                (acc[key] ||= []).push(r.patientId);
+                return acc;
+              }, {}),
+            )
+              .sort((a, b) => b[1].length - a[1].length)
+              .map(([reasonKey, ids]) => (
+                <button
+                  key={reasonKey}
+                  type="button"
+                  onClick={() => navigator.clipboard.writeText(ids.join("\n"))}
+                  title="Copy these ids"
+                  className="rounded-md border border-border bg-card px-2 py-1 font-mono text-[11px] text-foreground hover:bg-muted"
+                >
+                  {reasonKey}: {ids.length.toLocaleString()} · copy
+                </button>
+              ))}
+          </div>
+          <ul className="mt-2 space-y-0.5 font-mono text-[11px] text-muted-foreground">
             {rejected.slice(0, 20).map((r) => (
               <li key={r.patientId}>
                 {r.patientId} — {r.reason}
@@ -155,6 +176,7 @@ function ReportView({ report }: { report: BackfillReport }) {
           </ul>
         </div>
       )}
+
     </div>
   );
 }
