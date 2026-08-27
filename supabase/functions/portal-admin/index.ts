@@ -1312,7 +1312,7 @@ Deno.serve(async (req) => {
     // written above, so an aborted run still leaves the human on the record.
     await recordAction(ctx, {
       elationPatientId: null,
-      action: `${action}:${bulkApply ? "apply-result" : "dry-run"}`,
+      action: `${action}:${statusPoll ? "status" : bulkApply ? "apply-result" : "dry-run"}`,
       reason: reason || null,
       after: payload,
       ok,
@@ -1325,7 +1325,7 @@ Deno.serve(async (req) => {
   await logPhiAccess(ctx, req, {
     source: "portal.admin",
     resource: fnName,
-    scope: `${action}${isBulk ? (bulkApply ? ":apply" : ":dry-run") : ""}`,
+    scope: `${action}${isBulk ? (statusPoll ? ":status" : bulkApply ? ":apply" : ":dry-run") : ""}`,
     resource_id: isBatch ? null : elationPatientId,
     http_status: status,
     row_count: action === "backfillMinorReports"
