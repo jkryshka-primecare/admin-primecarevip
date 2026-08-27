@@ -21,8 +21,8 @@
 //   Decision A: skip DELETED stubs (no tombstone in backfill) and UNSIGNED stubs
 //     BEFORE re-fetch — only signed, non-deleted reports are stored.
 //   D-068 containment: HARD. isIngestAllowed(id) gates every patient. Unchanged.
-//     NOTE (adult backfill): isIngestAllowed now reads ELATION_INGEST_ALLOWLIST
-//     when set, falling back to ELATION_READ_ALLOWLIST. See reportIngest.js.
+//     isIngestAllowed = FULL_SYNC short-circuit → inList(ELATION_READ_ALLOWLIST) ||
+//     inList(ELATION_INGEST_EXTRA). See reportIngest.js / PR #454.
 //   D-080 soft-D-077: the active-member check is SOFT here. An explicitly non-active
 //     patients doc is skipped; a MISSING doc or absent field PROCEEDS (+log), because
 //     MK's supplied list is the authority for "active" and the backfill may run before
