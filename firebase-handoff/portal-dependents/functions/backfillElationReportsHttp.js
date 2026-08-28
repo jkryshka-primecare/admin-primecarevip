@@ -56,6 +56,37 @@ const DEFAULT_CHUNK = 40;  // ids per runner invocation (go-ahead item 4)
 const DEFAULT_CONCURRENCY = 5;
 const RUNS_COLLECTION = 'backfill_runs';
 
+// ---- RUN-LEVEL COMPLETION MODEL (2026-08-28) --------------------------------
+// A 960-patient run cannot finish inside one 540s invocation. When the instance
+// is SIGKILLed at the cap, driveRun's try/catch does NOT run (it only catches JS
+// errors), so the run doc used to be left at status:'running' forever and the
+// apply guard 409'd every resume of that runId — an unrecoverable zombie.
+//
+// Fix, three parts:
+//   1. SOFT BUDGET. driveRun stops STARTING new chunks once elapsed exceeds
+//      SOFT_BUDGET_MS (well under the 540s cap), flushes the cursor, writes
+//      status:'paused', and returns cleanly.
+//   2. RESUME. A 'paused' run is resumable: re-POST the same runId and the
+//      wrapper continues from `pending` (the durable cursor).
+//   3. LEASE + HEARTBEAT. Every running instance holds a lease (`leaseOwner`,
+//      `leaseExpiresAt`) renewed by a 30s HEARTBEAT timer that runs independently
+//      of patient completion, plus opportunistically on each checkpoint. The
+//      heartbeat is what makes lease expiry mean "instance dead": a live instance
+//      grinding on one slow patient (per-patient budget 420s >> the 120s TTL)
+//      would otherwise let its own lease lapse and invite a concurrent reclaim.
+//      The timer is cleared on every exit path (complete / pause / error).
+const INSTANCE_MAX_MS = 540 * 1000;   // must match runWith.timeoutSeconds
+const SOFT_BUDGET_MS = 500 * 1000;    // stop starting new work here
+const LEASE_TTL_MS = 120 * 1000;      // renewed by the heartbeat, not by work
+const HEARTBEAT_MS = 30 * 1000;       // lease renewal cadence while driveRun is active
+const INSTANCE_ID = `${process.env.K_REVISION || 'local'}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
+
+function leaseIsLive(run) {
+  const exp = Number(run && run.leaseExpiresAt) || 0;
+  if (!exp) return false;                 // pre-lease doc => treat as dead
+  return exp > Date.now();
+}
+
 function jsonError(res, status, code, reason, message) {
   return res.status(status).json({
     error: { code: status, status: code, message: message || reason, details: { reason } },
@@ -182,6 +213,7 @@ function derivedFailures(perPatient) {
  * a second call for the same runId simply continues from whatever is pending.
  */
 async function driveRun(runId, opts) {
+  const startedAtMs = Date.now();
   const db = admin.firestore();
   const runRef = db.collection(RUNS_COLLECTION).doc(runId);
   const FieldValue = admin.firestore.FieldValue;
@@ -194,29 +226,60 @@ async function driveRun(runId, opts) {
   let census = run.reportTypeCensus || {};
   let failed = Array.isArray(run.failed) ? run.failed : [];
 
-  // ABANDON-AND-ADVANCE (2026-08-28). `inFlight` is written before an id's work
-  // starts and cleared by its completion checkpoint. Anything still in `inFlight`
-  // when a run is re-entered is an id a previous instance died on: it already had
-  // its turn, so drop it from `pending` rather than re-hanging the resume on it.
-  const abandoned = Array.isArray(run.abandoned) ? run.abandoned.slice() : [];
-  const stale = Array.isArray(run.inFlight) ? run.inFlight.slice() : [];
-  if (stale.length) {
-    stale.forEach((id) => { if (!abandoned.includes(id)) abandoned.push(id); });
-    pending = pending.filter((id) => !stale.includes(id));
-  }
-
   await runRef.set({
     status: 'running',
     startedAt: FieldValue.serverTimestamp(),
-    inFlight: [],
-    abandoned,
-    pending,
+    leaseOwner: INSTANCE_ID,
+    leaseExpiresAt: Date.now() + LEASE_TTL_MS,
+    cycles: FieldValue.increment(1),
   }, { merge: true });
+
+  const renewLease = () => ({
+    leaseOwner: INSTANCE_ID,
+    leaseExpiresAt: Date.now() + LEASE_TTL_MS,
+  });
+
+  // ---- lease heartbeat ---------------------------------------------------
+  // Renews the lease every HEARTBEAT_MS for as long as this instance is alive,
+  // regardless of whether any patient has completed. Without it a single slow
+  // patient (per-patient budget 420s) outlives the 120s TTL and the run looks
+  // dead to an operator/resume while it is still working — which is how two
+  // concurrent instances (double Elation load, racing status writes) happen.
+  // Writes ONLY the lease fields, so it can never clobber cursor state.
+  let heartbeat = setInterval(() => {
+    runRef
+      .set(renewLease(), { merge: true })
+      .catch((e) => logError('backfillElationReports', e));
+  }, HEARTBEAT_MS);
+  if (heartbeat && typeof heartbeat.unref === 'function') heartbeat.unref();
+  const stopHeartbeat = () => {
+    if (heartbeat) { clearInterval(heartbeat); heartbeat = null; }
+  };
 
   const chunkSize = Math.max(1, Math.min(200, Number(opts.chunkSize) || DEFAULT_CHUNK));
 
   try {
     while (pending.length) {
+      // ---- graceful pre-timeout pause -------------------------------------
+      // Never START a chunk we cannot expect to finish before the hard cap.
+      if (Date.now() - startedAtMs >= SOFT_BUDGET_MS) {
+        stopHeartbeat();   // no renewal may race the pause write
+        await runRef.set({
+          status: 'paused',
+          pausedAt: FieldValue.serverTimestamp(),
+          pauseReason: 'SOFT_BUDGET_REACHED',
+          counters,
+          reportTypeCensus: census,
+          failed,
+          pending,
+          leaseOwner: null,
+          leaseExpiresAt: 0,
+          updatedAt: FieldValue.serverTimestamp(),
+        }, { merge: true });
+        log('backfillElationReports', 'paused', { runId, remaining: pending.length });
+        return;   // finally{} clears the heartbeat
+      }
+
       const chunk = pending.slice(0, chunkSize);
       const done = [];
 
@@ -230,24 +293,14 @@ async function driveRun(runId, opts) {
           storeMedicalRecords: opts.storeMedicalRecords,
           excludeReportTypes: opts.excludeReportTypes,
           concurrency: opts.concurrency,
-          // Claim the id before any work touches Elation or Storage.
-          onPatientStart: async (id) => {
-            await runRef.set({
-              inFlight: FieldValue.arrayUnion(String(id)),
-              updatedAt: FieldValue.serverTimestamp(),
-            }, { merge: true });
-          },
-          // Per-completed-id checkpoint (go-ahead item 4). The runner now calls
-          // this IN BAND, immediately after the last report for the id is
-          // persisted and before any further finalization, so a wedge after the
-          // writes can no longer leave a fully-ingested id pending.
+          // Per-completed-id checkpoint (go-ahead item 4).
           onPatientComplete: async (pc) => {
             done.push(pc.elationPatientId);
             await runRef.set({
               completed: FieldValue.arrayUnion(pc.elationPatientId),
               pending: FieldValue.arrayRemove(pc.elationPatientId),
-              inFlight: FieldValue.arrayRemove(pc.elationPatientId),
               lastPatientAt: FieldValue.serverTimestamp(),
+              ...renewLease(),
             }, { merge: true });
           },
         },
@@ -265,9 +318,11 @@ async function driveRun(runId, opts) {
         failed,
         pending,
         updatedAt: FieldValue.serverTimestamp(),
+        ...renewLease(),
       }, { merge: true });
     }
 
+    stopHeartbeat();   // no renewal may race the terminal write
     await runRef.set({
       status: 'complete',
       finishedAt: FieldValue.serverTimestamp(),
@@ -275,9 +330,11 @@ async function driveRun(runId, opts) {
       reportTypeCensus: census,
       failed,
       pending: [],
-      inFlight: [],
+      leaseOwner: null,
+      leaseExpiresAt: 0,
     }, { merge: true });
   } catch (e) {
+    stopHeartbeat();
     logError('backfillElationReports', e);
     await runRef.set({
       status: 'error',
@@ -288,7 +345,14 @@ async function driveRun(runId, opts) {
       reportTypeCensus: census,
       failed,
       pending,
+      leaseOwner: null,
+      leaseExpiresAt: 0,
     }, { merge: true });
+  } finally {
+    // Belt and braces: every exit path (including the graceful pause `return`
+    // above) stops the timer. Only a SIGKILL leaves it unrenewed — which is
+    // exactly the signal we want the lease to carry.
+    stopHeartbeat();
   }
 }
 
@@ -338,24 +402,71 @@ exports.backfillElationReports = functions
         requested: Array.isArray(d.requested) ? d.requested.length : (d.requestedCount || 0),
         completed: Array.isArray(d.completed) ? d.completed.length : 0,
         pending: Array.isArray(d.pending) ? d.pending.length : 0,
-        // Diagnostics for a stuck run (2026-08-28): WHICH ids are still pending and
-        // WHEN the last id completed. Elation patient ids are not PHI on their own
-        // and the console already sends them, so echoing the remainder is safe.
         pendingIds: Array.isArray(d.pending) ? d.pending.slice(0, 50) : [],
-        // Claimed-but-not-yet-checkpointed id(s), and ids a previous instance
-        // died on that a resume deliberately skipped.
-        inFlightIds: Array.isArray(d.inFlight) ? d.inFlight.slice(0, 50) : [],
-        abandonedIds: Array.isArray(d.abandoned) ? d.abandoned.slice(0, 50) : [],
+        // Run-level completion model. `resumable` is what the operator acts on:
+        // paused / error / claimed are always resumable; a 'running' run is only
+        // resumable once its lease has expired (its instance is provably dead).
+        cycles: Number(d.cycles) || 0,
+        pauseReason: d.pauseReason || null,
+        leaseOwner: d.leaseOwner || null,
+        leaseExpiresAt: Number(d.leaseExpiresAt) || 0,
+        leaseLive: leaseIsLive(d),
+        resumable: d.status !== 'complete' && !leaseIsLive(d),
+        staleLease: d.status === 'running' && !leaseIsLive(d),
         startedAt: d.startedAt && d.startedAt.toDate ? d.startedAt.toDate().toISOString() : null,
-        lastPatientAt: d.lastPatientAt && d.lastPatientAt.toDate
-          ? d.lastPatientAt.toDate().toISOString()
-          : null,
+        pausedAt: d.pausedAt && d.pausedAt.toDate ? d.pausedAt.toDate().toISOString() : null,
+        lastPatientAt: d.lastPatientAt && d.lastPatientAt.toDate ? d.lastPatientAt.toDate().toISOString() : null,
         updatedAt: d.updatedAt && d.updatedAt.toDate ? d.updatedAt.toDate().toISOString() : null,
         counters: d.counters || {},
         reportTypeCensus: Object.values(d.reportTypeCensus || {}).sort((a, b) => b.count - a.count),
         failed: d.failed || [],
         rejected: d.rejected || [],
         errorReason: d.errorReason || null,
+      });
+    }
+
+    // ---- reset (zombie clear) -------------------------------------------
+    // Operator escape hatch for run docs left at status:'running' by an instance
+    // that was SIGKILLed before the pause path could fire (pre-lease zombies such
+    // as TdyvnxsF5JKFCiTUXj85 / L0iCYecF1obm5bWklnAK). It NEVER touches ingested
+    // data: it only rewrites the run doc's control fields, so the worst case is
+    // that already-ingested ids are re-visited and skipped by skip-existing.
+    if (body.action === 'reset') {
+      const runId = String(body.runId || '').trim();
+      if (!/^[A-Za-z0-9_-]{6,64}$/.test(runId)) {
+        return jsonError(res, 400, 'INVALID_ARGUMENT', 'MALFORMED_RUN_ID');
+      }
+      const resetReason = String(body.reason || '').slice(0, 500);
+      if (!resetReason) return jsonError(res, 400, 'INVALID_ARGUMENT', 'REASON_REQUIRED');
+      const runRef = db.collection(RUNS_COLLECTION).doc(runId);
+      const snap = await runRef.get();
+      if (!snap.exists) return jsonError(res, 404, 'NOT_FOUND', 'NO_SUCH_RUN');
+      const d = snap.data() || {};
+      // Refuse to yank a run out from under a demonstrably live instance unless
+      // the caller explicitly forces it.
+      if (leaseIsLive(d) && body.force !== true) {
+        return res.status(409).json({
+          error: { code: 409, status: 'ABORTED', message: 'Run lease is still live', details: { reason: 'LEASE_LIVE', runId } },
+        });
+      }
+      const FieldValue = admin.firestore.FieldValue;
+      await runRef.set({
+        status: 'paused',
+        pauseReason: 'OPERATOR_RESET',
+        leaseOwner: null,
+        leaseExpiresAt: 0,
+        resetBy: String(body.actor || '').slice(0, 320) || 'unknown',
+        resetReason,
+        resetAt: FieldValue.serverTimestamp(),
+        updatedAt: FieldValue.serverTimestamp(),
+      }, { merge: true });
+      log('backfillElationReports', 'reset', { runId, actor: body.actor || 'unknown' });
+      return res.status(200).json({
+        runId,
+        status: 'paused',
+        reset: true,
+        pending: Array.isArray(d.pending) ? d.pending.length : 0,
+        resumable: true,
       });
     }
 
@@ -444,13 +555,29 @@ exports.backfillElationReports = functions
 
       if (existing.exists) {
         const d = existing.data() || {};
-        if (d.status === 'running') {
+        // A run is only genuinely in progress if its lease is LIVE. A lease is
+        // renewed on every chunk and every completed id, with a TTL shorter than
+        // the 540s instance cap, so an expired lease on a 'running' doc means the
+        // instance died (SIGKILL at the cap, OOM, eviction) — reclaim it rather
+        // than 409 forever.
+        if (d.status === 'running' && leaseIsLive(d)) {
           return res.status(409).json({
             error: { code: 409, status: 'ABORTED', message: 'Run already in progress', details: { reason: 'RUN_IN_PROGRESS', runId } },
           });
         }
-        // Resume: keep whatever is still pending.
-        await runRef.set({ resumedAt: FieldValue.serverTimestamp(), actor, reason }, { merge: true });
+        if (d.status === 'complete') {
+          return res.status(200).json({
+            apply: true, runId, cohort, status: 'complete', alreadyComplete: true, requested: parsed.ids.length,
+          });
+        }
+        // Resume: 'paused' (graceful), 'error', 'claimed', or a stale-lease
+        // 'running'. `pending` is the durable cursor — keep whatever is left.
+        await runRef.set({
+          resumedAt: FieldValue.serverTimestamp(),
+          actor,
+          reason,
+          reclaimedFrom: d.status === 'running' ? (d.leaseOwner || 'unknown') : null,
+        }, { merge: true });
       } else {
         await runRef.set({
           runId,
@@ -483,6 +610,12 @@ exports.backfillElationReports = functions
         eligible: eligible.length,
         rejected,
         poll: { action: 'status', runId },
+        // Resume model: the operator re-POSTs this same runId whenever status
+        // comes back 'paused' (or 'running' with staleLease). There is no
+        // self-re-invoke and no scheduler.
+        resumeModel: 'operator-repost',
+        softBudgetMs: SOFT_BUDGET_MS,
+        instanceMaxMs: INSTANCE_MAX_MS,
       });
 
       await driveRun(runId, {
