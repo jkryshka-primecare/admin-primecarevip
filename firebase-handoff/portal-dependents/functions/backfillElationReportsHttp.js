@@ -275,6 +275,7 @@ async function driveRun(runId, opts) {
       reportTypeCensus: census,
       failed,
       pending: [],
+      inFlight: [],
     }, { merge: true });
   } catch (e) {
     logError('backfillElationReports', e);
