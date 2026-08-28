@@ -257,6 +257,7 @@ function Runner({ def, canApply }: { def: RunnerDef; canApply: boolean }) {
 
   async function go(apply: boolean, runToEnd = false) {
     setMode(apply ? "apply" : "dry");
+    setAttachNotice(null);
     let cur = cursor;
     try {
       if (def.needsIds) {
@@ -265,18 +266,34 @@ function Runner({ def, canApply }: { def: RunnerDef; canApply: boolean }) {
           // claimed; the work then proceeds without this browser.
           setReport(null);
           setProgress(null);
-          const res = await run.mutateAsync({
-            apply: true,
-            reason: reason.trim(),
-            patientIds: ids,
-            cohort,
-            skipExisting,
-            ...(resumeId.trim() ? { runId: resumeId.trim() } : {}),
-          });
-          setReport(res);
-          if (res.runId) setRunId(res.runId);
+          const requestedRunId = resumeId.trim() || null;
+          try {
+            const res = await run.mutateAsync({
+              apply: true,
+              reason: reason.trim(),
+              patientIds: ids,
+              cohort,
+              skipExisting,
+              ...(requestedRunId ? { runId: requestedRunId } : {}),
+            });
+            setReport(res);
+            if (res.runId) setRunId(res.runId);
+          } catch (e) {
+            const msg = e instanceof Error ? e.message : String(e);
+            // 409 = this run (or another) is still draining server-side. That
+            // is not a failure: attach to it and poll instead of erroring.
+            if (/409|already in progress/i.test(msg) && requestedRunId) {
+              setRunId(requestedRunId);
+              setAttachNotice(
+                `A run is already in progress. Attached to ${requestedRunId} — progress below updates every 10s.`,
+              );
+            } else {
+              throw e;
+            }
+          }
           return;
         }
+
         let merged: BackfillReport | null = null;
         setReport(null);
         setProgress({ done: 0, total: ids.length });
