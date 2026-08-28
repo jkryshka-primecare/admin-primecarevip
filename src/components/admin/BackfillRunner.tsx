@@ -520,6 +520,11 @@ function Runner({ def, canApply }: { def: RunnerDef; canApply: boolean }) {
         )}
       </div>
 
+      {attachNotice && (
+        <p className="mt-3 rounded-md border border-border bg-muted/40 p-2 text-xs text-muted-foreground">
+          {attachNotice}
+        </p>
+      )}
 
 
       {def.needsIds && runId && (
