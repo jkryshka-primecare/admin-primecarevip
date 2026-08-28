@@ -197,6 +197,8 @@ function Runner({ def, canApply }: { def: RunnerDef; canApply: boolean }) {
   // working server-side. This id is the handle for progress and for resuming.
   const [runId, setRunId] = useState<string | null>(null);
   const [resumeId, setResumeId] = useState("");
+  const [attachNotice, setAttachNotice] = useState<string | null>(null);
+
 
   const runStatus = useBackfillRunStatus(runId, Boolean(runId));
   const live = runStatus.data ?? null;
@@ -257,6 +259,7 @@ function Runner({ def, canApply }: { def: RunnerDef; canApply: boolean }) {
 
   async function go(apply: boolean, runToEnd = false) {
     setMode(apply ? "apply" : "dry");
+    setAttachNotice(null);
     let cur = cursor;
     try {
       if (def.needsIds) {
@@ -265,18 +268,34 @@ function Runner({ def, canApply }: { def: RunnerDef; canApply: boolean }) {
           // claimed; the work then proceeds without this browser.
           setReport(null);
           setProgress(null);
-          const res = await run.mutateAsync({
-            apply: true,
-            reason: reason.trim(),
-            patientIds: ids,
-            cohort,
-            skipExisting,
-            ...(resumeId.trim() ? { runId: resumeId.trim() } : {}),
-          });
-          setReport(res);
-          if (res.runId) setRunId(res.runId);
+          const requestedRunId = resumeId.trim() || null;
+          try {
+            const res = await run.mutateAsync({
+              apply: true,
+              reason: reason.trim(),
+              patientIds: ids,
+              cohort,
+              skipExisting,
+              ...(requestedRunId ? { runId: requestedRunId } : {}),
+            });
+            setReport(res);
+            if (res.runId) setRunId(res.runId);
+          } catch (e) {
+            const msg = e instanceof Error ? e.message : String(e);
+            // 409 = this run (or another) is still draining server-side. That
+            // is not a failure: attach to it and poll instead of erroring.
+            if (/409|already in progress/i.test(msg) && requestedRunId) {
+              setRunId(requestedRunId);
+              setAttachNotice(
+                `A run is already in progress. Attached to ${requestedRunId} — progress below updates every 10s.`,
+              );
+            } else {
+              throw e;
+            }
+          }
           return;
         }
+
         let merged: BackfillReport | null = null;
         setReport(null);
         setProgress({ done: 0, total: ids.length });
@@ -501,6 +520,11 @@ function Runner({ def, canApply }: { def: RunnerDef; canApply: boolean }) {
         )}
       </div>
 
+      {attachNotice && (
+        <p className="mt-3 rounded-md border border-border bg-muted/40 p-2 text-xs text-muted-foreground">
+          {attachNotice}
+        </p>
+      )}
 
 
       {def.needsIds && runId && (
@@ -555,7 +579,7 @@ function Runner({ def, canApply }: { def: RunnerDef; canApply: boolean }) {
         </div>
       )}
 
-      {run.error && (
+      {run.error && !attachNotice && (
         <p className="mt-3 flex items-start gap-2 rounded-md bg-destructive/10 p-2 text-xs text-destructive">
           <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
           {run.error instanceof Error ? run.error.message : "The run failed."}
