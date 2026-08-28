@@ -172,12 +172,18 @@ function storedCopyIsCurrent(snap, report) {
 /** Ranged first-8-bytes read. Replaces the full download-back verify (item 2). */
 async function verifyPdfHeader(file) {
   const chunks = [];
-  await new Promise((resolve, reject) => {
-    const stream = file.createReadStream({ start: 0, end: 7 });
-    stream.on('data', (c) => chunks.push(c));
-    stream.on('error', reject);
-    stream.on('end', resolve);
-  });
+  let stream = null;
+  await withDeadline(
+    new Promise((resolve, reject) => {
+      stream = file.createReadStream({ start: 0, end: 7 });
+      stream.on('data', (c) => chunks.push(c));
+      stream.on('error', reject);
+      stream.on('end', resolve);
+    }),
+    GCS_READ_TIMEOUT_MS,
+    'ARTIFACT_VERIFY_TIMEOUT',
+    () => { try { stream && stream.destroy(); } catch (_) { /* noop */ } },
+  );
   const head = Buffer.concat(chunks).subarray(0, 5).toString();
   if (head !== '%PDF-') throw new Error('ARTIFACT_NOT_PDF');
 }
@@ -186,28 +192,72 @@ async function verifyPdfHeader(file) {
  * Fetch the printable and write it to Storage. Streams when the shared Elation
  * client exposes a stream helper; otherwise falls back to the buffered getBinary
  * (still with the dedicated artifact budget). Returns bytes written when known.
+ *
+ * Three independent guards, because the client's `timeoutMs` only covers headers:
+ *   1. total budget on the header/connect await,
+ *   2. a STALL watchdog on the pipe, reset on every chunk (a body that stops
+ *      mid-download is the failure mode we actually hit),
+ *   3. a total ceiling on the whole pipe so an infinitely-slow-but-dripping
+ *      body cannot outlive the invocation.
+ * Any of them destroys both streams and rejects, so the caller's catch runs.
  */
 async function uploadArtifact(file, reportId) {
   const path = '/reports/' + reportId + '/printable';
   const writeOpts = { contentType: 'application/pdf', resumable: false };
 
   if (typeof elationClient.getBinaryStream === 'function') {
-    const source = await elationClient.getBinaryStream(path, { timeoutMs: ARTIFACT_FETCH_TIMEOUT_MS });
+    const source = await withDeadline(
+      elationClient.getBinaryStream(path, { timeoutMs: ARTIFACT_FETCH_TIMEOUT_MS }),
+      ARTIFACT_FETCH_TIMEOUT_MS,
+      'ARTIFACT_OPEN_TIMEOUT',
+    );
     const body = source && source.stream ? source.stream : source;
-    await new Promise((resolve, reject) => {
-      const dest = file.createWriteStream(writeOpts);
-      body.on('error', reject);
-      dest.on('error', reject);
-      dest.on('finish', resolve);
-      body.pipe(dest);
-    });
+    let dest = null;
+    let stallTimer = null;
+    const abort = (err) => {
+      try { body && body.destroy(err); } catch (_) { /* noop */ }
+      try { dest && dest.destroy(err); } catch (_) { /* noop */ }
+    };
+    try {
+      await withDeadline(
+        new Promise((resolve, reject) => {
+          dest = file.createWriteStream(writeOpts);
+          const armStall = () => {
+            clearTimeout(stallTimer);
+            stallTimer = setTimeout(() => {
+              const err = new Error('ARTIFACT_STREAM_STALLED after ' + ARTIFACT_STALL_MS + 'ms');
+              err.reason = 'ARTIFACT_STREAM_STALLED';
+              abort(err);
+              reject(err);
+            }, ARTIFACT_STALL_MS);
+            if (stallTimer && typeof stallTimer.unref === 'function') stallTimer.unref();
+          };
+          body.on('data', armStall);
+          body.on('error', reject);
+          dest.on('error', reject);
+          dest.on('finish', resolve);
+          armStall();
+          body.pipe(dest);
+        }),
+        ARTIFACT_FETCH_TIMEOUT_MS,
+        'ARTIFACT_STREAM_TIMEOUT',
+        () => abort(new Error('ARTIFACT_STREAM_TIMEOUT')),
+      );
+    } finally {
+      clearTimeout(stallTimer);
+    }
     return null; // size unknown on the streamed path; GCS metadata has it
   }
 
-  const { buffer } = await getBinary(path, { timeoutMs: ARTIFACT_FETCH_TIMEOUT_MS });
-  await file.save(buffer, writeOpts);
+  const { buffer } = await withDeadline(
+    getBinary(path, { timeoutMs: ARTIFACT_FETCH_TIMEOUT_MS }),
+    ARTIFACT_FETCH_TIMEOUT_MS,
+    'ARTIFACT_FETCH_TIMEOUT',
+  );
+  await withDeadline(file.save(buffer, writeOpts), GCS_READ_TIMEOUT_MS, 'ARTIFACT_SAVE_TIMEOUT');
   return buffer.byteLength;
 }
+
 
 /** Census accumulator: distinct report_type -> count + mapped category. */
 function noteCensus(census, reportType) {
