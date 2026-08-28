@@ -559,6 +559,16 @@ function Runner({ def, canApply }: { def: RunnerDef; canApply: boolean }) {
               Waiting on: {live.pendingIds.join(", ")}
             </p>
           ) : null}
+          {live?.inFlightIds?.length ? (
+            <p className="mt-1 font-mono text-[11px] text-muted-foreground">
+              In flight (claimed, not yet checkpointed): {live.inFlightIds.join(", ")}
+            </p>
+          ) : null}
+          {live?.abandonedIds?.length ? (
+            <p className="mt-1 font-mono text-[11px] text-destructive">
+              Abandoned on resume (already had a turn): {live.abandonedIds.join(", ")}
+            </p>
+          ) : null}
           {live?.lastPatientAt && (
             <p className="mt-1 text-[11px] text-muted-foreground">
               Last patient finished {new Date(live.lastPatientAt).toLocaleTimeString()}
