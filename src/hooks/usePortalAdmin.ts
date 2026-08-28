@@ -461,6 +461,10 @@ export type BackfillReport = {
   pending?: number;
   /** Ids still queued — lets an operator see WHICH patient a run is wedged on. */
   pendingIds?: string[];
+  /** Ids claimed by a worker but not yet checkpointed complete. */
+  inFlightIds?: string[];
+  /** Ids a resume deliberately skipped because a prior instance died on them. */
+  abandonedIds?: string[];
   startedAt?: string | null;
   lastPatientAt?: string | null;
   updatedAt?: string | null;

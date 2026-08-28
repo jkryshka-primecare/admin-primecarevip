@@ -620,6 +620,13 @@ async function backfillPatient(db, FieldValue, bucket, elationPatientId, counter
   }
 
   counters.patientsProcessed += 1;
+  // DURABLE COMPLETION BEFORE FINALIZATION (2026-08-28).
+  // Every report for this id has been persisted by the time we get here. Record
+  // the id as complete NOW, before any further hangable step (logging sinks,
+  // the worker's own post-return checkpoint, the wrapper's chunk write). If a
+  // later step wedges, the run doc already shows this id done, so a resume
+  // advances to the next id instead of re-hanging on this one.
+  if (typeof opts._checkpoint === 'function') await opts._checkpoint(pc);
   log('backfillElationReports', dryRun ? 'patient-dry-run-complete' : 'patient-complete', pc);
   return pc;
 }
@@ -694,27 +701,15 @@ async function backfillElationReports(db, FieldValue, elationPatientIds, options
   async function worker() {
     while (cursor < ids.length) {
       const id = ids[cursor++];
-      // Last-resort ceiling: no single id may wedge a worker (and therefore the
-      // whole run) past this budget. Anything that escapes the per-call deadlines
-      // above surfaces here as a counted, logged patient failure — never a hang.
-      let pc;
-      try {
-        pc = await withDeadline(
-          backfillPatient(db, FieldValue, bucket, id, counters, opts),
-          PATIENT_BUDGET_MS,
-          'PATIENT_BUDGET_EXCEEDED',
-        );
-      } catch (err) {
-        counters.patientsErrored += 1;
-        pc = { elationPatientId: id, errors: 1, timedOut: true, lastError: errBrief('patient-budget', err) };
-        logError('backfillElationReports', 'patient-timed-out', err, { elationPatientId: id });
-      }
-      perPatient.push(pc);
-      if (typeof opts.onPatientComplete === 'function') {
-        // Checkpoint per COMPLETED id — a 540s kill resumes at the next id.
-        // This is also remote Firestore I/O in the HTTP wrapper. If it wedges after
-        // the patient budget fires, the id otherwise remains pending forever even
-        // though the worker already produced a timeout result.
+
+      // One checkpoint per id, whoever gets there first: the in-band call at the
+      // end of backfillPatient (normal path) or the post-return call below
+      // (skips, errors, budget timeouts). `fired` makes it idempotent so the run
+      // doc is never written twice for the same id.
+      let fired = false;
+      const checkpoint = async (pc) => {
+        if (fired || typeof opts.onPatientComplete !== 'function') return;
+        fired = true;
         try {
           await withDeadline(
             opts.onPatientComplete(pc, counters),
@@ -726,7 +721,42 @@ async function backfillElationReports(db, FieldValue, elationPatientIds, options
             elationPatientId: id,
           });
         }
+      };
+
+      // Mark the id in flight BEFORE any work, so a resume can see which id a
+      // killed instance died on and abandon-and-advance instead of re-hanging.
+      if (typeof opts.onPatientStart === 'function') {
+        try {
+          await withDeadline(
+            opts.onPatientStart(id),
+            FIRESTORE_CALL_TIMEOUT_MS,
+            'PATIENT_START_TIMEOUT',
+          );
+        } catch (startErr) {
+          logError('backfillElationReports', 'patient-start-checkpoint-failed', startErr, {
+            elationPatientId: id,
+          });
+        }
       }
+
+      // Last-resort ceiling: no single id may wedge a worker (and therefore the
+      // whole run) past this budget. Anything that escapes the per-call deadlines
+      // above surfaces here as a counted, logged patient failure — never a hang.
+      let pc;
+      try {
+        pc = await withDeadline(
+          backfillPatient(db, FieldValue, bucket, id, counters, { ...opts, _checkpoint: checkpoint }),
+          PATIENT_BUDGET_MS,
+          'PATIENT_BUDGET_EXCEEDED',
+        );
+      } catch (err) {
+        counters.patientsErrored += 1;
+        pc = { elationPatientId: id, errors: 1, timedOut: true, lastError: errBrief('patient-budget', err) };
+        logError('backfillElationReports', 'patient-timed-out', err, { elationPatientId: id });
+      }
+      perPatient.push(pc);
+      // No-op when backfillPatient already checkpointed in band.
+      await checkpoint(pc);
     }
   }
 

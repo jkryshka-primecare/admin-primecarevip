@@ -194,7 +194,24 @@ async function driveRun(runId, opts) {
   let census = run.reportTypeCensus || {};
   let failed = Array.isArray(run.failed) ? run.failed : [];
 
-  await runRef.set({ status: 'running', startedAt: FieldValue.serverTimestamp() }, { merge: true });
+  // ABANDON-AND-ADVANCE (2026-08-28). `inFlight` is written before an id's work
+  // starts and cleared by its completion checkpoint. Anything still in `inFlight`
+  // when a run is re-entered is an id a previous instance died on: it already had
+  // its turn, so drop it from `pending` rather than re-hanging the resume on it.
+  const abandoned = Array.isArray(run.abandoned) ? run.abandoned.slice() : [];
+  const stale = Array.isArray(run.inFlight) ? run.inFlight.slice() : [];
+  if (stale.length) {
+    stale.forEach((id) => { if (!abandoned.includes(id)) abandoned.push(id); });
+    pending = pending.filter((id) => !stale.includes(id));
+  }
+
+  await runRef.set({
+    status: 'running',
+    startedAt: FieldValue.serverTimestamp(),
+    inFlight: [],
+    abandoned,
+    pending,
+  }, { merge: true });
 
   const chunkSize = Math.max(1, Math.min(200, Number(opts.chunkSize) || DEFAULT_CHUNK));
 
@@ -213,12 +230,23 @@ async function driveRun(runId, opts) {
           storeMedicalRecords: opts.storeMedicalRecords,
           excludeReportTypes: opts.excludeReportTypes,
           concurrency: opts.concurrency,
-          // Per-completed-id checkpoint (go-ahead item 4).
+          // Claim the id before any work touches Elation or Storage.
+          onPatientStart: async (id) => {
+            await runRef.set({
+              inFlight: FieldValue.arrayUnion(String(id)),
+              updatedAt: FieldValue.serverTimestamp(),
+            }, { merge: true });
+          },
+          // Per-completed-id checkpoint (go-ahead item 4). The runner now calls
+          // this IN BAND, immediately after the last report for the id is
+          // persisted and before any further finalization, so a wedge after the
+          // writes can no longer leave a fully-ingested id pending.
           onPatientComplete: async (pc) => {
             done.push(pc.elationPatientId);
             await runRef.set({
               completed: FieldValue.arrayUnion(pc.elationPatientId),
               pending: FieldValue.arrayRemove(pc.elationPatientId),
+              inFlight: FieldValue.arrayRemove(pc.elationPatientId),
               lastPatientAt: FieldValue.serverTimestamp(),
             }, { merge: true });
           },
@@ -247,6 +275,7 @@ async function driveRun(runId, opts) {
       reportTypeCensus: census,
       failed,
       pending: [],
+      inFlight: [],
     }, { merge: true });
   } catch (e) {
     logError('backfillElationReports', e);
@@ -313,6 +342,10 @@ exports.backfillElationReports = functions
         // WHEN the last id completed. Elation patient ids are not PHI on their own
         // and the console already sends them, so echoing the remainder is safe.
         pendingIds: Array.isArray(d.pending) ? d.pending.slice(0, 50) : [],
+        // Claimed-but-not-yet-checkpointed id(s), and ids a previous instance
+        // died on that a resume deliberately skipped.
+        inFlightIds: Array.isArray(d.inFlight) ? d.inFlight.slice(0, 50) : [],
+        abandonedIds: Array.isArray(d.abandoned) ? d.abandoned.slice(0, 50) : [],
         startedAt: d.startedAt && d.startedAt.toDate ? d.startedAt.toDate().toISOString() : null,
         lastPatientAt: d.lastPatientAt && d.lastPatientAt.toDate
           ? d.lastPatientAt.toDate().toISOString()
