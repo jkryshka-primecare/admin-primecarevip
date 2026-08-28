@@ -712,7 +712,20 @@ async function backfillElationReports(db, FieldValue, elationPatientIds, options
       perPatient.push(pc);
       if (typeof opts.onPatientComplete === 'function') {
         // Checkpoint per COMPLETED id — a 540s kill resumes at the next id.
-        try { await opts.onPatientComplete(pc, counters); } catch (_) { /* never fatal */ }
+        // This is also remote Firestore I/O in the HTTP wrapper. If it wedges after
+        // the patient budget fires, the id otherwise remains pending forever even
+        // though the worker already produced a timeout result.
+        try {
+          await withDeadline(
+            opts.onPatientComplete(pc, counters),
+            FIRESTORE_CALL_TIMEOUT_MS,
+            'PATIENT_CHECKPOINT_TIMEOUT',
+          );
+        } catch (checkpointErr) {
+          logError('backfillElationReports', 'patient-checkpoint-failed', checkpointErr, {
+            elationPatientId: id,
+          });
+        }
       }
     }
   }
