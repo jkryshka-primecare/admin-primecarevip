@@ -201,6 +201,11 @@ function Runner({ def, canApply }: { def: RunnerDef; canApply: boolean }) {
   const runStatus = useBackfillRunStatus(runId, Boolean(runId));
   const live = runStatus.data ?? null;
   const runFinished = live?.status === "complete" || live?.status === "error";
+  const stalledMinutes =
+    live && !runFinished && live.lastPatientAt
+      ? Math.floor((Date.now() - new Date(live.lastPatientAt).getTime()) / 60000)
+      : null;
+
 
   const ids = idsText
     .split(/[\s,]+/)
