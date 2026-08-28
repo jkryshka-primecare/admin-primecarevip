@@ -342,6 +342,10 @@ exports.backfillElationReports = functions
         // WHEN the last id completed. Elation patient ids are not PHI on their own
         // and the console already sends them, so echoing the remainder is safe.
         pendingIds: Array.isArray(d.pending) ? d.pending.slice(0, 50) : [],
+        // Claimed-but-not-yet-checkpointed id(s), and ids a previous instance
+        // died on that a resume deliberately skipped.
+        inFlightIds: Array.isArray(d.inFlight) ? d.inFlight.slice(0, 50) : [],
+        abandonedIds: Array.isArray(d.abandoned) ? d.abandoned.slice(0, 50) : [],
         startedAt: d.startedAt && d.startedAt.toDate ? d.startedAt.toDate().toISOString() : null,
         lastPatientAt: d.lastPatientAt && d.lastPatientAt.toDate
           ? d.lastPatientAt.toDate().toISOString()
