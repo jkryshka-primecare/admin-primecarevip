@@ -309,6 +309,15 @@ exports.backfillElationReports = functions
         requested: Array.isArray(d.requested) ? d.requested.length : (d.requestedCount || 0),
         completed: Array.isArray(d.completed) ? d.completed.length : 0,
         pending: Array.isArray(d.pending) ? d.pending.length : 0,
+        // Diagnostics for a stuck run (2026-08-28): WHICH ids are still pending and
+        // WHEN the last id completed. Elation patient ids are not PHI on their own
+        // and the console already sends them, so echoing the remainder is safe.
+        pendingIds: Array.isArray(d.pending) ? d.pending.slice(0, 50) : [],
+        startedAt: d.startedAt && d.startedAt.toDate ? d.startedAt.toDate().toISOString() : null,
+        lastPatientAt: d.lastPatientAt && d.lastPatientAt.toDate
+          ? d.lastPatientAt.toDate().toISOString()
+          : null,
+        updatedAt: d.updatedAt && d.updatedAt.toDate ? d.updatedAt.toDate().toISOString() : null,
         counters: d.counters || {},
         reportTypeCensus: Object.values(d.reportTypeCensus || {}).sort((a, b) => b.count - a.count),
         failed: d.failed || [],

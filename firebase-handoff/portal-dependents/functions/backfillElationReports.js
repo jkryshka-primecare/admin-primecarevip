@@ -96,6 +96,34 @@ const REPORTS_PAGE_CAP = 200; // safety cap; loud failure > silent partial pull.
 // repair sweep out. Deliberately a SEPARATE constant (go-ahead item 3).
 const ARTIFACT_FETCH_TIMEOUT_MS = Number(process.env.ELATION_ARTIFACT_TIMEOUT_MS || 120000);
 
+// HANG FIX (2026-08-28, run L0iCYecF1obm5bWklnAK stuck at 1/2 with Failed: 0).
+// `timeoutMs` handed to the Elation client only guards CONNECT + RESPONSE HEADERS.
+// Once bytes start (or fail to start) flowing, the body pipe below was awaited with
+// NO timer at all: a stalled TCP body emits neither 'error' nor 'finish', so the
+// promise never settles, the worker never returns, the run doc never checkpoints,
+// and the 540s instance kill leaves `status:'running'` forever. Every await that can
+// touch the network now runs under a HARD deadline that rejects.
+const JSON_CALL_TIMEOUT_MS = Number(process.env.ELATION_JSON_TIMEOUT_MS || 60000);
+const ARTIFACT_STALL_MS = Number(process.env.ELATION_ARTIFACT_STALL_MS || 45000);
+const GCS_READ_TIMEOUT_MS = Number(process.env.GCS_READ_TIMEOUT_MS || 30000);
+const PATIENT_BUDGET_MS = Number(process.env.BACKFILL_PATIENT_BUDGET_MS || 420000);
+
+/** Reject with a coded error when `promise` has not settled within `ms`. */
+function withDeadline(promise, ms, code, onTimeout) {
+  let timer;
+  const guard = new Promise((_, reject) => {
+    timer = setTimeout(() => {
+      const err = new Error(code + ' after ' + ms + 'ms');
+      err.reason = code;
+      try { if (typeof onTimeout === 'function') onTimeout(); } catch (_) { /* best effort */ }
+      reject(err);
+    }, ms);
+    if (timer && typeof timer.unref === 'function') timer.unref();
+  });
+  return Promise.race([promise, guard]).finally(() => clearTimeout(timer));
+}
+
+
 /** True when MR docs may be stored at all (poller uses the same env flag). */
 function storeMedicalRecordsEnabled(options) {
   if (options && typeof options.storeMedicalRecords === 'boolean') return options.storeMedicalRecords;
@@ -144,12 +172,18 @@ function storedCopyIsCurrent(snap, report) {
 /** Ranged first-8-bytes read. Replaces the full download-back verify (item 2). */
 async function verifyPdfHeader(file) {
   const chunks = [];
-  await new Promise((resolve, reject) => {
-    const stream = file.createReadStream({ start: 0, end: 7 });
-    stream.on('data', (c) => chunks.push(c));
-    stream.on('error', reject);
-    stream.on('end', resolve);
-  });
+  let stream = null;
+  await withDeadline(
+    new Promise((resolve, reject) => {
+      stream = file.createReadStream({ start: 0, end: 7 });
+      stream.on('data', (c) => chunks.push(c));
+      stream.on('error', reject);
+      stream.on('end', resolve);
+    }),
+    GCS_READ_TIMEOUT_MS,
+    'ARTIFACT_VERIFY_TIMEOUT',
+    () => { try { stream && stream.destroy(); } catch (_) { /* noop */ } },
+  );
   const head = Buffer.concat(chunks).subarray(0, 5).toString();
   if (head !== '%PDF-') throw new Error('ARTIFACT_NOT_PDF');
 }
@@ -158,28 +192,72 @@ async function verifyPdfHeader(file) {
  * Fetch the printable and write it to Storage. Streams when the shared Elation
  * client exposes a stream helper; otherwise falls back to the buffered getBinary
  * (still with the dedicated artifact budget). Returns bytes written when known.
+ *
+ * Three independent guards, because the client's `timeoutMs` only covers headers:
+ *   1. total budget on the header/connect await,
+ *   2. a STALL watchdog on the pipe, reset on every chunk (a body that stops
+ *      mid-download is the failure mode we actually hit),
+ *   3. a total ceiling on the whole pipe so an infinitely-slow-but-dripping
+ *      body cannot outlive the invocation.
+ * Any of them destroys both streams and rejects, so the caller's catch runs.
  */
 async function uploadArtifact(file, reportId) {
   const path = '/reports/' + reportId + '/printable';
   const writeOpts = { contentType: 'application/pdf', resumable: false };
 
   if (typeof elationClient.getBinaryStream === 'function') {
-    const source = await elationClient.getBinaryStream(path, { timeoutMs: ARTIFACT_FETCH_TIMEOUT_MS });
+    const source = await withDeadline(
+      elationClient.getBinaryStream(path, { timeoutMs: ARTIFACT_FETCH_TIMEOUT_MS }),
+      ARTIFACT_FETCH_TIMEOUT_MS,
+      'ARTIFACT_OPEN_TIMEOUT',
+    );
     const body = source && source.stream ? source.stream : source;
-    await new Promise((resolve, reject) => {
-      const dest = file.createWriteStream(writeOpts);
-      body.on('error', reject);
-      dest.on('error', reject);
-      dest.on('finish', resolve);
-      body.pipe(dest);
-    });
+    let dest = null;
+    let stallTimer = null;
+    const abort = (err) => {
+      try { body && body.destroy(err); } catch (_) { /* noop */ }
+      try { dest && dest.destroy(err); } catch (_) { /* noop */ }
+    };
+    try {
+      await withDeadline(
+        new Promise((resolve, reject) => {
+          dest = file.createWriteStream(writeOpts);
+          const armStall = () => {
+            clearTimeout(stallTimer);
+            stallTimer = setTimeout(() => {
+              const err = new Error('ARTIFACT_STREAM_STALLED after ' + ARTIFACT_STALL_MS + 'ms');
+              err.reason = 'ARTIFACT_STREAM_STALLED';
+              abort(err);
+              reject(err);
+            }, ARTIFACT_STALL_MS);
+            if (stallTimer && typeof stallTimer.unref === 'function') stallTimer.unref();
+          };
+          body.on('data', armStall);
+          body.on('error', reject);
+          dest.on('error', reject);
+          dest.on('finish', resolve);
+          armStall();
+          body.pipe(dest);
+        }),
+        ARTIFACT_FETCH_TIMEOUT_MS,
+        'ARTIFACT_STREAM_TIMEOUT',
+        () => abort(new Error('ARTIFACT_STREAM_TIMEOUT')),
+      );
+    } finally {
+      clearTimeout(stallTimer);
+    }
     return null; // size unknown on the streamed path; GCS metadata has it
   }
 
-  const { buffer } = await getBinary(path, { timeoutMs: ARTIFACT_FETCH_TIMEOUT_MS });
-  await file.save(buffer, writeOpts);
+  const { buffer } = await withDeadline(
+    getBinary(path, { timeoutMs: ARTIFACT_FETCH_TIMEOUT_MS }),
+    ARTIFACT_FETCH_TIMEOUT_MS,
+    'ARTIFACT_FETCH_TIMEOUT',
+  );
+  await withDeadline(file.save(buffer, writeOpts), GCS_READ_TIMEOUT_MS, 'ARTIFACT_SAVE_TIMEOUT');
   return buffer.byteLength;
 }
+
 
 /** Census accumulator: distinct report_type -> count + mapped category. */
 function noteCensus(census, reportType) {
@@ -329,7 +407,11 @@ async function backfillPatient(db, FieldValue, bucket, elationPatientId, counter
     // Re-fetch full body (stub grids are empty; verified live 2026-07-06).
     let report;
     try {
-      report = await elationGet('/reports/' + reportId + '/');
+      report = await withDeadline(
+        elationGet('/reports/' + reportId + '/'),
+        JSON_CALL_TIMEOUT_MS,
+        'ELATION_JSON_TIMEOUT',
+      );
     } catch (err) {
       if (err && err.reason === 'ELATION_NOT_FOUND') {
         pc.notFound += 1; counters.notFound += 1;
@@ -504,7 +586,11 @@ async function backfillPatient(db, FieldValue, bucket, elationPatientId, counter
 // Pull ALL reports for one patient, following cursors to exhaustion.
 async function listPatientReports(elationPatientId) {
   const out = [];
-  let json = await elationGet('/reports/?patient=' + encodeURIComponent(elationPatientId));
+  let json = await withDeadline(
+    elationGet('/reports/?patient=' + encodeURIComponent(elationPatientId)),
+    JSON_CALL_TIMEOUT_MS,
+    'ELATION_JSON_TIMEOUT',
+  );
   let pages = 0;
   while (true) {
     const results = Array.isArray(json)
@@ -517,7 +603,11 @@ async function listPatientReports(elationPatientId) {
     if (!next) break;
     if (pages >= REPORTS_PAGE_CAP) throw new Error('ELATION_REPORTS_PAGE_CAP_EXCEEDED');
     if (!String(next).startsWith(ELATION_BASE)) throw new Error('ELATION_BAD_CURSOR');
-    json = await elationGet(String(next).slice(ELATION_BASE.length));
+    json = await withDeadline(
+      elationGet(String(next).slice(ELATION_BASE.length)),
+      JSON_CALL_TIMEOUT_MS,
+      'ELATION_JSON_TIMEOUT',
+    );
   }
   return out;
 }
@@ -563,7 +653,21 @@ async function backfillElationReports(db, FieldValue, elationPatientIds, options
   async function worker() {
     while (cursor < ids.length) {
       const id = ids[cursor++];
-      const pc = await backfillPatient(db, FieldValue, bucket, id, counters, opts);
+      // Last-resort ceiling: no single id may wedge a worker (and therefore the
+      // whole run) past this budget. Anything that escapes the per-call deadlines
+      // above surfaces here as a counted, logged patient failure — never a hang.
+      let pc;
+      try {
+        pc = await withDeadline(
+          backfillPatient(db, FieldValue, bucket, id, counters, opts),
+          PATIENT_BUDGET_MS,
+          'PATIENT_BUDGET_EXCEEDED',
+        );
+      } catch (err) {
+        counters.patientsErrored += 1;
+        pc = { elationPatientId: id, errors: 1, timedOut: true, lastError: errBrief('patient-budget', err) };
+        logError('backfillElationReports', 'patient-timed-out', err, { elationPatientId: id });
+      }
       perPatient.push(pc);
       if (typeof opts.onPatientComplete === 'function') {
         // Checkpoint per COMPLETED id — a 540s kill resumes at the next id.
