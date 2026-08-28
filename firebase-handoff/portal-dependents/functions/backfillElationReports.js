@@ -407,7 +407,11 @@ async function backfillPatient(db, FieldValue, bucket, elationPatientId, counter
     // Re-fetch full body (stub grids are empty; verified live 2026-07-06).
     let report;
     try {
-      report = await elationGet('/reports/' + reportId + '/');
+      report = await withDeadline(
+        elationGet('/reports/' + reportId + '/'),
+        JSON_CALL_TIMEOUT_MS,
+        'ELATION_JSON_TIMEOUT',
+      );
     } catch (err) {
       if (err && err.reason === 'ELATION_NOT_FOUND') {
         pc.notFound += 1; counters.notFound += 1;
@@ -582,7 +586,11 @@ async function backfillPatient(db, FieldValue, bucket, elationPatientId, counter
 // Pull ALL reports for one patient, following cursors to exhaustion.
 async function listPatientReports(elationPatientId) {
   const out = [];
-  let json = await elationGet('/reports/?patient=' + encodeURIComponent(elationPatientId));
+  let json = await withDeadline(
+    elationGet('/reports/?patient=' + encodeURIComponent(elationPatientId)),
+    JSON_CALL_TIMEOUT_MS,
+    'ELATION_JSON_TIMEOUT',
+  );
   let pages = 0;
   while (true) {
     const results = Array.isArray(json)
@@ -595,7 +603,11 @@ async function listPatientReports(elationPatientId) {
     if (!next) break;
     if (pages >= REPORTS_PAGE_CAP) throw new Error('ELATION_REPORTS_PAGE_CAP_EXCEEDED');
     if (!String(next).startsWith(ELATION_BASE)) throw new Error('ELATION_BAD_CURSOR');
-    json = await elationGet(String(next).slice(ELATION_BASE.length));
+    json = await withDeadline(
+      elationGet(String(next).slice(ELATION_BASE.length)),
+      JSON_CALL_TIMEOUT_MS,
+      'ELATION_JSON_TIMEOUT',
+    );
   }
   return out;
 }
@@ -641,7 +653,21 @@ async function backfillElationReports(db, FieldValue, elationPatientIds, options
   async function worker() {
     while (cursor < ids.length) {
       const id = ids[cursor++];
-      const pc = await backfillPatient(db, FieldValue, bucket, id, counters, opts);
+      // Last-resort ceiling: no single id may wedge a worker (and therefore the
+      // whole run) past this budget. Anything that escapes the per-call deadlines
+      // above surfaces here as a counted, logged patient failure — never a hang.
+      let pc;
+      try {
+        pc = await withDeadline(
+          backfillPatient(db, FieldValue, bucket, id, counters, opts),
+          PATIENT_BUDGET_MS,
+          'PATIENT_BUDGET_EXCEEDED',
+        );
+      } catch (err) {
+        counters.patientsErrored += 1;
+        pc = { elationPatientId: id, errors: 1, timedOut: true, lastError: errBrief('patient-budget', err) };
+        logError('backfillElationReports', 'patient-timed-out', err, { elationPatientId: id });
+      }
       perPatient.push(pc);
       if (typeof opts.onPatientComplete === 'function') {
         // Checkpoint per COMPLETED id — a 540s kill resumes at the next id.
