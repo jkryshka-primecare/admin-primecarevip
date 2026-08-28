@@ -620,6 +620,13 @@ async function backfillPatient(db, FieldValue, bucket, elationPatientId, counter
   }
 
   counters.patientsProcessed += 1;
+  // DURABLE COMPLETION BEFORE FINALIZATION (2026-08-28).
+  // Every report for this id has been persisted by the time we get here. Record
+  // the id as complete NOW, before any further hangable step (logging sinks,
+  // the worker's own post-return checkpoint, the wrapper's chunk write). If a
+  // later step wedges, the run doc already shows this id done, so a resume
+  // advances to the next id instead of re-hanging on this one.
+  if (typeof opts._checkpoint === 'function') await opts._checkpoint(pc);
   log('backfillElationReports', dryRun ? 'patient-dry-run-complete' : 'patient-complete', pc);
   return pc;
 }
