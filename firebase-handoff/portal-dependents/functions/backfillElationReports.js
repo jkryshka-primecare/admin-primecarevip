@@ -96,6 +96,34 @@ const REPORTS_PAGE_CAP = 200; // safety cap; loud failure > silent partial pull.
 // repair sweep out. Deliberately a SEPARATE constant (go-ahead item 3).
 const ARTIFACT_FETCH_TIMEOUT_MS = Number(process.env.ELATION_ARTIFACT_TIMEOUT_MS || 120000);
 
+// HANG FIX (2026-08-28, run L0iCYecF1obm5bWklnAK stuck at 1/2 with Failed: 0).
+// `timeoutMs` handed to the Elation client only guards CONNECT + RESPONSE HEADERS.
+// Once bytes start (or fail to start) flowing, the body pipe below was awaited with
+// NO timer at all: a stalled TCP body emits neither 'error' nor 'finish', so the
+// promise never settles, the worker never returns, the run doc never checkpoints,
+// and the 540s instance kill leaves `status:'running'` forever. Every await that can
+// touch the network now runs under a HARD deadline that rejects.
+const JSON_CALL_TIMEOUT_MS = Number(process.env.ELATION_JSON_TIMEOUT_MS || 60000);
+const ARTIFACT_STALL_MS = Number(process.env.ELATION_ARTIFACT_STALL_MS || 45000);
+const GCS_READ_TIMEOUT_MS = Number(process.env.GCS_READ_TIMEOUT_MS || 30000);
+const PATIENT_BUDGET_MS = Number(process.env.BACKFILL_PATIENT_BUDGET_MS || 420000);
+
+/** Reject with a coded error when `promise` has not settled within `ms`. */
+function withDeadline(promise, ms, code, onTimeout) {
+  let timer;
+  const guard = new Promise((_, reject) => {
+    timer = setTimeout(() => {
+      const err = new Error(code + ' after ' + ms + 'ms');
+      err.reason = code;
+      try { if (typeof onTimeout === 'function') onTimeout(); } catch (_) { /* best effort */ }
+      reject(err);
+    }, ms);
+    if (timer && typeof timer.unref === 'function') timer.unref();
+  });
+  return Promise.race([promise, guard]).finally(() => clearTimeout(timer));
+}
+
+
 /** True when MR docs may be stored at all (poller uses the same env flag). */
 function storeMedicalRecordsEnabled(options) {
   if (options && typeof options.storeMedicalRecords === 'boolean') return options.storeMedicalRecords;
