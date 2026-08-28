@@ -579,7 +579,7 @@ function Runner({ def, canApply }: { def: RunnerDef; canApply: boolean }) {
         </div>
       )}
 
-      {run.error && (
+      {run.error && !attachNotice && (
         <p className="mt-3 flex items-start gap-2 rounded-md bg-destructive/10 p-2 text-xs text-destructive">
           <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
           {run.error instanceof Error ? run.error.message : "The run failed."}
