@@ -197,6 +197,8 @@ function Runner({ def, canApply }: { def: RunnerDef; canApply: boolean }) {
   // working server-side. This id is the handle for progress and for resuming.
   const [runId, setRunId] = useState<string | null>(null);
   const [resumeId, setResumeId] = useState("");
+  const [attachNotice, setAttachNotice] = useState<string | null>(null);
+
 
   const runStatus = useBackfillRunStatus(runId, Boolean(runId));
   const live = runStatus.data ?? null;
