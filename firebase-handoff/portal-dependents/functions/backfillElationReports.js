@@ -106,6 +106,8 @@ const ARTIFACT_FETCH_TIMEOUT_MS = Number(process.env.ELATION_ARTIFACT_TIMEOUT_MS
 const JSON_CALL_TIMEOUT_MS = Number(process.env.ELATION_JSON_TIMEOUT_MS || 60000);
 const ARTIFACT_STALL_MS = Number(process.env.ELATION_ARTIFACT_STALL_MS || 45000);
 const GCS_READ_TIMEOUT_MS = Number(process.env.GCS_READ_TIMEOUT_MS || 30000);
+const FIRESTORE_CALL_TIMEOUT_MS = Number(process.env.BACKFILL_FIRESTORE_TIMEOUT_MS || 30000);
+const GCS_METADATA_TIMEOUT_MS = Number(process.env.GCS_METADATA_TIMEOUT_MS || 30000);
 const PATIENT_BUDGET_MS = Number(process.env.BACKFILL_PATIENT_BUDGET_MS || 420000);
 
 /** Reject with a coded error when `promise` has not settled within `ms`. */
@@ -298,7 +300,11 @@ async function backfillPatient(db, FieldValue, bucket, elationPatientId, counter
   // doc or absent field proceeds (+log) — MK's list is the "active" authority.
   let pSnap;
   try {
-    pSnap = await db.collection('patients').doc(pid).get();
+    pSnap = await withDeadline(
+      db.collection('patients').doc(pid).get(),
+      FIRESTORE_CALL_TIMEOUT_MS,
+      'PATIENT_DOC_LOOKUP_TIMEOUT',
+    );
   } catch (err) {
     counters.patientsErrored += 1;
     pc.errors += 1;
@@ -374,7 +380,11 @@ async function backfillPatient(db, FieldValue, bucket, elationPatientId, counter
       }
       let existing = null;
       try {
-        existing = await db.collection('patients').doc(pid).collection('labs').doc(reportId).get();
+        existing = await withDeadline(
+          db.collection('patients').doc(pid).collection('labs').doc(reportId).get(),
+          FIRESTORE_CALL_TIMEOUT_MS,
+          'EXISTING_DOC_LOOKUP_TIMEOUT',
+        );
       } catch (err) {
         pc.errors += 1; counters.errors += 1;
         noteError(pc, 'dry-run-existing-lookup', err, { reportId });
@@ -394,7 +404,11 @@ async function backfillPatient(db, FieldValue, bucket, elationPatientId, counter
     let existingSnap = null;
     if (skipExisting) {
       try {
-        existingSnap = await db.collection('patients').doc(pid).collection('labs').doc(reportId).get();
+        existingSnap = await withDeadline(
+          db.collection('patients').doc(pid).collection('labs').doc(reportId).get(),
+          FIRESTORE_CALL_TIMEOUT_MS,
+          'EXISTING_DOC_LOOKUP_TIMEOUT',
+        );
       } catch (err) {
         existingSnap = null; // treat a lookup failure as "unknown" -> re-store
       }
@@ -467,16 +481,20 @@ async function backfillPatient(db, FieldValue, bucket, elationPatientId, counter
     // phi_access_log FAIL-FAST (per record). A failed audit write blocks THIS store
     // but does not abort the batch — re-run re-attempts idempotently.
     try {
-      await db.collection('phi_access_log').add({
-        uid: 'system:backfillElationReports',
-        role: 'system',
-        source: 'backfill',
-        action: 'report_ingested',
-        elationPatientId: pid,
-        reportId,
-        reportType: report.report_type ?? null,
-        timestamp: FieldValue.serverTimestamp(),
-      });
+      await withDeadline(
+        db.collection('phi_access_log').add({
+          uid: 'system:backfillElationReports',
+          role: 'system',
+          source: 'backfill',
+          action: 'report_ingested',
+          elationPatientId: pid,
+          reportId,
+          reportType: report.report_type ?? null,
+          timestamp: FieldValue.serverTimestamp(),
+        }),
+        FIRESTORE_CALL_TIMEOUT_MS,
+        'AUDIT_WRITE_TIMEOUT',
+      );
     } catch (err) {
       pc.errors += 1; counters.errors += 1;
       noteError(pc, 'audit-write', err, { reportId });
@@ -497,19 +515,27 @@ async function backfillPatient(db, FieldValue, bucket, elationPatientId, counter
     try {
       // Write-once reverse index (reportId -> patient) so a later poller 404 can
       // resolve the owner after the object is gone from Elation (D-107, #324).
-      await db.collection('reportIndex').doc(reportId).set({ patient: pid });
+      await withDeadline(
+        db.collection('reportIndex').doc(reportId).set({ patient: pid }),
+        FIRESTORE_CALL_TIMEOUT_MS,
+        'REPORT_INDEX_WRITE_TIMEOUT',
+      );
 
       const payload = buildStoredPayload(report, category);
-      await db.collection('patients').doc(pid).collection('labs').doc(reportId).set({
-        ...payload,
-        reportId,
-        category,
-        subCategory,
-        reportType: report.report_type ?? null,
-        unmappedType,
-        deleted: false,
-        updatedAt: FieldValue.serverTimestamp(),
-      }, { merge: false });
+      await withDeadline(
+        db.collection('patients').doc(pid).collection('labs').doc(reportId).set({
+          ...payload,
+          reportId,
+          category,
+          subCategory,
+          reportType: report.report_type ?? null,
+          unmappedType,
+          deleted: false,
+          updatedAt: FieldValue.serverTimestamp(),
+        }, { merge: false }),
+        FIRESTORE_CALL_TIMEOUT_MS,
+        'REPORT_DOC_WRITE_TIMEOUT',
+      );
       pc.stored += 1; counters.stored += 1;
 
       // #372 (D-119): upload the report PDF artifact to Storage so the read path can
@@ -519,7 +545,11 @@ async function backfillPatient(db, FieldValue, bucket, elationPatientId, counter
       // Bearer-gated URL — fetch the bytes server-side and store only the bytes (D-102).
       if (categoryHasArtifact(category, opts) && computeHasArtifact(report)) {
         // 2b re-key: the RECORD's internalUid, never the caller's / claimant's auth uid.
-        const { internalUid } = await ensureInternalUid(pid, db);
+        const { internalUid } = await withDeadline(
+          ensureInternalUid(pid, db),
+          FIRESTORE_CALL_TIMEOUT_MS,
+          'INTERNAL_UID_TIMEOUT',
+        );
         if (!internalUid) {
           // A mint gap, NOT "no artifact": do not flip hasArtifact:false.
           pc.artifactErrors += 1; counters.artifactErrors += 1;
@@ -531,7 +561,14 @@ async function backfillPatient(db, FieldValue, bucket, elationPatientId, counter
             // skipExisting: a present, valid object is not re-fetched from Elation.
             let present = false;
             if (skipExisting) {
-              const [exists] = await file.exists();
+              // `file.exists()` is a metadata RPC. PR #458 guarded the printable
+              // open/body/verify paths but left this pre-fetch await uncovered, so a
+              // zero-stored patient could wedge before any artifact timer started.
+              const [exists] = await withDeadline(
+                file.exists(),
+                GCS_METADATA_TIMEOUT_MS,
+                'ARTIFACT_EXISTS_TIMEOUT',
+              );
               if (exists) {
                 try {
                   await verifyPdfHeader(file);
@@ -557,7 +594,11 @@ async function backfillPatient(db, FieldValue, bucket, elationPatientId, counter
             // corrupt object and leave hasArtifact:true — the audit sees an honest MISS
             // and sweepArtifactRepairs heals it (or parks + alerts after MAX_FAILURES).
             try {
-              await file.delete({ ignoreNotFound: true });
+              await withDeadline(
+                file.delete({ ignoreNotFound: true }),
+                GCS_METADATA_TIMEOUT_MS,
+                'ARTIFACT_CLEANUP_TIMEOUT',
+              );
             } catch (delErr) {
               log('backfillElationReports', 'artifact-cleanup-failed', {
                 elationPatientId: pid, reportId, error: delErr.message,
