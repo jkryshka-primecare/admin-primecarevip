@@ -459,6 +459,11 @@ export type BackfillReport = {
   requested?: number;
   completed?: number;
   pending?: number;
+  /** Ids still queued — lets an operator see WHICH patient a run is wedged on. */
+  pendingIds?: string[];
+  startedAt?: string | null;
+  lastPatientAt?: string | null;
+  updatedAt?: string | null;
   counters?: Record<string, number>;
   errorReason?: string | null;
   reportTypeCensus?: {

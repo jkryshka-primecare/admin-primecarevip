@@ -525,6 +525,21 @@ function Runner({ def, canApply }: { def: RunnerDef; canApply: boolean }) {
             {live?.completed ?? 0}/{live?.requested ?? ids.length} patients
             {typeof live?.pending === "number" && <> · {live.pending} pending</>}
           </p>
+          {live?.pendingIds?.length ? (
+            <p className="mt-1 font-mono text-[11px] text-muted-foreground">
+              Waiting on: {live.pendingIds.join(", ")}
+            </p>
+          ) : null}
+          {live?.lastPatientAt && (
+            <p className="mt-1 text-[11px] text-muted-foreground">
+              Last patient finished {new Date(live.lastPatientAt).toLocaleTimeString()}
+              {stalledMinutes !== null && stalledMinutes >= 5 && (
+                <span className="text-destructive">
+                  {" "}· no progress for {stalledMinutes} min — likely stalled
+                </span>
+              )}
+            </p>
+          )}
           {live?.errorReason && (
             <p className="mt-1 text-[11px] text-destructive">{live.errorReason}</p>
           )}
