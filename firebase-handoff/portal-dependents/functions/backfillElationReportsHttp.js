@@ -53,7 +53,7 @@ const runner = require('./backfillElationReports');
 
 const MAX_IDS = 1000;      // the full adult roster (~972) fits in one claim
 const DEFAULT_CHUNK = 40;  // ids per runner invocation (go-ahead item 4)
-const DEFAULT_CONCURRENCY = 5;
+const DEFAULT_CONCURRENCY = 3; // lowered 2026-08-29: Elation throttling under sustained load
 const RUNS_COLLECTION = 'backfill_runs';
 
 // ---- RUN-LEVEL COMPLETION MODEL (2026-08-28) --------------------------------

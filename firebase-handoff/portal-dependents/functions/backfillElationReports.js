@@ -103,12 +103,121 @@ const ARTIFACT_FETCH_TIMEOUT_MS = Number(process.env.ELATION_ARTIFACT_TIMEOUT_MS
 // promise never settles, the worker never returns, the run doc never checkpoints,
 // and the 540s instance kill leaves `status:'running'` forever. Every await that can
 // touch the network now runs under a HARD deadline that rejects.
-const JSON_CALL_TIMEOUT_MS = Number(process.env.ELATION_JSON_TIMEOUT_MS || 60000);
+const JSON_CALL_TIMEOUT_MS = Number(process.env.ELATION_JSON_TIMEOUT_MS || 90000);
 const ARTIFACT_STALL_MS = Number(process.env.ELATION_ARTIFACT_STALL_MS || 45000);
 const GCS_READ_TIMEOUT_MS = Number(process.env.GCS_READ_TIMEOUT_MS || 30000);
 const FIRESTORE_CALL_TIMEOUT_MS = Number(process.env.BACKFILL_FIRESTORE_TIMEOUT_MS || 30000);
 const GCS_METADATA_TIMEOUT_MS = Number(process.env.GCS_METADATA_TIMEOUT_MS || 30000);
 const PATIENT_BUDGET_MS = Number(process.env.BACKFILL_PATIENT_BUDGET_MS || 420000);
+
+// ---------------------------------------------------------------------------
+// ELATION THROTTLE + RETRY (2026-08-29, run 1K2OIzSY39v5rPpLnQLv: ~44% of the
+// retry cohort failed with ELATION_JSON_TIMEOUT/ELATION_TIMEOUT at list-reports,
+// status 0, WORSENING as the run progressed => upstream throttling under
+// sustained load, not transient network noise).
+//
+// Every Elation HTTP call in this module now passes through ONE process-wide
+// gate that bounds in-flight calls AND paces call STARTS. Patient-level
+// concurrency (opts.concurrency) no longer multiplies into Elation request
+// pressure: N workers share these limits.
+// ---------------------------------------------------------------------------
+const ELATION_MAX_INFLIGHT = Math.max(1, Number(process.env.ELATION_MAX_INFLIGHT || 3));
+const ELATION_MIN_INTERVAL_MS = Math.max(0, Number(process.env.ELATION_MIN_INTERVAL_MS || 250));
+const ELATION_MAX_ATTEMPTS = Math.max(1, Number(process.env.ELATION_MAX_ATTEMPTS || 4));
+const ELATION_BACKOFF_BASE_MS = Math.max(100, Number(process.env.ELATION_BACKOFF_BASE_MS || 2000));
+const ELATION_BACKOFF_CAP_MS = Math.max(1000, Number(process.env.ELATION_BACKOFF_CAP_MS || 30000));
+
+const sleep = (ms) => new Promise((r) => { const t = setTimeout(r, ms); if (t.unref) t.unref(); });
+
+const elationGate = { inflight: 0, lastStart: 0, queue: [] };
+
+function releaseElationSlot() {
+  elationGate.inflight -= 1;
+  pumpElationGate();
+}
+
+function pumpElationGate() {
+  if (!elationGate.queue.length) return;
+  if (elationGate.inflight >= ELATION_MAX_INFLIGHT) return;
+  const wait = Math.max(0, elationGate.lastStart + ELATION_MIN_INTERVAL_MS - Date.now());
+  if (wait > 0) {
+    if (!elationGate.timer) {
+      elationGate.timer = setTimeout(() => { elationGate.timer = null; pumpElationGate(); }, wait);
+      if (elationGate.timer.unref) elationGate.timer.unref();
+    }
+    return;
+  }
+  const next = elationGate.queue.shift();
+  elationGate.inflight += 1;
+  elationGate.lastStart = Date.now();
+  next();
+  pumpElationGate();
+}
+
+/** Acquire a paced Elation slot; resolves with a release fn. */
+function acquireElationSlot() {
+  return new Promise((resolve) => {
+    elationGate.queue.push(() => resolve(releaseElationSlot));
+    pumpElationGate();
+  });
+}
+
+/** Non-retryable: a definitive upstream answer. Everything else self-heals. */
+function isRetryableElationError(err) {
+  const reason = err && err.reason;
+  if (reason === 'ELATION_NOT_FOUND') return false;
+  if (reason === 'ELATION_JSON_TIMEOUT' || reason === 'ELATION_TIMEOUT') return true;
+  if (reason === 'ARTIFACT_OPEN_TIMEOUT' || reason === 'ARTIFACT_FETCH_TIMEOUT'
+    || reason === 'ARTIFACT_STREAM_TIMEOUT' || reason === 'ARTIFACT_STREAM_STALLED') return true;
+  const status = Number(err && (err.status || err.statusCode));
+  if (status === 429 || (status >= 500 && status <= 599)) return true;
+  if (status >= 400 && status < 500) return false;
+  return true; // status 0 / network / unknown -> retry
+}
+
+function backoffDelayMs(attempt, err) {
+  const retryAfter = Number(err && (err.retryAfterMs
+    || (err.headers && (err.headers['retry-after'] || err.headers['Retry-After']) * 1000)));
+  if (Number.isFinite(retryAfter) && retryAfter > 0) return Math.min(retryAfter, ELATION_BACKOFF_CAP_MS);
+  const exp = Math.min(ELATION_BACKOFF_BASE_MS * Math.pow(2, attempt - 1), ELATION_BACKOFF_CAP_MS);
+  return Math.round(exp * (0.5 + Math.random() * 0.5)); // full-ish jitter
+}
+
+/**
+ * Run one Elation call under the shared gate, with retry + exponential backoff.
+ * `fn()` must START the request (it is called inside the slot) and is re-invoked
+ * fresh on each attempt so no half-consumed stream is reused.
+ */
+async function callElation(label, fn, { attempts = ELATION_MAX_ATTEMPTS } = {}) {
+  let lastErr;
+  for (let attempt = 1; attempt <= attempts; attempt += 1) {
+    const release = await acquireElationSlot();
+    try {
+      return await fn();
+    } catch (err) {
+      lastErr = err;
+      if (attempt >= attempts || !isRetryableElationError(err)) throw err;
+      const delay = backoffDelayMs(attempt, err);
+      log('backfillElationReports', 'elation-retry', {
+        label, attempt, attempts, delayMs: delay, reason: (err && err.reason) || null,
+        status: Number(err && (err.status || err.statusCode)) || 0,
+      });
+      await sleep(delay);
+    } finally {
+      release();
+    }
+  }
+  throw lastErr;
+}
+
+/** Paced + retried JSON GET under the JSON deadline. */
+function elationJson(path, label) {
+  return callElation(label || path, () => withDeadline(
+    elationGet(path),
+    JSON_CALL_TIMEOUT_MS,
+    'ELATION_JSON_TIMEOUT',
+  ));
+}
 
 /** Reject with a coded error when `promise` has not settled within `ms`. */
 function withDeadline(promise, ms, code, onTimeout) {
@@ -124,6 +233,8 @@ function withDeadline(promise, ms, code, onTimeout) {
   });
   return Promise.race([promise, guard]).finally(() => clearTimeout(timer));
 }
+
+
 
 
 /** True when MR docs may be stored at all (poller uses the same env flag). */
@@ -203,7 +314,7 @@ async function verifyPdfHeader(file) {
  *      body cannot outlive the invocation.
  * Any of them destroys both streams and rejects, so the caller's catch runs.
  */
-async function uploadArtifact(file, reportId) {
+async function uploadArtifactOnce(file, reportId) {
   const path = '/reports/' + reportId + '/printable';
   const writeOpts = { contentType: 'application/pdf', resumable: false };
 
@@ -258,6 +369,17 @@ async function uploadArtifact(file, reportId) {
   );
   await withDeadline(file.save(buffer, writeOpts), GCS_READ_TIMEOUT_MS, 'ARTIFACT_SAVE_TIMEOUT');
   return buffer.byteLength;
+}
+
+/**
+ * Artifact pulls go through the SAME paced gate as JSON (a /printable is by far
+ * the heaviest call we make at Elation). Fewer attempts than JSON: each retry
+ * re-downloads multiple MB.
+ */
+function uploadArtifact(file, reportId) {
+  return callElation('printable:' + reportId, () => uploadArtifactOnce(file, reportId), {
+    attempts: Math.max(1, Number(process.env.ELATION_ARTIFACT_ATTEMPTS || 2)),
+  });
 }
 
 
@@ -421,11 +543,7 @@ async function backfillPatient(db, FieldValue, bucket, elationPatientId, counter
     // Re-fetch full body (stub grids are empty; verified live 2026-07-06).
     let report;
     try {
-      report = await withDeadline(
-        elationGet('/reports/' + reportId + '/'),
-        JSON_CALL_TIMEOUT_MS,
-        'ELATION_JSON_TIMEOUT',
-      );
+      report = await elationJson('/reports/' + reportId + '/', 'report:' + reportId);
     } catch (err) {
       if (err && err.reason === 'ELATION_NOT_FOUND') {
         pc.notFound += 1; counters.notFound += 1;
@@ -634,10 +752,9 @@ async function backfillPatient(db, FieldValue, bucket, elationPatientId, counter
 // Pull ALL reports for one patient, following cursors to exhaustion.
 async function listPatientReports(elationPatientId) {
   const out = [];
-  let json = await withDeadline(
-    elationGet('/reports/?patient=' + encodeURIComponent(elationPatientId)),
-    JSON_CALL_TIMEOUT_MS,
-    'ELATION_JSON_TIMEOUT',
+  let json = await elationJson(
+    '/reports/?patient=' + encodeURIComponent(elationPatientId),
+    'list-reports:' + elationPatientId,
   );
   let pages = 0;
   while (true) {
@@ -651,10 +768,9 @@ async function listPatientReports(elationPatientId) {
     if (!next) break;
     if (pages >= REPORTS_PAGE_CAP) throw new Error('ELATION_REPORTS_PAGE_CAP_EXCEEDED');
     if (!String(next).startsWith(ELATION_BASE)) throw new Error('ELATION_BAD_CURSOR');
-    json = await withDeadline(
-      elationGet(String(next).slice(ELATION_BASE.length)),
-      JSON_CALL_TIMEOUT_MS,
-      'ELATION_JSON_TIMEOUT',
+    json = await elationJson(
+      String(next).slice(ELATION_BASE.length),
+      'list-reports-page:' + elationPatientId,
     );
   }
   return out;
