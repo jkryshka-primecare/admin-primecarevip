@@ -34,7 +34,8 @@ type Action =
   | "backfillUids"
   | "backfillArtifacts"
   | "backfillMinorReports"
-  | "linkGuardians";
+  | "linkGuardians"
+  | "reset";
 
 const FUNCTION_BY_ACTION: Record<Action, string> = {
   get: "adminGetPortalAccess",
@@ -49,6 +50,11 @@ const FUNCTION_BY_ACTION: Record<Action, string> = {
   backfillArtifacts: "backfillArtifactObjects",
   backfillMinorReports: "backfillElationReports",
   linkGuardians: "adminLinkGuardian",
+  // Run-level maintenance on an async report-ingest run: clears a zombie
+  // `backfill_runs/{runId}` doc so the same runId can be resumed. It is the
+  // authenticated path — a raw gcloud identity token cannot satisfy
+  // `requireAdminCaller`, which wants a Firebase super_admin ID token.
+  reset: "backfillElationReports",
 };
 
 const MUTATIONS: Action[] = ["invite", "revoke", "setAccess", "provision"];
@@ -86,6 +92,7 @@ const FAN_OUT: Action[] = ["linkGuardians"];
 /** Actions that act on a set of members rather than a single patient. */
 const BATCH_ACTIONS: Action[] = [
   "provision",
+  "reset",
   "runAudit",
   "smoke",
   "unclaimedGuardians",
@@ -849,6 +856,26 @@ Deno.serve(async (req) => {
     return deny(400, "That runId is not valid.");
   }
 
+  /**
+   * Run reset. It touches no PHI and ingests nothing — it only clears the
+   * lease/status on a run doc so the run can be resumed — but it is a
+   * write to migration state, so it carries the same tier as an apply:
+   * super_admin resolved server-side, plus a written reason, plus an
+   * attribution row before the upstream call.
+   */
+  const isReset = action === "reset";
+  if (isReset) {
+    if (!(await isSuperAdmin(ctx))) {
+      return deny(403, "Only a super administrator can reset a migration run.");
+    }
+    if (!reason) {
+      return deny(400, "A written reason is required to reset a run.");
+    }
+    if (!RUN_ID_RE.test(runId)) {
+      return deny(400, "A valid runId is required to reset a run.");
+    }
+  }
+
   const bulkApply = isBulk && !statusPoll && body.apply === true;
   let minorIds: string[] = [];
   // Report-ingest cohort switch. The Cloud Function wrapper is the authority
@@ -1155,6 +1182,18 @@ Deno.serve(async (req) => {
     }
   }
 
+  if (isReset) {
+    // Reset-only wire shape — the wrapper branches on `action: 'reset'`.
+    for (const k of Object.keys(upstreamPayload)) delete upstreamPayload[k];
+    upstreamPayload.action = "reset";
+    upstreamPayload.runId = runId;
+    upstreamPayload.reason = reason;
+    upstreamPayload.actor = actor;
+    // `force` reclaims a run whose lease has NOT yet expired. Off by default:
+    // without it the wrapper refuses to touch a run a live instance still owns.
+    if (body.force === true) upstreamPayload.force = true;
+  }
+
   if (statusPoll) {
     // Poll-only wire shape — the wrapper branches on `action: 'status'` before
     // it looks at anything else.
@@ -1171,14 +1210,15 @@ Deno.serve(async (req) => {
 
   // GUARDRAIL 3 — attribution before action. A bulk apply does not happen
   // unless the human is on the record first.
-  if (bulkApply) {
+  if (bulkApply || isReset) {
     const attributed = await recordActionStrict(ctx, {
-      action: `${action}:apply`,
+      action: isReset ? "backfillRun:reset" : `${action}:apply`,
       reason,
       after: {
         limit: upstreamPayload.limit ?? null,
         cursor: upstreamPayload.cursor ?? null,
         runId: upstreamPayload.runId ?? null,
+        force: isReset ? body.force === true : undefined,
         patientIds: action === "backfillMinorReports" ? minorIds : undefined,
         patientCount: action === "backfillMinorReports" ? minorIds.length : undefined,
         cohort: action === "backfillMinorReports" ? cohort : undefined,
@@ -1294,6 +1334,16 @@ Deno.serve(async (req) => {
       reason: reason || null,
       before: result?.before,
       after: result?.after ?? (action === "setAccess" ? undefined : upstreamPayload.patch),
+      ok,
+      httpStatus: status,
+      errorMessage,
+    });
+  } else if (isReset) {
+    await recordAction(ctx, {
+      elationPatientId: null,
+      action: "backfillRun:reset-result",
+      reason,
+      after: payload,
       ok,
       httpStatus: status,
       errorMessage,
