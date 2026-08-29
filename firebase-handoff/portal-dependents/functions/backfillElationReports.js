@@ -752,10 +752,9 @@ async function backfillPatient(db, FieldValue, bucket, elationPatientId, counter
 // Pull ALL reports for one patient, following cursors to exhaustion.
 async function listPatientReports(elationPatientId) {
   const out = [];
-  let json = await withDeadline(
-    elationGet('/reports/?patient=' + encodeURIComponent(elationPatientId)),
-    JSON_CALL_TIMEOUT_MS,
-    'ELATION_JSON_TIMEOUT',
+  let json = await elationJson(
+    '/reports/?patient=' + encodeURIComponent(elationPatientId),
+    'list-reports:' + elationPatientId,
   );
   let pages = 0;
   while (true) {
