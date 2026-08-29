@@ -556,7 +556,10 @@ export function useBackfillRunStatus(runId: string | null, enabled: boolean) {
     queryKey: ["portal-admin", "backfill-run", runId],
     enabled: validRunId && enabled,
     retry: false,
-    refetchInterval: validRunId && enabled ? 10_000 : false,
+    // Stop polling once a call fails (expired session, bad id) instead of
+    // retrying the same error every 10s.
+    refetchInterval: (q) => (validRunId && enabled && !q.state.error ? 10_000 : false),
+
     queryFn: async () => {
       const res = await callPortalAdmin<BackfillReport>({
         action: "backfillMinorReports",
