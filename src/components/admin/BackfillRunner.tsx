@@ -207,9 +207,14 @@ function Runner({ def, canApply }: { def: RunnerDef; canApply: boolean }) {
   const [runId, setRunId] = useState<string | null>(null);
   const [resumeId, setResumeId] = useState("");
   const [attachNotice, setAttachNotice] = useState<string | null>(null);
+  // Reset has its own run-id field: it is a destructive maintenance action on
+  // a possibly DIFFERENT run than the one being resumed, so sharing state with
+  // the resume input would let one silently retarget the other.
+  const [resetRunId, setResetRunId] = useState("");
   const [resetReason, setResetReason] = useState("");
   const [resetNotice, setResetNotice] = useState<string | null>(null);
   const reset = useResetBackfillRun();
+
 
 
   const runStatus = useBackfillRunStatus(runId, Boolean(runId));
