@@ -258,12 +258,29 @@ async function driveRun(runId, opts) {
 
   const chunkSize = Math.max(1, Math.min(200, Number(opts.chunkSize) || DEFAULT_CHUNK));
 
+  // ---- soft-budget backoff brake -----------------------------------------
+  // The pause check below only runs BETWEEN chunks. If the soft budget is
+  // reached while a chunk is mid-flight, any Elation retry sitting in a backoff
+  // sleep would keep the instance busy doing nothing until the 540s kill. This
+  // timer breaks every pending backoff at the boundary so those calls fail fast,
+  // the chunk drains, and the loop reaches the pause write with its cursor intact.
+  let backoffBrake = setTimeout(() => {
+    try {
+      const woken = typeof runner.abortElationBackoff === 'function' ? runner.abortElationBackoff() : 0;
+      if (woken) log('backfillElationReports', 'backoff-brake', { runId, woken });
+    } catch (e) { logError('backfillElationReports', e); }
+  }, Math.max(0, SOFT_BUDGET_MS - (Date.now() - startedAtMs)));
+  if (backoffBrake && typeof backoffBrake.unref === 'function') backoffBrake.unref();
+  const stopBackoffBrake = () => {
+    if (backoffBrake) { clearTimeout(backoffBrake); backoffBrake = null; }
+  };
+
   try {
     while (pending.length) {
       // ---- graceful pre-timeout pause -------------------------------------
       // Never START a chunk we cannot expect to finish before the hard cap.
       if (Date.now() - startedAtMs >= SOFT_BUDGET_MS) {
-        stopHeartbeat();   // no renewal may race the pause write
+        stopHeartbeat(); stopBackoffBrake();   // no renewal may race the pause write
         await runRef.set({
           status: 'paused',
           pausedAt: FieldValue.serverTimestamp(),
@@ -322,7 +339,7 @@ async function driveRun(runId, opts) {
       }, { merge: true });
     }
 
-    stopHeartbeat();   // no renewal may race the terminal write
+    stopHeartbeat(); stopBackoffBrake();   // no renewal may race the terminal write
     await runRef.set({
       status: 'complete',
       finishedAt: FieldValue.serverTimestamp(),
@@ -334,7 +351,7 @@ async function driveRun(runId, opts) {
       leaseExpiresAt: 0,
     }, { merge: true });
   } catch (e) {
-    stopHeartbeat();
+    stopHeartbeat(); stopBackoffBrake();
     logError('backfillElationReports', e);
     await runRef.set({
       status: 'error',
@@ -352,7 +369,7 @@ async function driveRun(runId, opts) {
     // Belt and braces: every exit path (including the graceful pause `return`
     // above) stops the timer. Only a SIGKILL leaves it unrenewed — which is
     // exactly the signal we want the lease to carry.
-    stopHeartbeat();
+    stopHeartbeat(); stopBackoffBrake();
   }
 }
 
