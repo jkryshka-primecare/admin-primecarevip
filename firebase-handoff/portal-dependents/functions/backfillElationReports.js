@@ -768,10 +768,9 @@ async function listPatientReports(elationPatientId) {
     if (!next) break;
     if (pages >= REPORTS_PAGE_CAP) throw new Error('ELATION_REPORTS_PAGE_CAP_EXCEEDED');
     if (!String(next).startsWith(ELATION_BASE)) throw new Error('ELATION_BAD_CURSOR');
-    json = await withDeadline(
-      elationGet(String(next).slice(ELATION_BASE.length)),
-      JSON_CALL_TIMEOUT_MS,
-      'ELATION_JSON_TIMEOUT',
+    json = await elationJson(
+      String(next).slice(ELATION_BASE.length),
+      'list-reports-page:' + elationPatientId,
     );
   }
   return out;
