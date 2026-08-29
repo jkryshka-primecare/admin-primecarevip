@@ -126,10 +126,61 @@ const ELATION_MIN_INTERVAL_MS = Math.max(0, Number(process.env.ELATION_MIN_INTER
 const ELATION_MAX_ATTEMPTS = Math.max(1, Number(process.env.ELATION_MAX_ATTEMPTS || 4));
 const ELATION_BACKOFF_BASE_MS = Math.max(100, Number(process.env.ELATION_BACKOFF_BASE_MS || 2000));
 const ELATION_BACKOFF_CAP_MS = Math.max(1000, Number(process.env.ELATION_BACKOFF_CAP_MS || 30000));
+// A server-supplied Retry-After is authoritative and may legitimately exceed the
+// exponential cap; it is bounded only by this sane ceiling (review item 3).
+const ELATION_RETRY_AFTER_MAX_MS = Math.max(
+  ELATION_BACKOFF_CAP_MS,
+  Number(process.env.ELATION_RETRY_AFTER_MAX_MS || 120000),
+);
+// Head-room subtracted from the remaining patient budget before we agree to
+// spend it on another attempt (checkpoint/finalisation still has to happen).
+const ELATION_RETRY_MARGIN_MS = Math.max(0, Number(process.env.ELATION_RETRY_MARGIN_MS || 15000));
 
-const sleep = (ms) => new Promise((r) => { const t = setTimeout(r, ms); if (t.unref) t.unref(); });
+// --- per-patient deadline context -----------------------------------------
+// The worker wraps each patient in `withPatientDeadline`; every Elation call
+// made underneath it (however deep) can then read how much of the 420s budget
+// is left and refuse to start an attempt it cannot finish. Ambient context
+// avoids threading a deadline argument through every call site.
+const { AsyncLocalStorage } = require('node:async_hooks');
+const patientDeadlineStore = new AsyncLocalStorage();
 
-const elationGate = { inflight: 0, lastStart: 0, queue: [] };
+function withPatientDeadline(deadlineAt, fn) {
+  return patientDeadlineStore.run({ deadlineAt }, fn);
+}
+
+/** Milliseconds left in the current patient budget, or Infinity outside one. */
+function remainingPatientMs() {
+  const ctx = patientDeadlineStore.getStore();
+  if (!ctx || !Number.isFinite(ctx.deadlineAt)) return Infinity;
+  return ctx.deadlineAt - Date.now();
+}
+
+// --- abortable backoff -----------------------------------------------------
+// Pending backoff sleeps are tracked so the run can break them all at the
+// soft-budget / pause boundary instead of burning the instance's last seconds
+// inside a 30s setTimeout that nothing can cancel.
+const pendingBackoffs = new Set();
+
+function sleep(ms) {
+  const t = setTimeout(() => {}, 0);
+  clearTimeout(t);
+  return new Promise((resolve) => {
+    const timer = setTimeout(() => { pendingBackoffs.delete(entry); resolve(false); }, ms);
+    if (timer && typeof timer.unref === 'function') timer.unref();
+    const entry = { cancel: () => { clearTimeout(timer); pendingBackoffs.delete(entry); resolve(true); } };
+    pendingBackoffs.add(entry);
+  });
+}
+
+/** Wake every in-flight backoff immediately; they surface as aborted retries. */
+function abortElationBackoff() {
+  const entries = Array.from(pendingBackoffs);
+  pendingBackoffs.clear();
+  entries.forEach((e) => { try { e.cancel(); } catch (_) { /* best effort */ } });
+  return entries.length;
+}
+
+const elationGate = { inflight: 0, lastStart: 0, queue: [], timer: null };
 
 function releaseElationSlot() {
   elationGate.inflight -= 1;
@@ -154,12 +205,48 @@ function pumpElationGate() {
   pumpElationGate();
 }
 
-/** Acquire a paced Elation slot; resolves with a release fn. */
+/** Acquire a paced Elation slot; resolves with a release fn (idempotent). */
 function acquireElationSlot() {
   return new Promise((resolve) => {
-    elationGate.queue.push(() => resolve(releaseElationSlot));
+    elationGate.queue.push(() => {
+      let released = false;
+      resolve(() => { if (!released) { released = true; releaseElationSlot(); } });
+    });
     pumpElationGate();
   });
+}
+
+/**
+ * Normalise whatever the Elation client throws into { status, headers,
+ * retryAfterMs }. The client is not guaranteed to attach an HTTP status; without
+ * this, `Number(undefined)` is NaN, both status branches fall through, and the
+ * unknown-error fallback would retry a hard 401/403/404 four times and burn the
+ * patient budget (review item 3).
+ */
+function elationErrorFacts(err) {
+  const e = err || {};
+  const res = e.response || e.res || {};
+  let status = Number(e.status || e.statusCode || res.status || res.statusCode || 0);
+  if (!status) {
+    const m = String(e.reason || e.code || e.message || '').match(/\b([45]\d{2})\b/);
+    if (m) status = Number(m[1]);
+  }
+  const headers = e.headers || res.headers || null;
+  const rawRetryAfter = headers
+    ? (headers['retry-after'] || headers['Retry-After']
+      || (typeof headers.get === 'function' ? headers.get('retry-after') : null))
+    : null;
+  let retryAfterMs = Number(e.retryAfterMs || 0);
+  if (!retryAfterMs && rawRetryAfter != null) {
+    const asSeconds = Number(rawRetryAfter);
+    if (Number.isFinite(asSeconds) && asSeconds >= 0) {
+      retryAfterMs = asSeconds * 1000;
+    } else {
+      const asDate = Date.parse(String(rawRetryAfter));
+      if (Number.isFinite(asDate)) retryAfterMs = Math.max(0, asDate - Date.now());
+    }
+  }
+  return { status: status || 0, retryAfterMs: retryAfterMs || 0 };
 }
 
 /** Non-retryable: a definitive upstream answer. Everything else self-heals. */
@@ -169,26 +256,37 @@ function isRetryableElationError(err) {
   if (reason === 'ELATION_JSON_TIMEOUT' || reason === 'ELATION_TIMEOUT') return true;
   if (reason === 'ARTIFACT_OPEN_TIMEOUT' || reason === 'ARTIFACT_FETCH_TIMEOUT'
     || reason === 'ARTIFACT_STREAM_TIMEOUT' || reason === 'ARTIFACT_STREAM_STALLED') return true;
-  const status = Number(err && (err.status || err.statusCode));
+  const { status } = elationErrorFacts(err);
   if (status === 429 || (status >= 500 && status <= 599)) return true;
   if (status >= 400 && status < 500) return false;
   return true; // status 0 / network / unknown -> retry
 }
 
 function backoffDelayMs(attempt, err) {
-  const retryAfter = Number(err && (err.retryAfterMs
-    || (err.headers && (err.headers['retry-after'] || err.headers['Retry-After']) * 1000)));
-  if (Number.isFinite(retryAfter) && retryAfter > 0) return Math.min(retryAfter, ELATION_BACKOFF_CAP_MS);
+  const { retryAfterMs } = elationErrorFacts(err);
+  if (retryAfterMs > 0) return Math.min(retryAfterMs, ELATION_RETRY_AFTER_MAX_MS);
   const exp = Math.min(ELATION_BACKOFF_BASE_MS * Math.pow(2, attempt - 1), ELATION_BACKOFF_CAP_MS);
   return Math.round(exp * (0.5 + Math.random() * 0.5)); // full-ish jitter
 }
 
 /**
  * Run one Elation call under the shared gate, with retry + exponential backoff.
+ *
+ * Two properties the reviewer asked for, both load-bearing:
+ *  - The gate slot is acquired PER ATTEMPT and released BEFORE the backoff
+ *    sleep. A retrying call must never occupy one of the 3 slots while doing
+ *    nothing, or three simultaneous retries would freeze all Elation traffic
+ *    for the whole backoff window — exactly when load is heaviest.
+ *  - Retries are budget-aware. `callTimeoutMs` is what one attempt can cost; we
+ *    only spend another attempt when the remaining patient budget covers
+ *    delay + timeout + margin, so retrying can never itself manufacture
+ *    PATIENT_BUDGET_EXCEEDED. Backoff also breaks on pause/abort.
+ *
  * `fn()` must START the request (it is called inside the slot) and is re-invoked
  * fresh on each attempt so no half-consumed stream is reused.
  */
-async function callElation(label, fn, { attempts = ELATION_MAX_ATTEMPTS } = {}) {
+async function callElation(label, fn, opts) {
+  const { attempts = ELATION_MAX_ATTEMPTS, callTimeoutMs = JSON_CALL_TIMEOUT_MS } = opts || {};
   let lastErr;
   for (let attempt = 1; attempt <= attempts; attempt += 1) {
     const release = await acquireElationSlot();
@@ -198,13 +296,29 @@ async function callElation(label, fn, { attempts = ELATION_MAX_ATTEMPTS } = {}) 
       lastErr = err;
       if (attempt >= attempts || !isRetryableElationError(err)) throw err;
       const delay = backoffDelayMs(attempt, err);
+      const remaining = remainingPatientMs();
+      if (remaining < delay + callTimeoutMs + ELATION_RETRY_MARGIN_MS) {
+        log('backfillElationReports', 'elation-retry-skipped', {
+          label, attempt, attempts, delayMs: delay, remainingMs: Math.round(remaining),
+          needMs: delay + callTimeoutMs + ELATION_RETRY_MARGIN_MS,
+          reason: (err && err.reason) || null,
+        });
+        if (err && !err.reason) err.reason = 'ELATION_RETRY_BUDGET_EXHAUSTED';
+        throw err;
+      }
       log('backfillElationReports', 'elation-retry', {
         label, attempt, attempts, delayMs: delay, reason: (err && err.reason) || null,
-        status: Number(err && (err.status || err.statusCode)) || 0,
+        status: elationErrorFacts(err).status,
       });
-      await sleep(delay);
+      release();                       // free the slot BEFORE sleeping
+      const aborted = await sleep(delay);
+      if (aborted) {
+        if (err && !err.reason) err.reason = 'ELATION_BACKOFF_ABORTED';
+        throw err;
+      }
+      continue;
     } finally {
-      release();
+      release();                       // idempotent; no-op if already released
     }
   }
   throw lastErr;
@@ -212,12 +326,19 @@ async function callElation(label, fn, { attempts = ELATION_MAX_ATTEMPTS } = {}) 
 
 /** Paced + retried JSON GET under the JSON deadline. */
 function elationJson(path, label) {
+  // Never let one attempt outlive the patient budget it is spending.
+  const budget = remainingPatientMs();
+  const timeoutMs = Math.max(
+    1000,
+    Math.min(JSON_CALL_TIMEOUT_MS, Number.isFinite(budget) ? budget - ELATION_RETRY_MARGIN_MS : JSON_CALL_TIMEOUT_MS),
+  );
   return callElation(label || path, () => withDeadline(
     elationGet(path),
-    JSON_CALL_TIMEOUT_MS,
+    timeoutMs,
     'ELATION_JSON_TIMEOUT',
-  ));
+  ), { callTimeoutMs: timeoutMs });
 }
+
 
 /** Reject with a coded error when `promise` has not settled within `ms`. */
 function withDeadline(promise, ms, code, onTimeout) {
