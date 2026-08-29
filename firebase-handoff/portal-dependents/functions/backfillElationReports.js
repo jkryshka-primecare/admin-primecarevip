@@ -104,7 +104,6 @@ const ARTIFACT_FETCH_TIMEOUT_MS = Number(process.env.ELATION_ARTIFACT_TIMEOUT_MS
 // and the 540s instance kill leaves `status:'running'` forever. Every await that can
 // touch the network now runs under a HARD deadline that rejects.
 const JSON_CALL_TIMEOUT_MS = Number(process.env.ELATION_JSON_TIMEOUT_MS || 90000);
-const ARTIFACT_STALL_MS = Number(process.env.ELATION_ARTIFACT_STALL_MS || 45000);
 const GCS_READ_TIMEOUT_MS = Number(process.env.GCS_READ_TIMEOUT_MS || 30000);
 const FIRESTORE_CALL_TIMEOUT_MS = Number(process.env.BACKFILL_FIRESTORE_TIMEOUT_MS || 30000);
 const GCS_METADATA_TIMEOUT_MS = Number(process.env.GCS_METADATA_TIMEOUT_MS || 30000);
@@ -126,12 +125,6 @@ const ELATION_MIN_INTERVAL_MS = Math.max(0, Number(process.env.ELATION_MIN_INTER
 const ELATION_MAX_ATTEMPTS = Math.max(1, Number(process.env.ELATION_MAX_ATTEMPTS || 4));
 const ELATION_BACKOFF_BASE_MS = Math.max(100, Number(process.env.ELATION_BACKOFF_BASE_MS || 2000));
 const ELATION_BACKOFF_CAP_MS = Math.max(1000, Number(process.env.ELATION_BACKOFF_CAP_MS || 30000));
-// A server-supplied Retry-After is authoritative and may legitimately exceed the
-// exponential cap; it is bounded only by this sane ceiling (review item 3).
-const ELATION_RETRY_AFTER_MAX_MS = Math.max(
-  ELATION_BACKOFF_CAP_MS,
-  Number(process.env.ELATION_RETRY_AFTER_MAX_MS || 120000),
-);
 // Head-room subtracted from the remaining patient budget before we agree to
 // spend it on another attempt (checkpoint/finalisation still has to happen).
 const ELATION_RETRY_MARGIN_MS = Math.max(0, Number(process.env.ELATION_RETRY_MARGIN_MS || 15000));
@@ -312,7 +305,7 @@ async function callElation(label, fn, opts) {
     } catch (err) {
       lastErr = err;
       if (attempt >= attempts || !isRetryableElationError(err)) throw err;
-      const delay = backoffDelayMs(attempt, err);
+      const delay = backoffDelayMs(attempt);
       const remaining = remainingPatientMs();
       if (remaining < delay + callTimeoutMs + ELATION_RETRY_MARGIN_MS) {
         log('backfillElationReports', 'elation-retry-skipped', {
