@@ -67,12 +67,17 @@ type Envelope<T> = {
 };
 
 async function callPortalAdmin<T>(body: Record<string, unknown>): Promise<Envelope<T>> {
+  // Signed-out / expired sessions must not reach the function: it answers 401
+  // and the panel renders that as a blank screen.
+  const { data: { session } } = await supabase.auth.getSession();
+  if (!session) throw new Error("Your session has expired. Sign in again to continue.");
   const { data, error } = await supabase.functions.invoke<Envelope<T>>("portal-admin", { body });
   if (error && !data) throw new Error(error.message);
   if (!data) throw new Error("Empty response from the portal control plane");
   if (!data.ok) throw new Error(data.error ?? `Portal function returned ${data.status}`);
   return data;
 }
+
 
 /**
  * The Cloud Function answers with `{ claim: { state, claimedAt, liveToken, ... }, access, roster }`.
@@ -551,7 +556,10 @@ export function useBackfillRunStatus(runId: string | null, enabled: boolean) {
     queryKey: ["portal-admin", "backfill-run", runId],
     enabled: validRunId && enabled,
     retry: false,
-    refetchInterval: validRunId && enabled ? 10_000 : false,
+    // Stop polling once a call fails (expired session, bad id) instead of
+    // retrying the same error every 10s.
+    refetchInterval: (q) => (validRunId && enabled && !q.state.error ? 10_000 : false),
+
     queryFn: async () => {
       const res = await callPortalAdmin<BackfillReport>({
         action: "backfillMinorReports",
