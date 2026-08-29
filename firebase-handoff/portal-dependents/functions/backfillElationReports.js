@@ -218,57 +218,73 @@ function acquireElationSlot() {
 }
 
 /**
- * Normalise whatever the Elation client throws into { status, headers,
- * retryAfterMs }. The client is not guaranteed to attach an HTTP status; without
- * this, `Number(undefined)` is NaN, both status branches fall through, and the
- * unknown-error fallback would retry a hard 401/403/404 four times and burn the
- * patient budget (review item 3).
+ * Normalise whatever the Elation client throws into { status, reason }.
+ *
+ * CORRECTED 2026-08-29 against the ACTUAL client
+ * (functions/core/services/elation/client.js): failures are built by
+ * `elationError(status, reason)` and carry
+ *   err.elationStatus  numeric HTTP status, or 0 for network/timeout
+ *   err.reason         'ELATION_TIMEOUT' | 'ELATION_NETWORK_ERROR' |
+ *                      'ELATION_BAD_RESPONSE' | 'ELATION_BAD_REQUEST' |
+ *                      'ELATION_AUTH_FAILED' | 'ELATION_SCOPE_DENIED' |
+ *                      'ELATION_NOT_FOUND' | 'ELATION_RATE_LIMITED' |
+ *                      'ELATION_ERROR'
+ * There is NO .status/.statusCode/.response/.headers and no Retry-After: the
+ * client never surfaces response headers (it absorbs 429/5xx with a fixed 750ms
+ * sleep + one internal retry, then throws). The previous version read
+ * status/statusCode/response.status plus a [45]\d\d message regex — none of
+ * which ever match — so every error fell through to the default retry: 404s
+ * were retried 4x and rate limits were not recognised at all.
  */
 function elationErrorFacts(err) {
   const e = err || {};
-  const res = e.response || e.res || {};
-  let status = Number(e.status || e.statusCode || res.status || res.statusCode || 0);
-  if (!status) {
-    const m = String(e.reason || e.code || e.message || '').match(/\b([45]\d{2})\b/);
-    if (m) status = Number(m[1]);
-  }
-  const headers = e.headers || res.headers || null;
-  const rawRetryAfter = headers
-    ? (headers['retry-after'] || headers['Retry-After']
-      || (typeof headers.get === 'function' ? headers.get('retry-after') : null))
-    : null;
-  let retryAfterMs = Number(e.retryAfterMs || 0);
-  if (!retryAfterMs && rawRetryAfter != null) {
-    const asSeconds = Number(rawRetryAfter);
-    if (Number.isFinite(asSeconds) && asSeconds >= 0) {
-      retryAfterMs = asSeconds * 1000;
-    } else {
-      const asDate = Date.parse(String(rawRetryAfter));
-      if (Number.isFinite(asDate)) retryAfterMs = Math.max(0, asDate - Date.now());
-    }
-  }
-  return { status: status || 0, retryAfterMs: retryAfterMs || 0 };
+  const status = Number.isFinite(Number(e.elationStatus)) ? Number(e.elationStatus) : null;
+  const reason = typeof e.reason === 'string' ? e.reason : null;
+  return { status, reason };
 }
 
-/** Non-retryable: a definitive upstream answer. Everything else self-heals. */
+// Coded deadline failures raised by THIS module (withDeadline), not the client.
+const RETRYABLE_LOCAL_REASONS = new Set([
+  'ELATION_JSON_TIMEOUT',
+  'ARTIFACT_FETCH_TIMEOUT',
+  'ARTIFACT_SAVE_TIMEOUT',
+]);
+
+// Definitive upstream answers from the client: retrying cannot change them.
+const TERMINAL_ELATION_REASONS = new Set([
+  'ELATION_NOT_FOUND',
+  'EL_NOT_FOUND',
+  'ELATION_BAD_REQUEST',
+  'ELATION_AUTH_FAILED',
+  'ELATION_SCOPE_DENIED',
+]);
+
+/** Retry only what can plausibly succeed on a second try. */
 function isRetryableElationError(err) {
-  const reason = err && err.reason;
-  if (reason === 'ELATION_NOT_FOUND') return false;
-  if (reason === 'ELATION_JSON_TIMEOUT' || reason === 'ELATION_TIMEOUT') return true;
-  if (reason === 'ARTIFACT_OPEN_TIMEOUT' || reason === 'ARTIFACT_FETCH_TIMEOUT'
-    || reason === 'ARTIFACT_STREAM_TIMEOUT' || reason === 'ARTIFACT_STREAM_STALLED') return true;
-  const { status } = elationErrorFacts(err);
-  if (status === 429 || (status >= 500 && status <= 599)) return true;
-  if (status >= 400 && status < 500) return false;
-  return true; // status 0 / network / unknown -> retry
+  const { status, reason } = elationErrorFacts(err);
+  if (reason && TERMINAL_ELATION_REASONS.has(reason)) return false;
+  if (reason === 'ELATION_RATE_LIMITED') return true;
+  if (reason && RETRYABLE_LOCAL_REASONS.has(reason)) return true;
+  if (reason === 'ELATION_TIMEOUT' || reason === 'ELATION_NETWORK_ERROR'
+    || reason === 'ELATION_BAD_RESPONSE') return true;
+  if (status === 429) return true;
+  if (status !== null && status >= 500 && status <= 599) return true;
+  if (status !== null && status >= 400 && status < 500) return false;
+  if (status === 0) return true;              // network / abort / timeout
+  return false; // unknown shape: fail fast rather than burn the patient budget
 }
 
-function backoffDelayMs(attempt, err) {
-  const { retryAfterMs } = elationErrorFacts(err);
-  if (retryAfterMs > 0) return Math.min(retryAfterMs, ELATION_RETRY_AFTER_MAX_MS);
+/**
+ * Exponential backoff with jitter. No Retry-After handling: the client discards
+ * response headers, so there is nothing to read (dead logic removed rather than
+ * left in place looking authoritative). If Elation-supplied pacing is wanted,
+ * client.js must attach `retryAfterMs` to the thrown error first.
+ */
+function backoffDelayMs(attempt) {
   const exp = Math.min(ELATION_BACKOFF_BASE_MS * Math.pow(2, attempt - 1), ELATION_BACKOFF_CAP_MS);
   return Math.round(exp * (0.5 + Math.random() * 0.5)); // full-ish jitter
 }
+
 
 /**
  * Run one Elation call under the shared gate, with retry + exponential backoff.
