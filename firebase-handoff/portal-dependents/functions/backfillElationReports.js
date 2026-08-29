@@ -543,11 +543,7 @@ async function backfillPatient(db, FieldValue, bucket, elationPatientId, counter
     // Re-fetch full body (stub grids are empty; verified live 2026-07-06).
     let report;
     try {
-      report = await withDeadline(
-        elationGet('/reports/' + reportId + '/'),
-        JSON_CALL_TIMEOUT_MS,
-        'ELATION_JSON_TIMEOUT',
-      );
+      report = await elationJson('/reports/' + reportId + '/', 'report:' + reportId);
     } catch (err) {
       if (err && err.reason === 'ELATION_NOT_FOUND') {
         pc.notFound += 1; counters.notFound += 1;
