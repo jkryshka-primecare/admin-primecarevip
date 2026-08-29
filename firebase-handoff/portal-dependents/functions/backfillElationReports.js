@@ -424,65 +424,22 @@ async function verifyPdfHeader(file) {
 }
 
 /**
- * Fetch the printable and write it to Storage. Streams when the shared Elation
- * client exposes a stream helper; otherwise falls back to the buffered getBinary
- * (still with the dedicated artifact budget). Returns bytes written when known.
+ * Fetch the printable and write it to Storage.
  *
- * Three independent guards, because the client's `timeoutMs` only covers headers:
- *   1. total budget on the header/connect await,
- *   2. a STALL watchdog on the pipe, reset on every chunk (a body that stops
- *      mid-download is the failure mode we actually hit),
- *   3. a total ceiling on the whole pipe so an infinitely-slow-but-dripping
- *      body cannot outlive the invocation.
- * Any of them destroys both streams and rejects, so the caller's catch runs.
+ * BUFFERED BY DESIGN (2026-08-29). An earlier revision had a
+ * `elationClient.getBinaryStream` branch with a stall watchdog, but the shared
+ * client (core/services/elation/client) exports only
+ * { elationGet, elationGetAll, getBinary, elationPost, ELATION_BASE } — the
+ * guard was permanently false, so the streaming code and its watchdog never
+ * ran. Dead branch removed rather than pretended-at. Printables are single-digit
+ * MB; buffering one at a time under ELATION_MAX_INFLIGHT is acceptable, and the
+ * hang risk the watchdog targeted is covered here by hard deadlines on BOTH the
+ * fetch (client-side abort) and the Storage save.
+ * If we later want true streaming, the client must export a stream helper first.
  */
 async function uploadArtifactOnce(file, reportId) {
   const path = '/reports/' + reportId + '/printable';
   const writeOpts = { contentType: 'application/pdf', resumable: false };
-
-  if (typeof elationClient.getBinaryStream === 'function') {
-    const source = await withDeadline(
-      elationClient.getBinaryStream(path, { timeoutMs: ARTIFACT_FETCH_TIMEOUT_MS }),
-      ARTIFACT_FETCH_TIMEOUT_MS,
-      'ARTIFACT_OPEN_TIMEOUT',
-    );
-    const body = source && source.stream ? source.stream : source;
-    let dest = null;
-    let stallTimer = null;
-    const abort = (err) => {
-      try { body && body.destroy(err); } catch (_) { /* noop */ }
-      try { dest && dest.destroy(err); } catch (_) { /* noop */ }
-    };
-    try {
-      await withDeadline(
-        new Promise((resolve, reject) => {
-          dest = file.createWriteStream(writeOpts);
-          const armStall = () => {
-            clearTimeout(stallTimer);
-            stallTimer = setTimeout(() => {
-              const err = new Error('ARTIFACT_STREAM_STALLED after ' + ARTIFACT_STALL_MS + 'ms');
-              err.reason = 'ARTIFACT_STREAM_STALLED';
-              abort(err);
-              reject(err);
-            }, ARTIFACT_STALL_MS);
-            if (stallTimer && typeof stallTimer.unref === 'function') stallTimer.unref();
-          };
-          body.on('data', armStall);
-          body.on('error', reject);
-          dest.on('error', reject);
-          dest.on('finish', resolve);
-          armStall();
-          body.pipe(dest);
-        }),
-        ARTIFACT_FETCH_TIMEOUT_MS,
-        'ARTIFACT_STREAM_TIMEOUT',
-        () => abort(new Error('ARTIFACT_STREAM_TIMEOUT')),
-      );
-    } finally {
-      clearTimeout(stallTimer);
-    }
-    return null; // size unknown on the streamed path; GCS metadata has it
-  }
 
   const { buffer } = await withDeadline(
     getBinary(path, { timeoutMs: ARTIFACT_FETCH_TIMEOUT_MS }),
@@ -492,6 +449,7 @@ async function uploadArtifactOnce(file, reportId) {
   await withDeadline(file.save(buffer, writeOpts), GCS_READ_TIMEOUT_MS, 'ARTIFACT_SAVE_TIMEOUT');
   return buffer.byteLength;
 }
+
 
 /**
  * Artifact pulls go through the SAME paced gate as JSON (a /printable is by far
