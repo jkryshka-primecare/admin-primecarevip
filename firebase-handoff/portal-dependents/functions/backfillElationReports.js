@@ -104,7 +104,6 @@ const ARTIFACT_FETCH_TIMEOUT_MS = Number(process.env.ELATION_ARTIFACT_TIMEOUT_MS
 // and the 540s instance kill leaves `status:'running'` forever. Every await that can
 // touch the network now runs under a HARD deadline that rejects.
 const JSON_CALL_TIMEOUT_MS = Number(process.env.ELATION_JSON_TIMEOUT_MS || 90000);
-const ARTIFACT_STALL_MS = Number(process.env.ELATION_ARTIFACT_STALL_MS || 45000);
 const GCS_READ_TIMEOUT_MS = Number(process.env.GCS_READ_TIMEOUT_MS || 30000);
 const FIRESTORE_CALL_TIMEOUT_MS = Number(process.env.BACKFILL_FIRESTORE_TIMEOUT_MS || 30000);
 const GCS_METADATA_TIMEOUT_MS = Number(process.env.GCS_METADATA_TIMEOUT_MS || 30000);
@@ -126,12 +125,6 @@ const ELATION_MIN_INTERVAL_MS = Math.max(0, Number(process.env.ELATION_MIN_INTER
 const ELATION_MAX_ATTEMPTS = Math.max(1, Number(process.env.ELATION_MAX_ATTEMPTS || 4));
 const ELATION_BACKOFF_BASE_MS = Math.max(100, Number(process.env.ELATION_BACKOFF_BASE_MS || 2000));
 const ELATION_BACKOFF_CAP_MS = Math.max(1000, Number(process.env.ELATION_BACKOFF_CAP_MS || 30000));
-// A server-supplied Retry-After is authoritative and may legitimately exceed the
-// exponential cap; it is bounded only by this sane ceiling (review item 3).
-const ELATION_RETRY_AFTER_MAX_MS = Math.max(
-  ELATION_BACKOFF_CAP_MS,
-  Number(process.env.ELATION_RETRY_AFTER_MAX_MS || 120000),
-);
 // Head-room subtracted from the remaining patient budget before we agree to
 // spend it on another attempt (checkpoint/finalisation still has to happen).
 const ELATION_RETRY_MARGIN_MS = Math.max(0, Number(process.env.ELATION_RETRY_MARGIN_MS || 15000));
@@ -218,57 +211,73 @@ function acquireElationSlot() {
 }
 
 /**
- * Normalise whatever the Elation client throws into { status, headers,
- * retryAfterMs }. The client is not guaranteed to attach an HTTP status; without
- * this, `Number(undefined)` is NaN, both status branches fall through, and the
- * unknown-error fallback would retry a hard 401/403/404 four times and burn the
- * patient budget (review item 3).
+ * Normalise whatever the Elation client throws into { status, reason }.
+ *
+ * CORRECTED 2026-08-29 against the ACTUAL client
+ * (functions/core/services/elation/client.js): failures are built by
+ * `elationError(status, reason)` and carry
+ *   err.elationStatus  numeric HTTP status, or 0 for network/timeout
+ *   err.reason         'ELATION_TIMEOUT' | 'ELATION_NETWORK_ERROR' |
+ *                      'ELATION_BAD_RESPONSE' | 'ELATION_BAD_REQUEST' |
+ *                      'ELATION_AUTH_FAILED' | 'ELATION_SCOPE_DENIED' |
+ *                      'ELATION_NOT_FOUND' | 'ELATION_RATE_LIMITED' |
+ *                      'ELATION_ERROR'
+ * There is NO .status/.statusCode/.response/.headers and no Retry-After: the
+ * client never surfaces response headers (it absorbs 429/5xx with a fixed 750ms
+ * sleep + one internal retry, then throws). The previous version read
+ * status/statusCode/response.status plus a [45]\d\d message regex — none of
+ * which ever match — so every error fell through to the default retry: 404s
+ * were retried 4x and rate limits were not recognised at all.
  */
 function elationErrorFacts(err) {
   const e = err || {};
-  const res = e.response || e.res || {};
-  let status = Number(e.status || e.statusCode || res.status || res.statusCode || 0);
-  if (!status) {
-    const m = String(e.reason || e.code || e.message || '').match(/\b([45]\d{2})\b/);
-    if (m) status = Number(m[1]);
-  }
-  const headers = e.headers || res.headers || null;
-  const rawRetryAfter = headers
-    ? (headers['retry-after'] || headers['Retry-After']
-      || (typeof headers.get === 'function' ? headers.get('retry-after') : null))
-    : null;
-  let retryAfterMs = Number(e.retryAfterMs || 0);
-  if (!retryAfterMs && rawRetryAfter != null) {
-    const asSeconds = Number(rawRetryAfter);
-    if (Number.isFinite(asSeconds) && asSeconds >= 0) {
-      retryAfterMs = asSeconds * 1000;
-    } else {
-      const asDate = Date.parse(String(rawRetryAfter));
-      if (Number.isFinite(asDate)) retryAfterMs = Math.max(0, asDate - Date.now());
-    }
-  }
-  return { status: status || 0, retryAfterMs: retryAfterMs || 0 };
+  const status = Number.isFinite(Number(e.elationStatus)) ? Number(e.elationStatus) : null;
+  const reason = typeof e.reason === 'string' ? e.reason : null;
+  return { status, reason };
 }
 
-/** Non-retryable: a definitive upstream answer. Everything else self-heals. */
+// Coded deadline failures raised by THIS module (withDeadline), not the client.
+const RETRYABLE_LOCAL_REASONS = new Set([
+  'ELATION_JSON_TIMEOUT',
+  'ARTIFACT_FETCH_TIMEOUT',
+  'ARTIFACT_SAVE_TIMEOUT',
+]);
+
+// Definitive upstream answers from the client: retrying cannot change them.
+const TERMINAL_ELATION_REASONS = new Set([
+  'ELATION_NOT_FOUND',
+  'EL_NOT_FOUND',
+  'ELATION_BAD_REQUEST',
+  'ELATION_AUTH_FAILED',
+  'ELATION_SCOPE_DENIED',
+]);
+
+/** Retry only what can plausibly succeed on a second try. */
 function isRetryableElationError(err) {
-  const reason = err && err.reason;
-  if (reason === 'ELATION_NOT_FOUND') return false;
-  if (reason === 'ELATION_JSON_TIMEOUT' || reason === 'ELATION_TIMEOUT') return true;
-  if (reason === 'ARTIFACT_OPEN_TIMEOUT' || reason === 'ARTIFACT_FETCH_TIMEOUT'
-    || reason === 'ARTIFACT_STREAM_TIMEOUT' || reason === 'ARTIFACT_STREAM_STALLED') return true;
-  const { status } = elationErrorFacts(err);
-  if (status === 429 || (status >= 500 && status <= 599)) return true;
-  if (status >= 400 && status < 500) return false;
-  return true; // status 0 / network / unknown -> retry
+  const { status, reason } = elationErrorFacts(err);
+  if (reason && TERMINAL_ELATION_REASONS.has(reason)) return false;
+  if (reason === 'ELATION_RATE_LIMITED') return true;
+  if (reason && RETRYABLE_LOCAL_REASONS.has(reason)) return true;
+  if (reason === 'ELATION_TIMEOUT' || reason === 'ELATION_NETWORK_ERROR'
+    || reason === 'ELATION_BAD_RESPONSE') return true;
+  if (status === 429) return true;
+  if (status !== null && status >= 500 && status <= 599) return true;
+  if (status !== null && status >= 400 && status < 500) return false;
+  if (status === 0) return true;              // network / abort / timeout
+  return false; // unknown shape: fail fast rather than burn the patient budget
 }
 
-function backoffDelayMs(attempt, err) {
-  const { retryAfterMs } = elationErrorFacts(err);
-  if (retryAfterMs > 0) return Math.min(retryAfterMs, ELATION_RETRY_AFTER_MAX_MS);
+/**
+ * Exponential backoff with jitter. No Retry-After handling: the client discards
+ * response headers, so there is nothing to read (dead logic removed rather than
+ * left in place looking authoritative). If Elation-supplied pacing is wanted,
+ * client.js must attach `retryAfterMs` to the thrown error first.
+ */
+function backoffDelayMs(attempt) {
   const exp = Math.min(ELATION_BACKOFF_BASE_MS * Math.pow(2, attempt - 1), ELATION_BACKOFF_CAP_MS);
   return Math.round(exp * (0.5 + Math.random() * 0.5)); // full-ish jitter
 }
+
 
 /**
  * Run one Elation call under the shared gate, with retry + exponential backoff.
@@ -296,7 +305,7 @@ async function callElation(label, fn, opts) {
     } catch (err) {
       lastErr = err;
       if (attempt >= attempts || !isRetryableElationError(err)) throw err;
-      const delay = backoffDelayMs(attempt, err);
+      const delay = backoffDelayMs(attempt);
       const remaining = remainingPatientMs();
       if (remaining < delay + callTimeoutMs + ELATION_RETRY_MARGIN_MS) {
         log('backfillElationReports', 'elation-retry-skipped', {
@@ -424,65 +433,22 @@ async function verifyPdfHeader(file) {
 }
 
 /**
- * Fetch the printable and write it to Storage. Streams when the shared Elation
- * client exposes a stream helper; otherwise falls back to the buffered getBinary
- * (still with the dedicated artifact budget). Returns bytes written when known.
+ * Fetch the printable and write it to Storage.
  *
- * Three independent guards, because the client's `timeoutMs` only covers headers:
- *   1. total budget on the header/connect await,
- *   2. a STALL watchdog on the pipe, reset on every chunk (a body that stops
- *      mid-download is the failure mode we actually hit),
- *   3. a total ceiling on the whole pipe so an infinitely-slow-but-dripping
- *      body cannot outlive the invocation.
- * Any of them destroys both streams and rejects, so the caller's catch runs.
+ * BUFFERED BY DESIGN (2026-08-29). An earlier revision had a
+ * `elationClient.getBinaryStream` branch with a stall watchdog, but the shared
+ * client (core/services/elation/client) exports only
+ * { elationGet, elationGetAll, getBinary, elationPost, ELATION_BASE } — the
+ * guard was permanently false, so the streaming code and its watchdog never
+ * ran. Dead branch removed rather than pretended-at. Printables are single-digit
+ * MB; buffering one at a time under ELATION_MAX_INFLIGHT is acceptable, and the
+ * hang risk the watchdog targeted is covered here by hard deadlines on BOTH the
+ * fetch (client-side abort) and the Storage save.
+ * If we later want true streaming, the client must export a stream helper first.
  */
 async function uploadArtifactOnce(file, reportId) {
   const path = '/reports/' + reportId + '/printable';
   const writeOpts = { contentType: 'application/pdf', resumable: false };
-
-  if (typeof elationClient.getBinaryStream === 'function') {
-    const source = await withDeadline(
-      elationClient.getBinaryStream(path, { timeoutMs: ARTIFACT_FETCH_TIMEOUT_MS }),
-      ARTIFACT_FETCH_TIMEOUT_MS,
-      'ARTIFACT_OPEN_TIMEOUT',
-    );
-    const body = source && source.stream ? source.stream : source;
-    let dest = null;
-    let stallTimer = null;
-    const abort = (err) => {
-      try { body && body.destroy(err); } catch (_) { /* noop */ }
-      try { dest && dest.destroy(err); } catch (_) { /* noop */ }
-    };
-    try {
-      await withDeadline(
-        new Promise((resolve, reject) => {
-          dest = file.createWriteStream(writeOpts);
-          const armStall = () => {
-            clearTimeout(stallTimer);
-            stallTimer = setTimeout(() => {
-              const err = new Error('ARTIFACT_STREAM_STALLED after ' + ARTIFACT_STALL_MS + 'ms');
-              err.reason = 'ARTIFACT_STREAM_STALLED';
-              abort(err);
-              reject(err);
-            }, ARTIFACT_STALL_MS);
-            if (stallTimer && typeof stallTimer.unref === 'function') stallTimer.unref();
-          };
-          body.on('data', armStall);
-          body.on('error', reject);
-          dest.on('error', reject);
-          dest.on('finish', resolve);
-          armStall();
-          body.pipe(dest);
-        }),
-        ARTIFACT_FETCH_TIMEOUT_MS,
-        'ARTIFACT_STREAM_TIMEOUT',
-        () => abort(new Error('ARTIFACT_STREAM_TIMEOUT')),
-      );
-    } finally {
-      clearTimeout(stallTimer);
-    }
-    return null; // size unknown on the streamed path; GCS metadata has it
-  }
 
   const { buffer } = await withDeadline(
     getBinary(path, { timeoutMs: ARTIFACT_FETCH_TIMEOUT_MS }),
@@ -492,6 +458,7 @@ async function uploadArtifactOnce(file, reportId) {
   await withDeadline(file.save(buffer, writeOpts), GCS_READ_TIMEOUT_MS, 'ARTIFACT_SAVE_TIMEOUT');
   return buffer.byteLength;
 }
+
 
 /**
  * Artifact pulls go through the SAME paced gate as JSON (a /printable is by far
