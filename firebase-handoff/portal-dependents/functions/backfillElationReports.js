@@ -161,15 +161,16 @@ function remainingPatientMs() {
 // inside a 30s setTimeout that nothing can cancel.
 const pendingBackoffs = new Set();
 
+/** Resolves false on normal expiry, true when aborted by abortElationBackoff(). */
 function sleep(ms) {
-  const t = setTimeout(() => {}, 0);
-  clearTimeout(t);
   return new Promise((resolve) => {
+    const entry = {};
     const timer = setTimeout(() => { pendingBackoffs.delete(entry); resolve(false); }, ms);
     if (timer && typeof timer.unref === 'function') timer.unref();
-    const entry = { cancel: () => { clearTimeout(timer); pendingBackoffs.delete(entry); resolve(true); } };
+    entry.cancel = () => { clearTimeout(timer); pendingBackoffs.delete(entry); resolve(true); };
     pendingBackoffs.add(entry);
   });
+
 }
 
 /** Wake every in-flight backoff immediately; they surface as aborted retries. */
