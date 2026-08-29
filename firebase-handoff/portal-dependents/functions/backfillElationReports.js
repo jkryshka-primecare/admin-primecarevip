@@ -1019,7 +1019,13 @@ async function backfillElationReports(db, FieldValue, elationPatientIds, options
 module.exports = {
   backfillElationReports,
   listPatientReports,
+  // Lets the HTTP wrapper break every pending Elation backoff at the
+  // soft-budget / pause boundary instead of waiting out a 30s timer.
+  abortElationBackoff,
   // exported for unit tests
+  _isRetryableElationError: isRetryableElationError,
+  _elationErrorFacts: elationErrorFacts,
+  _withPatientDeadline: withPatientDeadline,
   _storedCopyIsCurrent: storedCopyIsCurrent,
   _categoryHasArtifact: categoryHasArtifact,
 };
