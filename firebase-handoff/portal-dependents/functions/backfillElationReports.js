@@ -314,7 +314,7 @@ async function verifyPdfHeader(file) {
  *      body cannot outlive the invocation.
  * Any of them destroys both streams and rejects, so the caller's catch runs.
  */
-async function uploadArtifact(file, reportId) {
+async function uploadArtifactOnce(file, reportId) {
   const path = '/reports/' + reportId + '/printable';
   const writeOpts = { contentType: 'application/pdf', resumable: false };
 
