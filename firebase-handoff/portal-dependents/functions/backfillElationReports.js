@@ -250,6 +250,8 @@ const TERMINAL_ELATION_REASONS = new Set([
   'ELATION_BAD_REQUEST',
   'ELATION_AUTH_FAILED',
   'ELATION_SCOPE_DENIED',
+  // Missing/invalid credentials surface as status 0; retrying cannot fix config.
+  'ELATION_CONFIG_MISSING',
 ]);
 
 /** Retry only what can plausibly succeed on a second try. */
