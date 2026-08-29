@@ -242,7 +242,9 @@ function Runner({ def, canApply }: { def: RunnerDef; canApply: boolean }) {
     try {
       await reset.mutateAsync({ runId: targetRunId, reason: resetReason.trim() });
       setResetNotice(`Run ${targetRunId} reset — it can now be resumed with the same run id.`);
-      runStatus.refetch();
+      // `refetch()` ignores `enabled`, so it would poll with an empty runId
+      // (400) whenever the reset targets a run this card isn't tracking.
+      if (runId) runStatus.refetch();
     } catch (e) {
       setResetNotice(e instanceof Error ? e.message : "The reset failed.");
     }
