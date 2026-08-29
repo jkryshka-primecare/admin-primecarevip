@@ -1,9 +1,18 @@
 import { useState } from "react";
-import { AlertTriangle, Loader2, Play, ShieldAlert, Users } from "lucide-react";
+import {
+  AlertTriangle,
+  Loader2,
+  PauseCircle,
+  Play,
+  RotateCcw,
+  ShieldAlert,
+  Users,
+} from "lucide-react";
 import { useAuth } from "@/hooks/useAuth";
 import {
   useBackfillRunner,
   useBackfillRunStatus,
+  useResetBackfillRun,
   type BackfillAction,
   type BackfillReport,
 } from "@/hooks/usePortalAdmin";
@@ -198,11 +207,37 @@ function Runner({ def, canApply }: { def: RunnerDef; canApply: boolean }) {
   const [runId, setRunId] = useState<string | null>(null);
   const [resumeId, setResumeId] = useState("");
   const [attachNotice, setAttachNotice] = useState<string | null>(null);
+  const [resetReason, setResetReason] = useState("");
+  const [resetNotice, setResetNotice] = useState<string | null>(null);
+  const reset = useResetBackfillRun();
 
 
   const runStatus = useBackfillRunStatus(runId, Boolean(runId));
   const live = runStatus.data ?? null;
+  // Only `complete` and `error` are terminal. `paused` (graceful pre-timeout
+  // stop) and a stale lease (instance provably dead) are RESUMABLE states —
+  // treating them as finished is what stranded runs mid-cohort.
+  const paused = live?.status === "paused" || live?.paused === true;
+  const staleLease = live?.staleLease === true;
   const runFinished = live?.status === "complete" || live?.status === "error";
+  const resumableNow = !runFinished && (paused || staleLease);
+
+  async function resumeSameRun() {
+    if (!runId) return;
+    setResumeId(runId);
+    await go(true);
+  }
+
+  async function doReset(targetRunId: string) {
+    setResetNotice(null);
+    try {
+      await reset.mutateAsync({ runId: targetRunId, reason: resetReason.trim() });
+      setResetNotice(`Run ${targetRunId} reset — it can now be resumed with the same run id.`);
+      runStatus.refetch();
+    } catch (e) {
+      setResetNotice(e instanceof Error ? e.message : "The reset failed.");
+    }
+  }
   const stalledMinutes =
     live && !runFinished && live.lastPatientAt
       ? Math.floor((Date.now() - new Date(live.lastPatientAt).getTime()) / 60000)
@@ -532,10 +567,26 @@ function Runner({ def, canApply }: { def: RunnerDef; canApply: boolean }) {
           <div className="flex flex-wrap items-center justify-between gap-2">
             <div className="text-xs text-foreground">
               Run <span className="font-mono">{runId}</span>{" "}
-              <span className="text-muted-foreground">· {live?.status ?? "starting"}</span>
+              <span
+                className={`rounded-full px-2 py-0.5 font-mono text-[10px] uppercase ${
+                  live?.status === "complete"
+                    ? "bg-success/15 text-success"
+                    : live?.status === "error"
+                      ? "bg-destructive/10 text-destructive"
+                      : staleLease
+                        ? "bg-warning/15 text-warning"
+                        : paused
+                          ? "bg-warning/15 text-warning"
+                          : "bg-muted text-muted-foreground"
+                }`}
+              >
+                {staleLease && !runFinished ? "stale lease" : (live?.status ?? "starting")}
+              </span>
             </div>
             <div className="flex items-center gap-2">
-              {!runFinished && <Loader2 className="h-3.5 w-3.5 animate-spin text-muted-foreground" />}
+              {!runFinished && !resumableNow && (
+                <Loader2 className="h-3.5 w-3.5 animate-spin text-muted-foreground" />
+              )}
               <button
                 onClick={() => runStatus.refetch()}
                 className="rounded-md border border-border bg-background px-2 py-1 text-[11px] text-foreground hover:bg-muted"
@@ -579,6 +630,55 @@ function Runner({ def, canApply }: { def: RunnerDef; canApply: boolean }) {
               )}
             </p>
           )}
+          {resumableNow && (
+            <div className="mt-3 rounded-md border border-warning/40 bg-warning/10 p-3">
+              <p className="flex items-start gap-2 text-xs text-foreground">
+                <PauseCircle className="mt-0.5 h-3.5 w-3.5 shrink-0 text-warning" />
+                <span>
+                  {staleLease
+                    ? "This run's lease expired — the instance that owned it is gone. It is safe to resume."
+                    : "This run paused before the function timeout and flushed its cursor."}
+                  {live?.pauseReason && (
+                    <>
+                      {" "}
+                      <span className="font-mono">({live.pauseReason})</span>
+                    </>
+                  )}
+                  {live?.leaseExpiresAt && (
+                    <>
+                      {" "}
+                      Lease expired {new Date(live.leaseExpiresAt).toLocaleTimeString()}.
+                    </>
+                  )}
+                  {live?.reclaimedFrom && (
+                    <>
+                      {" "}
+                      Reclaimed from <span className="font-mono">{live.reclaimedFrom}</span>.
+                    </>
+                  )}
+                </span>
+              </p>
+              {canApply && (
+                <button
+                  onClick={resumeSameRun}
+                  disabled={busy || !reason.trim()}
+                  className="mt-2 inline-flex items-center gap-2 rounded-md bg-primary px-3 py-1.5 text-xs font-medium text-primary-foreground hover:opacity-90 disabled:opacity-50"
+                >
+                  {busy && mode === "apply" ? (
+                    <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                  ) : (
+                    <Play className="h-3.5 w-3.5" />
+                  )}
+                  Resume (same run id)
+                </button>
+              )}
+              {canApply && !reason.trim() && (
+                <p className="mt-1 text-[11px] text-muted-foreground">
+                  A reason is required to resume.
+                </p>
+              )}
+            </div>
+          )}
           {live?.errorReason && (
             <p className="mt-1 text-[11px] text-destructive">{live.errorReason}</p>
           )}
@@ -586,6 +686,53 @@ function Runner({ def, canApply }: { def: RunnerDef; canApply: boolean }) {
             The run continues on the server — closing this tab does not stop it. Paste this run id
             into &ldquo;Resume run id&rdquo; to re-attach or continue a partial run.
           </p>
+        </div>
+      )}
+
+      {def.needsIds && canApply && (
+        <div className="mt-3 rounded-md border border-border bg-muted/30 p-3">
+          <p className="text-xs font-medium text-foreground">Reset a run</p>
+          <p className="mt-1 text-[11px] text-muted-foreground">
+            Clears a run doc left at <span className="font-mono">running</span> by a killed
+            instance (a zombie), so the same run id stops answering 409 and can be resumed. It
+            ingests nothing and touches no member data. Super-admin only, reason required, audited
+            before the call.
+          </p>
+          <div className="mt-2 flex flex-wrap items-end gap-2">
+            <div>
+              <label className="text-[11px] font-medium text-foreground">Run id</label>
+              <input
+                value={resumeId}
+                onChange={(e) => setResumeId(e.target.value.trim())}
+                placeholder="run id to reset"
+                className="mt-1 w-56 rounded-md border border-border bg-background px-3 py-1.5 font-mono text-xs text-foreground"
+              />
+            </div>
+            <div className="min-w-[200px] flex-1">
+              <label className="text-[11px] font-medium text-foreground">Reason</label>
+              <input
+                value={resetReason}
+                onChange={(e) => setResetReason(e.target.value)}
+                placeholder="Why this run is being reset"
+                className="mt-1 w-full rounded-md border border-border bg-background px-3 py-1.5 text-xs text-foreground"
+              />
+            </div>
+            <button
+              onClick={() => doReset(resumeId.trim())}
+              disabled={reset.isPending || !resumeId.trim() || !resetReason.trim()}
+              className="inline-flex items-center gap-2 rounded-md border border-destructive/40 bg-background px-3 py-1.5 text-xs font-medium text-destructive hover:bg-destructive/10 disabled:opacity-50"
+            >
+              {reset.isPending ? (
+                <Loader2 className="h-3.5 w-3.5 animate-spin" />
+              ) : (
+                <RotateCcw className="h-3.5 w-3.5" />
+              )}
+              Reset run
+            </button>
+          </div>
+          {resetNotice && (
+            <p className="mt-2 text-[11px] text-muted-foreground">{resetNotice}</p>
+          )}
         </div>
       )}
 
