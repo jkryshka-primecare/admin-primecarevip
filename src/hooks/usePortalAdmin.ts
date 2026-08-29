@@ -540,16 +540,23 @@ export function useBackfillRunner(action: BackfillAction) {
  * server-side whether or not anyone is polling: closing the tab does not stop
  * it, and re-attaching is just polling the same runId again.
  */
+const RUN_ID_RE = /^[A-Za-z0-9_-]{6,64}$/;
+
 export function useBackfillRunStatus(runId: string | null, enabled: boolean) {
+  // The edge function rejects a malformed/empty runId with a 400. Never poll
+  // unless the id matches the same shape server-side, so a half-set id can't
+  // throw an error the panel renders as a blank screen.
+  const validRunId = typeof runId === "string" && RUN_ID_RE.test(runId.trim());
   return useQuery({
     queryKey: ["portal-admin", "backfill-run", runId],
-    enabled: Boolean(runId) && enabled,
-    refetchInterval: enabled ? 10_000 : false,
+    enabled: validRunId && enabled,
+    retry: false,
+    refetchInterval: validRunId && enabled ? 10_000 : false,
     queryFn: async () => {
       const res = await callPortalAdmin<BackfillReport>({
         action: "backfillMinorReports",
         statusOnly: true,
-        runId,
+        runId: (runId ?? "").trim(),
       });
       return res.data ?? ({} as BackfillReport);
     },
