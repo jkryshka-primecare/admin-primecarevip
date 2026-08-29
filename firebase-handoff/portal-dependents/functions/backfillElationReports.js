@@ -985,10 +985,13 @@ async function backfillElationReports(db, FieldValue, elationPatientIds, options
       // above surfaces here as a counted, logged patient failure — never a hang.
       let pc;
       try {
-        pc = await withDeadline(
-          backfillPatient(db, FieldValue, bucket, id, counters, { ...opts, _checkpoint: checkpoint }),
-          PATIENT_BUDGET_MS,
-          'PATIENT_BUDGET_EXCEEDED',
+        pc = await withPatientDeadline(
+          Date.now() + PATIENT_BUDGET_MS,
+          () => withDeadline(
+            backfillPatient(db, FieldValue, bucket, id, counters, { ...opts, _checkpoint: checkpoint }),
+            PATIENT_BUDGET_MS,
+            'PATIENT_BUDGET_EXCEEDED',
+          ),
         );
       } catch (err) {
         counters.patientsErrored += 1;
