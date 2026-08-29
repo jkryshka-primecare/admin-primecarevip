@@ -455,7 +455,21 @@ export type BackfillReport = {
   runId?: string;
   async?: boolean;
   /** Async apply progress (from a `statusOnly` poll of `backfill_runs/{runId}`). */
-  status?: "claimed" | "running" | "complete" | "error" | "unknown" | string;
+  status?:
+    | "claimed"
+    | "running"
+    | "paused"
+    | "complete"
+    | "error"
+    | "unknown"
+    | string;
+  /** Run-level pause/lease fields (wrapper PR #460). */
+  paused?: boolean;
+  pauseReason?: string | null;
+  staleLease?: boolean;
+  resumable?: boolean;
+  reclaimedFrom?: string | null;
+  leaseExpiresAt?: string | null;
   requested?: number;
   completed?: number;
   pending?: number;
@@ -538,6 +552,29 @@ export function useBackfillRunStatus(runId: string | null, enabled: boolean) {
         runId,
       });
       return res.data ?? ({} as BackfillReport);
+    },
+  });
+}
+
+/**
+ * Clears a zombie `backfill_runs/{runId}` so the same runId can be resumed.
+ * Super-admin + written reason, enforced server-side and audited before the
+ * upstream call. `force` reclaims a run whose lease has not expired yet.
+ */
+export function useResetBackfillRun() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (vars: { runId: string; reason: string; force?: boolean }) => {
+      const res = await callPortalAdmin<BackfillReport>({
+        action: "reset",
+        runId: vars.runId,
+        reason: vars.reason,
+        ...(vars.force ? { force: true } : {}),
+      });
+      return res.data ?? ({} as BackfillReport);
+    },
+    onSuccess: (_d, vars) => {
+      qc.invalidateQueries({ queryKey: ["portal-admin", "backfill-run", vars.runId] });
     },
   });
 }
