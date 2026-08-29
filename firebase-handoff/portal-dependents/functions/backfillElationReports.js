@@ -371,6 +371,17 @@ async function uploadArtifactOnce(file, reportId) {
   return buffer.byteLength;
 }
 
+/**
+ * Artifact pulls go through the SAME paced gate as JSON (a /printable is by far
+ * the heaviest call we make at Elation). Fewer attempts than JSON: each retry
+ * re-downloads multiple MB.
+ */
+function uploadArtifact(file, reportId) {
+  return callElation('printable:' + reportId, () => uploadArtifactOnce(file, reportId), {
+    attempts: Math.max(1, Number(process.env.ELATION_ARTIFACT_ATTEMPTS || 2)),
+  });
+}
+
 
 /** Census accumulator: distinct report_type -> count + mapped category. */
 function noteCensus(census, reportType) {
