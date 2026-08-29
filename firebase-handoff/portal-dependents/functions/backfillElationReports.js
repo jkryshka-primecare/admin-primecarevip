@@ -501,6 +501,9 @@ async function uploadArtifactOnce(file, reportId) {
 function uploadArtifact(file, reportId) {
   return callElation('printable:' + reportId, () => uploadArtifactOnce(file, reportId), {
     attempts: Math.max(1, Number(process.env.ELATION_ARTIFACT_ATTEMPTS || 2)),
+    // One printable attempt costs at most the artifact fetch deadline; the
+    // retry check charges that against the remaining patient budget.
+    callTimeoutMs: ARTIFACT_FETCH_TIMEOUT_MS,
   });
 }
 
