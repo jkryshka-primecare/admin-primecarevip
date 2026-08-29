@@ -229,9 +229,13 @@ function Runner({ def, canApply }: { def: RunnerDef; canApply: boolean }) {
 
   async function resumeSameRun() {
     if (!runId) return;
+    // Pass the id EXPLICITLY. `setResumeId` does not apply until the next
+    // render, so `go()` would still read the previous (often empty) state and
+    // start a brand new run instead of continuing this one.
     setResumeId(runId);
-    await go(true);
+    await go(true, false, runId);
   }
+
 
   async function doReset(targetRunId: string) {
     setResetNotice(null);
