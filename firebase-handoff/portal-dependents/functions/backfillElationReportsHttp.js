@@ -280,7 +280,7 @@ async function driveRun(runId, opts) {
       // ---- graceful pre-timeout pause -------------------------------------
       // Never START a chunk we cannot expect to finish before the hard cap.
       if (Date.now() - startedAtMs >= SOFT_BUDGET_MS) {
-        stopHeartbeat();   // no renewal may race the pause write
+        stopHeartbeat(); stopBackoffBrake();   // no renewal may race the pause write
         await runRef.set({
           status: 'paused',
           pausedAt: FieldValue.serverTimestamp(),
@@ -339,7 +339,7 @@ async function driveRun(runId, opts) {
       }, { merge: true });
     }
 
-    stopHeartbeat();   // no renewal may race the terminal write
+    stopHeartbeat(); stopBackoffBrake();   // no renewal may race the terminal write
     await runRef.set({
       status: 'complete',
       finishedAt: FieldValue.serverTimestamp(),
@@ -351,7 +351,7 @@ async function driveRun(runId, opts) {
       leaseExpiresAt: 0,
     }, { merge: true });
   } catch (e) {
-    stopHeartbeat();
+    stopHeartbeat(); stopBackoffBrake();
     logError('backfillElationReports', e);
     await runRef.set({
       status: 'error',
@@ -369,7 +369,7 @@ async function driveRun(runId, opts) {
     // Belt and braces: every exit path (including the graceful pause `return`
     // above) stops the timer. Only a SIGKILL leaves it unrenewed — which is
     // exactly the signal we want the lease to carry.
-    stopHeartbeat();
+    stopHeartbeat(); stopBackoffBrake();
   }
 }
 
