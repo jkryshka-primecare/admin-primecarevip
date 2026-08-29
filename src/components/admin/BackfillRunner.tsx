@@ -207,9 +207,14 @@ function Runner({ def, canApply }: { def: RunnerDef; canApply: boolean }) {
   const [runId, setRunId] = useState<string | null>(null);
   const [resumeId, setResumeId] = useState("");
   const [attachNotice, setAttachNotice] = useState<string | null>(null);
+  // Reset has its own run-id field: it is a destructive maintenance action on
+  // a possibly DIFFERENT run than the one being resumed, so sharing state with
+  // the resume input would let one silently retarget the other.
+  const [resetRunId, setResetRunId] = useState("");
   const [resetReason, setResetReason] = useState("");
   const [resetNotice, setResetNotice] = useState<string | null>(null);
   const reset = useResetBackfillRun();
+
 
 
   const runStatus = useBackfillRunStatus(runId, Boolean(runId));
@@ -224,9 +229,13 @@ function Runner({ def, canApply }: { def: RunnerDef; canApply: boolean }) {
 
   async function resumeSameRun() {
     if (!runId) return;
+    // Pass the id EXPLICITLY. `setResumeId` does not apply until the next
+    // render, so `go()` would still read the previous (often empty) state and
+    // start a brand new run instead of continuing this one.
     setResumeId(runId);
-    await go(true);
+    await go(true, false, runId);
   }
+
 
   async function doReset(targetRunId: string) {
     setResetNotice(null);
@@ -292,7 +301,7 @@ function Runner({ def, canApply }: { def: RunnerDef; canApply: boolean }) {
     };
   }
 
-  async function go(apply: boolean, runToEnd = false) {
+  async function go(apply: boolean, runToEnd = false, overrideRunId?: string) {
     setMode(apply ? "apply" : "dry");
     setAttachNotice(null);
     let cur = cursor;
@@ -303,7 +312,9 @@ function Runner({ def, canApply }: { def: RunnerDef; canApply: boolean }) {
           // claimed; the work then proceeds without this browser.
           setReport(null);
           setProgress(null);
-          const requestedRunId = resumeId.trim() || null;
+          // An explicit id (Resume) wins over the input field, which may not
+          // have re-rendered yet.
+          const requestedRunId = (overrideRunId ?? resumeId).trim() || null;
           try {
             const res = await run.mutateAsync({
               apply: true,
@@ -702,8 +713,8 @@ function Runner({ def, canApply }: { def: RunnerDef; canApply: boolean }) {
             <div>
               <label className="text-[11px] font-medium text-foreground">Run id</label>
               <input
-                value={resumeId}
-                onChange={(e) => setResumeId(e.target.value.trim())}
+                value={resetRunId}
+                onChange={(e) => setResetRunId(e.target.value.trim())}
                 placeholder="run id to reset"
                 className="mt-1 w-56 rounded-md border border-border bg-background px-3 py-1.5 font-mono text-xs text-foreground"
               />
@@ -718,8 +729,8 @@ function Runner({ def, canApply }: { def: RunnerDef; canApply: boolean }) {
               />
             </div>
             <button
-              onClick={() => doReset(resumeId.trim())}
-              disabled={reset.isPending || !resumeId.trim() || !resetReason.trim()}
+              onClick={() => doReset(resetRunId.trim())}
+              disabled={reset.isPending || !resetRunId.trim() || !resetReason.trim()}
               className="inline-flex items-center gap-2 rounded-md border border-destructive/40 bg-background px-3 py-1.5 text-xs font-medium text-destructive hover:bg-destructive/10 disabled:opacity-50"
             >
               {reset.isPending ? (
