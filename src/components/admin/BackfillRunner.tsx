@@ -301,7 +301,7 @@ function Runner({ def, canApply }: { def: RunnerDef; canApply: boolean }) {
     };
   }
 
-  async function go(apply: boolean, runToEnd = false) {
+  async function go(apply: boolean, runToEnd = false, overrideRunId?: string) {
     setMode(apply ? "apply" : "dry");
     setAttachNotice(null);
     let cur = cursor;
@@ -312,7 +312,9 @@ function Runner({ def, canApply }: { def: RunnerDef; canApply: boolean }) {
           // claimed; the work then proceeds without this browser.
           setReport(null);
           setProgress(null);
-          const requestedRunId = resumeId.trim() || null;
+          // An explicit id (Resume) wins over the input field, which may not
+          // have re-rendered yet.
+          const requestedRunId = (overrideRunId ?? resumeId).trim() || null;
           try {
             const res = await run.mutateAsync({
               apply: true,
@@ -711,8 +713,8 @@ function Runner({ def, canApply }: { def: RunnerDef; canApply: boolean }) {
             <div>
               <label className="text-[11px] font-medium text-foreground">Run id</label>
               <input
-                value={resumeId}
-                onChange={(e) => setResumeId(e.target.value.trim())}
+                value={resetRunId}
+                onChange={(e) => setResetRunId(e.target.value.trim())}
                 placeholder="run id to reset"
                 className="mt-1 w-56 rounded-md border border-border bg-background px-3 py-1.5 font-mono text-xs text-foreground"
               />
@@ -727,8 +729,8 @@ function Runner({ def, canApply }: { def: RunnerDef; canApply: boolean }) {
               />
             </div>
             <button
-              onClick={() => doReset(resumeId.trim())}
-              disabled={reset.isPending || !resumeId.trim() || !resetReason.trim()}
+              onClick={() => doReset(resetRunId.trim())}
+              disabled={reset.isPending || !resetRunId.trim() || !resetReason.trim()}
               className="inline-flex items-center gap-2 rounded-md border border-destructive/40 bg-background px-3 py-1.5 text-xs font-medium text-destructive hover:bg-destructive/10 disabled:opacity-50"
             >
               {reset.isPending ? (
