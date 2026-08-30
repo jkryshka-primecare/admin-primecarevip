@@ -13,6 +13,7 @@ import {
   Bell,
   BarChart3,
   Star,
+  Briefcase,
 } from "lucide-react";
 import AppLayout from "@/components/AppLayout";
 import { cn } from "@/lib/utils";
@@ -28,6 +29,7 @@ type Tab = {
 const TABS: Tab[] = [
   { to: "/hr", label: "Dashboard", icon: LayoutDashboard, end: true },
   { to: "/hr/employees", label: "Employees", icon: Users },
+  { to: "/hr/contractors", label: "Contractors", icon: Briefcase },
   { to: "/hr/org-chart", label: "Org Chart", icon: Network },
   { to: "/hr/onboarding", label: "Onboarding", icon: UserPlus },
   { to: "/hr/payroll", label: "Payroll", icon: DollarSign },

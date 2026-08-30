@@ -401,6 +401,89 @@ export type Database = {
           },
         ]
       }
+      hr_contractors: {
+        Row: {
+          address: string | null
+          company_name: string | null
+          contract_number: string | null
+          created_at: string
+          department_id: string | null
+          email: string
+          end_date: string | null
+          first_name: string
+          id: string
+          last_name: string
+          notes: string | null
+          phone: string | null
+          rate: number | null
+          rate_type:
+            | Database["public"]["Enums"]["hr_contractor_rate_type"]
+            | null
+          service_role: string | null
+          start_date: string | null
+          status: Database["public"]["Enums"]["hr_contractor_status"]
+          tax_id: string | null
+          updated_at: string
+          w9_on_file: boolean
+        }
+        Insert: {
+          address?: string | null
+          company_name?: string | null
+          contract_number?: string | null
+          created_at?: string
+          department_id?: string | null
+          email: string
+          end_date?: string | null
+          first_name: string
+          id?: string
+          last_name: string
+          notes?: string | null
+          phone?: string | null
+          rate?: number | null
+          rate_type?:
+            | Database["public"]["Enums"]["hr_contractor_rate_type"]
+            | null
+          service_role?: string | null
+          start_date?: string | null
+          status?: Database["public"]["Enums"]["hr_contractor_status"]
+          tax_id?: string | null
+          updated_at?: string
+          w9_on_file?: boolean
+        }
+        Update: {
+          address?: string | null
+          company_name?: string | null
+          contract_number?: string | null
+          created_at?: string
+          department_id?: string | null
+          email?: string
+          end_date?: string | null
+          first_name?: string
+          id?: string
+          last_name?: string
+          notes?: string | null
+          phone?: string | null
+          rate?: number | null
+          rate_type?:
+            | Database["public"]["Enums"]["hr_contractor_rate_type"]
+            | null
+          service_role?: string | null
+          start_date?: string | null
+          status?: Database["public"]["Enums"]["hr_contractor_status"]
+          tax_id?: string | null
+          updated_at?: string
+          w9_on_file?: boolean
+        }
+        Relationships: [
+          {
+            foreignKeyName: "hr_contractors_department_id_fkey"
+            columns: ["department_id"]
+            isOneToOne: false
+            referencedRelation: "hr_departments"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       hr_departments: {
         Row: {
           created_at: string
@@ -1928,6 +2011,8 @@ export type Database = {
         | "remote"
         | "holiday"
         | "sick"
+      hr_contractor_rate_type: "hourly" | "daily" | "per_project" | "retainer"
+      hr_contractor_status: "active" | "inactive" | "terminated"
       hr_employment_status: "active" | "on_leave" | "terminated" | "suspended"
       hr_goal_status: "not_started" | "in_progress" | "completed" | "cancelled"
       hr_grievance_priority: "low" | "medium" | "high" | "urgent"
@@ -2104,6 +2189,8 @@ export const Constants = {
         "holiday",
         "sick",
       ],
+      hr_contractor_rate_type: ["hourly", "daily", "per_project", "retainer"],
+      hr_contractor_status: ["active", "inactive", "terminated"],
       hr_employment_status: ["active", "on_leave", "terminated", "suspended"],
       hr_goal_status: ["not_started", "in_progress", "completed", "cancelled"],
       hr_grievance_priority: ["low", "medium", "high", "urgent"],
