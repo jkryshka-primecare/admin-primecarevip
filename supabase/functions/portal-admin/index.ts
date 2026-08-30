@@ -889,6 +889,45 @@ Deno.serve(async (req) => {
     }
   }
 
+  /**
+   * Artifact-repair sweep control.
+   *   - `sweepStatus` reads run counters only: admin, no reason, no audit row.
+   *   - `sweepStart` (start OR resume) and `sweepReset` write migration state
+   *     and drive PHI fetches, so they carry the apply tier: super_admin
+   *     resolved server-side, a written reason, and attribution first.
+   */
+  const isSweep = SWEEP_ACTIONS.includes(action);
+  const sweepStatusOnly = action === "sweepStatus";
+  let sweepMaxItems = 0;
+  if (isSweep) {
+    if (!(await isAdmin(ctx))) {
+      return deny(403, "Only administrators can drive the artifact repair sweep.");
+    }
+    if (sweepStatusOnly) {
+      if (!RUN_ID_RE.test(runId)) {
+        return deny(400, "A valid runId is required to check sweep progress.");
+      }
+    } else {
+      if (!(await isSuperAdmin(ctx))) {
+        return deny(403, "Only a super administrator can run or reset the artifact repair sweep.");
+      }
+      if (!reason) {
+        return deny(400, "A written reason is required for this sweep action.");
+      }
+      if (action === "sweepReset" && !RUN_ID_RE.test(runId)) {
+        return deny(400, "A valid runId is required to reset a sweep run.");
+      }
+      // A start may omit runId (upstream mints one); a resume supplies it.
+      if (action === "sweepStart" && runId && !RUN_ID_RE.test(runId)) {
+        return deny(400, "That runId is not valid.");
+      }
+      const raw = Number(body.maxItems);
+      sweepMaxItems = Number.isFinite(raw) && raw > 0 ? Math.min(Math.floor(raw), 5000) : 0;
+    }
+  }
+
+
+
   const bulkApply = isBulk && !statusPoll && body.apply === true;
   let minorIds: string[] = [];
   // Report-ingest cohort switch. The Cloud Function wrapper is the authority
