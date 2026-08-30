@@ -62,6 +62,8 @@ export default function AdminHome() {
           <div className="space-y-4">
             <GuardianLinkLoader />
             <BackfillRunner />
+            <ArtifactSweepRunner />
+
           </div>
         )}
         {tab === "go-live" && <GoLiveChecklist />}
