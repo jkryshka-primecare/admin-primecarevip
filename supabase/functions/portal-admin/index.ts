@@ -98,6 +98,9 @@ const BULK_MIGRATIONS: Action[] = [
  */
 const FAN_OUT: Action[] = ["linkGuardians"];
 
+/** Artifact-repair sweep control actions (no patient id, run-scoped). */
+const SWEEP_ACTIONS: Action[] = ["sweepStart", "sweepStatus", "sweepReset"];
+
 /** Actions that act on a set of members rather than a single patient. */
 const BATCH_ACTIONS: Action[] = [
   "provision",
@@ -105,6 +108,7 @@ const BATCH_ACTIONS: Action[] = [
   "runAudit",
   "smoke",
   "unclaimedGuardians",
+  ...SWEEP_ACTIONS,
   ...BULK_MIGRATIONS,
 ];
 
