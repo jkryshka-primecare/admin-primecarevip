@@ -1432,6 +1432,18 @@ Deno.serve(async (req) => {
       httpStatus: status,
       errorMessage,
     });
+  } else if (sweepWrite) {
+    await recordAction(ctx, {
+      elationPatientId: null,
+      action: `artifactSweep:${action === "sweepStart" ? "start" : "reset"}-result`,
+      reason,
+      after: payload,
+      ok,
+      httpStatus: status,
+      errorMessage,
+    });
+  } else if (isSweep) {
+    // Status poll: counters only, not audited per call.
   } else if (ADMIN_ONLY.includes(action)) {
     await recordAction(ctx, {
       elationPatientId: null,
