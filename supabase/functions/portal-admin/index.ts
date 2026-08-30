@@ -58,6 +58,12 @@ const FUNCTION_BY_ACTION: Record<Action, string> = {
   // authenticated path — a raw gcloud identity token cannot satisfy
   // `requireAdminCaller`, which wants a Firebase super_admin ID token.
   reset: "backfillElationReports",
+  // Artifact repair sweep (large-tail drain). Same run-doc/lease/heartbeat
+  // durability model as the report ingest, and every artifact fetch goes
+  // through the one process-wide Elation gate.
+  sweepStart: "adminRunArtifactRepairSweep",
+  sweepStatus: "adminRunArtifactRepairSweep",
+  sweepReset: "adminRunArtifactRepairSweep",
 };
 
 const MUTATIONS: Action[] = ["invite", "revoke", "setAccess", "provision"];
