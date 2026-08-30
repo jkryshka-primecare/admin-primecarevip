@@ -38,7 +38,11 @@ type Action =
   | "reset"
   | "sweepStart"
   | "sweepStatus"
-  | "sweepReset";
+  | "sweepReset"
+  | "driverStart"
+  | "driverStatus"
+  | "driverStop"
+  | "driverResume";
 
 const FUNCTION_BY_ACTION: Record<Action, string> = {
   get: "adminGetPortalAccess",
@@ -64,6 +68,13 @@ const FUNCTION_BY_ACTION: Record<Action, string> = {
   sweepStart: "adminRunArtifactRepairSweep",
   sweepStatus: "adminRunArtifactRepairSweep",
   sweepReset: "adminRunArtifactRepairSweep",
+  // Auto-resume driver (#466). It orchestrates the backfill -> sweep ->
+  // coverage-audit sequence unattended; the console arms it, watches it, and
+  // stops it. Every unit of work still happens in the functions above.
+  driverStart: "adminRunBackfillDriver",
+  driverStatus: "adminRunBackfillDriver",
+  driverStop: "adminRunBackfillDriver",
+  driverResume: "adminRunBackfillDriver",
 };
 
 const MUTATIONS: Action[] = ["invite", "revoke", "setAccess", "provision"];
@@ -101,6 +112,15 @@ const FAN_OUT: Action[] = ["linkGuardians"];
 /** Artifact-repair sweep control actions (no patient id, run-scoped). */
 const SWEEP_ACTIONS: Action[] = ["sweepStart", "sweepStatus", "sweepReset"];
 
+/**
+ * Auto-resume driver control. `driverStart` and `driverResume` arm an
+ * UNATTENDED PHI migration, so they carry the apply tier (super_admin + written
+ * reason + attribution first). `driverStop` is the kill switch: admin is enough
+ * to STOP something — never gate a stop behind a higher tier than the start —
+ * but it is still attributed. `driverStatus` is a read.
+ */
+const DRIVER_ACTIONS: Action[] = ["driverStart", "driverStatus", "driverStop", "driverResume"];
+
 /** Actions that act on a set of members rather than a single patient. */
 const BATCH_ACTIONS: Action[] = [
   "provision",
@@ -109,6 +129,7 @@ const BATCH_ACTIONS: Action[] = [
   "smoke",
   "unclaimedGuardians",
   ...SWEEP_ACTIONS,
+  ...DRIVER_ACTIONS,
   ...BULK_MIGRATIONS,
 ];
 
