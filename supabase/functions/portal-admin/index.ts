@@ -1255,6 +1255,29 @@ Deno.serve(async (req) => {
     upstreamPayload.actor = actor;
   }
 
+  if (isSweep) {
+    // Sweep wire shape. The Cloud Function takes exactly one of
+    // start | status | reset; nothing else on the payload is read.
+    for (const k of Object.keys(upstreamPayload)) delete upstreamPayload[k];
+    upstreamPayload.action = action === "sweepStart"
+      ? "start"
+      : action === "sweepReset"
+        ? "reset"
+        : "status";
+    upstreamPayload.actor = actor;
+    if (runId) upstreamPayload.runId = runId;
+    if (!sweepStatusOnly) upstreamPayload.reason = reason;
+    if (action === "sweepStart" && sweepMaxItems) upstreamPayload.maxItems = sweepMaxItems;
+    if (action === "sweepReset") {
+      if (body.force === true) upstreamPayload.force = true;
+      // The global circuit breaker is separate from the run doc: clearing it
+      // is always an explicit operator choice, never implied by a reset.
+      if (body.clearGlobalPause === true) upstreamPayload.clearGlobalPause = true;
+    }
+  }
+
+
+
 
   const fnName = FUNCTION_BY_ACTION[action];
   const url = `${FUNCTIONS_BASE}/${fnName}`;
