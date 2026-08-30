@@ -35,7 +35,10 @@ type Action =
   | "backfillArtifacts"
   | "backfillMinorReports"
   | "linkGuardians"
-  | "reset";
+  | "reset"
+  | "sweepStart"
+  | "sweepStatus"
+  | "sweepReset";
 
 const FUNCTION_BY_ACTION: Record<Action, string> = {
   get: "adminGetPortalAccess",
