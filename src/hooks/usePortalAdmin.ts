@@ -743,3 +743,100 @@ export function useGuardianLinkLoader() {
     },
   });
 }
+
+// ---------------------------------------------------------------------------
+// Auto-resume driver (#466) — the orchestrator that drives the backfill to
+// pending:0, THEN the sweep to remaining:0, then triggers the coverage audit
+// and stops at `awaiting_signoff`. It re-implements nothing: every cycle is a
+// re-POST of the SAME runId against the existing endpoints.
+//
+// This console surface is deliberately watch-and-stop. It can arm the driver
+// and it can kill it; it cannot declare the migration complete — that is the
+// operator's coverage MISS=0 sign-off.
+// ---------------------------------------------------------------------------
+
+export type DriverState = {
+  driverId?: string;
+  enabled?: boolean;
+  phase?: string;
+  backfillRunId?: string | null;
+  sweepRunId?: string | null;
+  cycles?: number;
+  backfillCycles?: number;
+  sweepCycles?: number;
+  lastAction?: string | null;
+  lastActionReason?: string | null;
+  lastActionAt?: string | null;
+  lastProgressAt?: string | null;
+  noProgressStreak?: number;
+  haltReason?: string | null;
+  haltDetail?: string | null;
+  killSwitch?: boolean;
+  killSwitchBy?: string | null;
+  maxCycles?: number;
+  failedRateThreshold?: number;
+  patientCount?: number;
+  auditTriggeredAt?: string | null;
+  completionRule?: string | null;
+  updatedAt?: string | null;
+};
+
+export function useDriverStatus(driverId: string | null, enabled: boolean) {
+  return useQuery({
+    queryKey: ["portal-admin", "backfill-driver", driverId],
+    enabled: Boolean(driverId) && enabled,
+    retry: false,
+    refetchInterval: (q) => (driverId && enabled && !q.state.error ? 15_000 : false),
+    queryFn: async () => {
+      const res = await callPortalAdmin<DriverState>({
+        action: "driverStatus",
+        ...(driverId ? { driverId } : {}),
+      });
+      return res.data ?? ({} as DriverState);
+    },
+  });
+}
+
+/** Arm the driver on an existing backfill runId. Super-admin + reason. */
+export function useStartDriver() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (vars: {
+      reason: string;
+      backfillRunId: string;
+      patientIds: string[];
+      driverId?: string;
+      cohort?: "minors" | "adults";
+      maxCycles?: number;
+      failedRateThreshold?: number;
+    }) => {
+      const res = await callPortalAdmin<DriverState>({ action: "driverStart", ...vars });
+      return res.data ?? ({} as DriverState);
+    },
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["portal-admin", "backfill-driver"] }),
+  });
+}
+
+/** Kill switch. Admin-level on purpose: a stop is never harder than a start. */
+export function useStopDriver() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (vars: { reason: string; driverId?: string }) => {
+      const res = await callPortalAdmin<DriverState>({ action: "driverStop", ...vars });
+      return res.data ?? ({} as DriverState);
+    },
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["portal-admin", "backfill-driver"] }),
+  });
+}
+
+/** Clear a halt and re-arm. Deliberately super-admin + reason, never automatic. */
+export function useResumeDriver() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (vars: { reason: string; driverId?: string }) => {
+      const res = await callPortalAdmin<DriverState>({ action: "driverResume", ...vars });
+      return res.data ?? ({} as DriverState);
+    },
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["portal-admin", "backfill-driver"] }),
+  });
+}
