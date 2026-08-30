@@ -3,6 +3,8 @@ import HrLayout from "./HrLayout";
 import HrDashboard from "./HrDashboard";
 import HrEmployees from "./HrEmployees";
 import HrEmployeeDetail from "./HrEmployeeDetail";
+import HrContractors from "./HrContractors";
+import HrContractorDetail from "./HrContractorDetail";
 import HrOrgChart from "./HrOrgChart";
 import HrOnboarding from "./HrOnboarding";
 import HrPayroll from "./HrPayroll";
@@ -22,6 +24,8 @@ export default function HrHome() {
         <Route index element={<HrDashboard />} />
         <Route path="employees" element={<HrEmployees />} />
         <Route path="employees/:id" element={<HrEmployeeDetail />} />
+        <Route path="contractors" element={<HrContractors />} />
+        <Route path="contractors/:id" element={<HrContractorDetail />} />
         <Route path="org-chart" element={<HrOrgChart />} />
         <Route path="onboarding" element={<HrOnboarding />} />
         <Route path="payroll" element={<HrPayroll />} />
