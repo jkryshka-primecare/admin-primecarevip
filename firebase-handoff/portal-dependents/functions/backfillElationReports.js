@@ -94,7 +94,12 @@ const REPORTS_PAGE_CAP = 200; // safety cap; loud failure > silent partial pull.
 // A /printable fetch is a multi-MB PDF over a slow upstream and must NOT share the
 // JSON call's short budget — the 5.6MB / 16.4MB reports are exactly what timed the
 // repair sweep out. Deliberately a SEPARATE constant (go-ahead item 3).
-const ARTIFACT_FETCH_TIMEOUT_MS = Number(process.env.ELATION_ARTIFACT_TIMEOUT_MS || 120000);
+// 2026-08-30 (run 8F3054h6EQI8Iw5okePb): a 120s ceiling x2 attempts could burn
+// 240s+ of a 420s patient budget on ONE printable and then starve every later
+// JSON call down to the old 1s clamp floor. Ceiling lowered to 60s and attempts
+// to 1 by default; BOTH are env-tunable with no redeploy of logic.
+const ARTIFACT_FETCH_TIMEOUT_MS = Number(process.env.ELATION_ARTIFACT_TIMEOUT_MS || 60000);
+const ARTIFACT_ATTEMPTS = Math.max(1, Number(process.env.ELATION_ARTIFACT_ATTEMPTS || 1));
 
 // HANG FIX (2026-08-28, run L0iCYecF1obm5bWklnAK stuck at 1/2 with Failed: 0).
 // `timeoutMs` handed to the Elation client only guards CONNECT + RESPONSE HEADERS.
@@ -108,6 +113,30 @@ const GCS_READ_TIMEOUT_MS = Number(process.env.GCS_READ_TIMEOUT_MS || 30000);
 const FIRESTORE_CALL_TIMEOUT_MS = Number(process.env.BACKFILL_FIRESTORE_TIMEOUT_MS || 30000);
 const GCS_METADATA_TIMEOUT_MS = Number(process.env.GCS_METADATA_TIMEOUT_MS || 30000);
 const PATIENT_BUDGET_MS = Number(process.env.BACKFILL_PATIENT_BUDGET_MS || 420000);
+
+// ---- ARTIFACT SUB-BUDGET ---------------------------------------------------
+// Artifact (printable) time is charged ONLY here, never against the JSON clamp.
+// When a patient exhausts ARTIFACT_BUDGET_MS, remaining artifacts are LEFT OPEN
+// (hasArtifact stays true, no object written, no failure recorded) for
+// sweepArtifactRepairs to heal — the report doc itself is still stored.
+const ARTIFACT_BUDGET_MS = Math.max(0, Number(process.env.BACKFILL_ARTIFACT_BUDGET_MS || 240000));
+// Floor for the JSON clamp. The old floor was 1000ms, which turned a
+// budget-starved patient into a cascade of ELATION_JSON_TIMEOUT-after-1000ms
+// refetch failures. Below floor + margin we do not issue the call at all: it is
+// a logged, counted skip instead of a guaranteed timeout.
+// What the instance-cap guard CHARGES for one not-yet-started patient. Defaults
+// to the full worst-case budget (safe: a started patient can never be
+// SIGKILLed mid-flight). That is deliberately conservative — at 420s only the
+// first ~95s of a 540s instance may start patients — so it is env-tunable:
+// with the 60s/1-attempt artifact ceiling a realistic patient is well under
+// 120s, and BACKFILL_PATIENT_START_BUDGET_MS=150000 buys far more throughput
+// per cycle with no code change. Never set it above BACKFILL_PATIENT_BUDGET_MS
+// expecting safety.
+const PATIENT_START_BUDGET_MS = Math.max(
+  1000,
+  Number(process.env.BACKFILL_PATIENT_START_BUDGET_MS || PATIENT_BUDGET_MS),
+);
+const JSON_MIN_TIMEOUT_MS = Math.max(1000, Number(process.env.ELATION_JSON_MIN_TIMEOUT_MS || 10000));
 
 // ---------------------------------------------------------------------------
 // ELATION THROTTLE + RETRY (2026-08-29, run 1K2OIzSY39v5rPpLnQLv: ~44% of the
@@ -138,14 +167,42 @@ const { AsyncLocalStorage } = require('node:async_hooks');
 const patientDeadlineStore = new AsyncLocalStorage();
 
 function withPatientDeadline(deadlineAt, fn) {
-  return patientDeadlineStore.run({ deadlineAt }, fn);
+  return patientDeadlineStore.run({ deadlineAt, artifactMs: 0 }, fn);
 }
 
-/** Milliseconds left in the current patient budget, or Infinity outside one. */
-function remainingPatientMs() {
+function patientCtx() {
   const ctx = patientDeadlineStore.getStore();
-  if (!ctx || !Number.isFinite(ctx.deadlineAt)) return Infinity;
-  return ctx.deadlineAt - Date.now();
+  return ctx && Number.isFinite(ctx.deadlineAt) ? ctx : null;
+}
+
+/** Wall-clock milliseconds left in the current patient budget. */
+function remainingPatientMs() {
+  const ctx = patientCtx();
+  return ctx ? ctx.deadlineAt - Date.now() : Infinity;
+}
+
+/** Record time spent inside a printable fetch/save against the sub-budget. */
+function noteArtifactMs(ms) {
+  const ctx = patientCtx();
+  if (ctx) ctx.artifactMs = (ctx.artifactMs || 0) + Math.max(0, ms);
+}
+
+/**
+ * Budget a JSON call may spend. Artifact time is ADDED BACK, so a heavy
+ * printable can never shrink the clamp for the JSON calls that follow it — the
+ * sub-budget alone pays for artifacts.
+ */
+function remainingJsonMs() {
+  const ctx = patientCtx();
+  if (!ctx) return Infinity;
+  return (ctx.deadlineAt - Date.now()) + (ctx.artifactMs || 0);
+}
+
+/** Budget left for artifacts: the sub-budget, never exceeding wall clock. */
+function remainingArtifactMs() {
+  const ctx = patientCtx();
+  if (!ctx) return Infinity;
+  return Math.min(ARTIFACT_BUDGET_MS - (ctx.artifactMs || 0), ctx.deadlineAt - Date.now());
 }
 
 // --- abortable backoff -----------------------------------------------------
@@ -252,6 +309,9 @@ const TERMINAL_ELATION_REASONS = new Set([
   'ELATION_SCOPE_DENIED',
   // Missing/invalid credentials surface as status 0; retrying cannot fix config.
   'ELATION_CONFIG_MISSING',
+  // Locally-raised budget refusals: retrying spends budget we already lack.
+  'ELATION_JSON_BUDGET_EXHAUSTED',
+  'ARTIFACT_BUDGET_EXHAUSTED',
 ]);
 
 /** Retry only what can plausibly succeed on a second try. */
@@ -298,7 +358,13 @@ function backoffDelayMs(attempt) {
  * fresh on each attempt so no half-consumed stream is reused.
  */
 async function callElation(label, fn, opts) {
-  const { attempts = ELATION_MAX_ATTEMPTS, callTimeoutMs = JSON_CALL_TIMEOUT_MS } = opts || {};
+  const {
+    attempts = ELATION_MAX_ATTEMPTS,
+    callTimeoutMs = JSON_CALL_TIMEOUT_MS,
+    // Which budget a retry is charged against: JSON calls read the
+    // artifact-adjusted budget, printables read their own sub-budget.
+    remainingFn = remainingPatientMs,
+  } = opts || {};
   let lastErr;
   for (let attempt = 1; attempt <= attempts; attempt += 1) {
     const release = await acquireElationSlot();
@@ -308,7 +374,7 @@ async function callElation(label, fn, opts) {
       lastErr = err;
       if (attempt >= attempts || !isRetryableElationError(err)) throw err;
       const delay = backoffDelayMs(attempt);
-      const remaining = remainingPatientMs();
+      const remaining = remainingFn();
       if (remaining < delay + callTimeoutMs + ELATION_RETRY_MARGIN_MS) {
         log('backfillElationReports', 'elation-retry-skipped', {
           label, attempt, attempts, delayMs: delay, remainingMs: Math.round(remaining),
@@ -337,18 +403,28 @@ async function callElation(label, fn, opts) {
 }
 
 /** Paced + retried JSON GET under the JSON deadline. */
-function elationJson(path, label) {
-  // Never let one attempt outlive the patient budget it is spending.
-  const budget = remainingPatientMs();
+async function elationJson(path, label) {
+  // Artifact time is NOT charged here (remainingJsonMs adds it back).
+  const budget = remainingJsonMs();
+  if (Number.isFinite(budget) && budget < JSON_MIN_TIMEOUT_MS + ELATION_RETRY_MARGIN_MS) {
+    // Sub-floor: a logged skip beats issuing a call we know will time out.
+    log('backfillElationReports', 'elation-json-skipped-budget', {
+      label: label || path, remainingMs: Math.round(budget), floorMs: JSON_MIN_TIMEOUT_MS,
+    });
+    const err = new Error('ELATION_JSON_BUDGET_EXHAUSTED');
+    err.reason = 'ELATION_JSON_BUDGET_EXHAUSTED';
+    err.elationStatus = 0;
+    throw err;
+  }
   const timeoutMs = Math.max(
-    1000,
+    JSON_MIN_TIMEOUT_MS,
     Math.min(JSON_CALL_TIMEOUT_MS, Number.isFinite(budget) ? budget - ELATION_RETRY_MARGIN_MS : JSON_CALL_TIMEOUT_MS),
   );
   return callElation(label || path, () => withDeadline(
     elationGet(path),
     timeoutMs,
     'ELATION_JSON_TIMEOUT',
-  ), { callTimeoutMs: timeoutMs });
+  ), { callTimeoutMs: timeoutMs, remainingFn: remainingJsonMs });
 }
 
 
@@ -467,13 +543,28 @@ async function uploadArtifactOnce(file, reportId) {
  * the heaviest call we make at Elation). Fewer attempts than JSON: each retry
  * re-downloads multiple MB.
  */
-function uploadArtifact(file, reportId) {
-  return callElation('printable:' + reportId, () => uploadArtifactOnce(file, reportId), {
-    attempts: Math.max(1, Number(process.env.ELATION_ARTIFACT_ATTEMPTS || 2)),
-    // One printable attempt costs at most the artifact fetch deadline; the
-    // retry check charges that against the remaining patient budget.
-    callTimeoutMs: ARTIFACT_FETCH_TIMEOUT_MS,
-  });
+async function uploadArtifact(file, reportId) {
+  const remaining = remainingArtifactMs();
+  if (Number.isFinite(remaining) && remaining < ARTIFACT_FETCH_TIMEOUT_MS) {
+    // Sub-budget spent: refuse BEFORE any bytes move. The caller leaves the
+    // report open (hasArtifact stays true) for sweepArtifactRepairs.
+    const err = new Error('ARTIFACT_BUDGET_EXHAUSTED');
+    err.reason = 'ARTIFACT_BUDGET_EXHAUSTED';
+    err.elationStatus = 0;
+    throw err;
+  }
+  const startedAt = Date.now();
+  try {
+    return await callElation('printable:' + reportId, () => uploadArtifactOnce(file, reportId), {
+      attempts: ARTIFACT_ATTEMPTS,
+      // One printable attempt costs at most the artifact fetch deadline; the
+      // retry check charges that against the ARTIFACT sub-budget only.
+      callTimeoutMs: ARTIFACT_FETCH_TIMEOUT_MS,
+      remainingFn: remainingArtifactMs,
+    });
+  } finally {
+    noteArtifactMs(Date.now() - startedAt);
+  }
 }
 
 
@@ -501,6 +592,7 @@ async function backfillPatient(db, FieldValue, bucket, elationPatientId, counter
     skippedNotAllowlisted: false, skippedNonActive: false, noPatientDoc: false,
     skippedRecordsDeferred: 0, alreadyStored: 0, wouldStore: 0,
     artifactsStored: 0, artifactErrors: 0, artifactSkippedUnclaimed: 0, artifactsAlreadyPresent: 0,
+    artifactsDeferredBudget: 0,
     errorDetails: [], lastError: null,
   };
 
@@ -802,6 +894,16 @@ async function backfillPatient(db, FieldValue, bucket, elationPatientId, counter
               log('backfillElationReports', 'artifact-stored', { elationPatientId: pid, reportId, bytes });
             }
           } catch (artErr) {
+            if (artErr && artErr.reason === 'ARTIFACT_BUDGET_EXHAUSTED') {
+              // NOT a failure: the doc is stored, hasArtifact stays true, and no
+              // bytes were fetched. sweepArtifactRepairs picks it up.
+              pc.artifactsDeferredBudget = (pc.artifactsDeferredBudget || 0) + 1;
+              counters.artifactsDeferredBudget += 1;
+              log('backfillElationReports', 'artifact-deferred-budget', {
+                elationPatientId: pid, reportId, artifactBudgetMs: ARTIFACT_BUDGET_MS,
+              });
+              continue;
+            }
             // Coverage-gate era: do NOT flip hasArtifact:false. Delete any partial or
             // corrupt object and leave hasArtifact:true — the audit sees an honest MISS
             // and sweepArtifactRepairs heals it (or parks + alerts after MAX_FAILURES).
@@ -896,6 +998,7 @@ async function backfillElationReports(db, FieldValue, elationPatientIds, options
     stored: 0, skippedDeleted: 0, skippedUnsigned: 0, notFound: 0, mismatched: 0, unresolved: 0, errors: 0,
     skippedRecordsDeferred: 0, skippedExcludedType: 0, alreadyStored: 0, wouldStore: 0,
     artifactsStored: 0, artifactErrors: 0, artifactSkippedUnclaimed: 0, artifactsAlreadyPresent: 0,
+    artifactsDeferredBudget: 0,
     reportTypeCensus: {},
   };
 
@@ -908,8 +1011,23 @@ async function backfillElationReports(db, FieldValue, elationPatientIds, options
   const concurrency = Math.max(1, Math.min(10, Number(opts.concurrency) || 1));
   let cursor = 0;
 
+  // INSTANCE-CAP GUARD (2026-08-30). Enforced at EVERY PATIENT START, not once
+  // per chunk: with chunkSize > 1 a per-chunk check still overshoots the 540s
+  // gen1 cap and manufactures a zombie run. Ids never started are returned in
+  // `notStarted` so the wrapper keeps them pending and pauses cleanly.
+  const instanceDeadlineAt = Number.isFinite(Number(opts.instanceDeadlineAt))
+    ? Number(opts.instanceDeadlineAt)
+    : null;
+  const notStarted = [];
+  let stoppedEarly = false;
+
   async function worker() {
     while (cursor < ids.length) {
+      if (instanceDeadlineAt && Date.now() + PATIENT_START_BUDGET_MS > instanceDeadlineAt) {
+        stoppedEarly = true;
+        while (cursor < ids.length) notStarted.push(ids[cursor++]);
+        return;
+      }
       const id = ids[cursor++];
 
       // One checkpoint per id, whoever gets there first: the in-band call at the
@@ -981,6 +1099,8 @@ async function backfillElationReports(db, FieldValue, elationPatientIds, options
   return {
     counters,
     perPatient,
+    stoppedEarly,
+    notStarted,
     reportTypeCensus: Object.values(counters.reportTypeCensus).sort((a, b) => b.count - a.count),
   };
 }

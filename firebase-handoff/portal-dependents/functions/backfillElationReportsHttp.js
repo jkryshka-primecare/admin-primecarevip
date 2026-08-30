@@ -77,6 +77,10 @@ const RUNS_COLLECTION = 'backfill_runs';
 //      The timer is cleared on every exit path (complete / pause / error).
 const INSTANCE_MAX_MS = 540 * 1000;   // must match runWith.timeoutSeconds
 const SOFT_BUDGET_MS = 500 * 1000;    // stop starting new work here
+// Hard gen1 instance cap and the reserve kept for the pause/checkpoint writes.
+// The runner refuses to START a patient whose 420s budget could cross this,
+// so a chunk of N never overshoots the cap the way a per-chunk-only check did.
+const FINALIZE_RESERVE_MS = Number(process.env.BACKFILL_FINALIZE_RESERVE_MS || 25000);
 const LEASE_TTL_MS = 120 * 1000;      // renewed by the heartbeat, not by work
 const HEARTBEAT_MS = 30 * 1000;       // lease renewal cadence while driveRun is active
 const INSTANCE_ID = `${process.env.K_REVISION || 'local'}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
@@ -310,6 +314,8 @@ async function driveRun(runId, opts) {
           storeMedicalRecords: opts.storeMedicalRecords,
           excludeReportTypes: opts.excludeReportTypes,
           concurrency: opts.concurrency,
+          // Per-PATIENT instance-cap guard (see INSTANCE_MAX_MS).
+          instanceDeadlineAt: startedAtMs + INSTANCE_MAX_MS - FINALIZE_RESERVE_MS,
           // Per-completed-id checkpoint (go-ahead item 4).
           onPatientComplete: async (pc) => {
             done.push(pc.elationPatientId);
@@ -327,7 +333,10 @@ async function driveRun(runId, opts) {
       census = mergeCensus(census, result.counters.reportTypeCensus);
       failed = failed.concat(derivedFailures(result.perPatient)).slice(0, 200);
 
-      pending = pending.filter((id) => !done.includes(id) && !chunk.includes(id));
+      // Ids the runner never STARTED (instance-cap guard) stay pending.
+      const notStarted = Array.isArray(result.notStarted) ? result.notStarted : [];
+      pending = pending.filter((id) => !done.includes(id)
+        && (!chunk.includes(id) || notStarted.includes(id)));
 
       await runRef.set({
         counters,
@@ -337,6 +346,29 @@ async function driveRun(runId, opts) {
         updatedAt: FieldValue.serverTimestamp(),
         ...renewLease(),
       }, { merge: true });
+
+      // The runner stopped starting patients because the next one could not
+      // finish inside the instance cap: pause now with the cursor intact
+      // instead of looping into a chunk that would be SIGKILLed mid-flight.
+      if (result.stoppedEarly && pending.length) {
+        stopHeartbeat(); stopBackoffBrake();
+        await runRef.set({
+          status: 'paused',
+          pausedAt: FieldValue.serverTimestamp(),
+          pauseReason: 'INSTANCE_BUDGET_REACHED',
+          counters,
+          reportTypeCensus: census,
+          failed,
+          pending,
+          leaseOwner: null,
+          leaseExpiresAt: 0,
+          updatedAt: FieldValue.serverTimestamp(),
+        }, { merge: true });
+        log('backfillElationReports', 'paused', {
+          runId, remaining: pending.length, reason: 'INSTANCE_BUDGET_REACHED',
+        });
+        return;
+      }
     }
 
     stopHeartbeat(); stopBackoffBrake();   // no renewal may race the terminal write
