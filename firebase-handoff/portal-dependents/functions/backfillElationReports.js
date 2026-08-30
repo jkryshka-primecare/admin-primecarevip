@@ -124,16 +124,20 @@ const ARTIFACT_BUDGET_MS = Math.max(0, Number(process.env.BACKFILL_ARTIFACT_BUDG
 // budget-starved patient into a cascade of ELATION_JSON_TIMEOUT-after-1000ms
 // refetch failures. Below floor + margin we do not issue the call at all: it is
 // a logged, counted skip instead of a guaranteed timeout.
-// What the instance-cap guard CHARGES for one not-yet-started patient. Defaults
-// to the full worst-case budget (safe: a started patient can never be
-// SIGKILLed mid-flight). That is deliberately conservative — at 420s only the
-// first ~95s of a 540s instance may start patients — so it is env-tunable:
-// with the 60s/1-attempt artifact ceiling a realistic patient is well under
-// 120s, and BACKFILL_PATIENT_START_BUDGET_MS=150000 buys far more throughput
-// per cycle with no code change. Never set it above BACKFILL_PATIENT_BUDGET_MS
-// expecting safety.
+// What the instance-cap guard CHARGES for one not-yet-started patient. This
+// MUST be >= PATIENT_BUDGET_MS or the SIGKILL guarantee breaks: a patient
+// started with less headroom than its own worst-case budget can still be
+// running when the 540s instance cap kills it, which is exactly the zombie
+// this guard exists to prevent. The Math.max below ENFORCES the invariant —
+// an operator override can only ever raise it. Never set it BELOW
+// BACKFILL_PATIENT_BUDGET_MS.
+//
+// If cycle utilisation is the concern, the safe lever is to lower
+// BACKFILL_PATIENT_BUDGET_MS to the true per-patient worst case (with the
+// 60s/1-attempt artifact ceiling, ~180s is realistic) and leave the start
+// budget equal to it. Do NOT split the two.
 const PATIENT_START_BUDGET_MS = Math.max(
-  1000,
+  PATIENT_BUDGET_MS,
   Number(process.env.BACKFILL_PATIENT_START_BUDGET_MS || PATIENT_BUDGET_MS),
 );
 const JSON_MIN_TIMEOUT_MS = Math.max(1000, Number(process.env.ELATION_JSON_MIN_TIMEOUT_MS || 10000));
