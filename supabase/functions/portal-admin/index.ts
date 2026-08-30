@@ -1284,16 +1284,25 @@ Deno.serve(async (req) => {
   const started = Date.now();
 
   // GUARDRAIL 3 — attribution before action. A bulk apply does not happen
-  // unless the human is on the record first.
-  if (bulkApply || isReset) {
+  // unless the human is on the record first. The sweep's start/reset are
+  // writes that drive PHI fetches, so they sit in the same gate; a status
+  // poll does not.
+  const sweepWrite = isSweep && !sweepStatusOnly;
+  if (bulkApply || isReset || sweepWrite) {
     const attributed = await recordActionStrict(ctx, {
-      action: isReset ? "backfillRun:reset" : `${action}:apply`,
+      action: isReset
+        ? "backfillRun:reset"
+        : sweepWrite
+          ? `artifactSweep:${action === "sweepStart" ? "start" : "reset"}`
+          : `${action}:apply`,
       reason,
       after: {
         limit: upstreamPayload.limit ?? null,
         cursor: upstreamPayload.cursor ?? null,
         runId: upstreamPayload.runId ?? null,
-        force: isReset ? body.force === true : undefined,
+        force: isReset || sweepWrite ? body.force === true : undefined,
+        maxItems: sweepWrite ? (sweepMaxItems || null) : undefined,
+        clearGlobalPause: action === "sweepReset" ? body.clearGlobalPause === true : undefined,
         patientIds: action === "backfillMinorReports" ? minorIds : undefined,
         patientCount: action === "backfillMinorReports" ? minorIds.length : undefined,
         cohort: action === "backfillMinorReports" ? cohort : undefined,
