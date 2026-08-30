@@ -153,9 +153,9 @@ export default function AppLayout({
 }) {
   const { signOut, user } = useAuth();
 
-  // HIPAA-style 15-minute idle auto-logout.
-  useIdleTimeout(15 * 60 * 1000, async () => {
-    toast.info("Signed out for inactivity (15 min).");
+  // HIPAA-style 30-minute idle auto-logout.
+  useIdleTimeout(30 * 60 * 1000, async () => {
+    toast.info("Signed out for inactivity (30 min).");
     await signOut();
   });
 
