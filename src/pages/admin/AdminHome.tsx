@@ -8,6 +8,7 @@ import ArtifactCoveragePanel from "@/components/admin/ArtifactCoveragePanel";
 import UnclaimedGuardiansPanel from "@/components/admin/UnclaimedGuardiansPanel";
 import BackfillRunner from "@/components/admin/BackfillRunner";
 import ArtifactSweepRunner from "@/components/admin/ArtifactSweepRunner";
+import AutoResumeDriver from "@/components/admin/AutoResumeDriver";
 import GuardianLinkLoader from "@/components/admin/GuardianLinkLoader";
 import GoLiveChecklist from "@/components/admin/GoLiveChecklist";
 import MemberBillingPanel from "@/components/firestore/MemberBillingPanel";
@@ -64,6 +65,7 @@ export default function AdminHome() {
             <GuardianLinkLoader />
             <BackfillRunner />
             <ArtifactSweepRunner />
+            <AutoResumeDriver />
 
           </div>
         )}

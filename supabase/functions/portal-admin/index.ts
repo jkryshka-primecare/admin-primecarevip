@@ -38,7 +38,11 @@ type Action =
   | "reset"
   | "sweepStart"
   | "sweepStatus"
-  | "sweepReset";
+  | "sweepReset"
+  | "driverStart"
+  | "driverStatus"
+  | "driverStop"
+  | "driverResume";
 
 const FUNCTION_BY_ACTION: Record<Action, string> = {
   get: "adminGetPortalAccess",
@@ -64,6 +68,13 @@ const FUNCTION_BY_ACTION: Record<Action, string> = {
   sweepStart: "adminRunArtifactRepairSweep",
   sweepStatus: "adminRunArtifactRepairSweep",
   sweepReset: "adminRunArtifactRepairSweep",
+  // Auto-resume driver (#466). It orchestrates the backfill -> sweep ->
+  // coverage-audit sequence unattended; the console arms it, watches it, and
+  // stops it. Every unit of work still happens in the functions above.
+  driverStart: "adminRunBackfillDriver",
+  driverStatus: "adminRunBackfillDriver",
+  driverStop: "adminRunBackfillDriver",
+  driverResume: "adminRunBackfillDriver",
 };
 
 const MUTATIONS: Action[] = ["invite", "revoke", "setAccess", "provision"];
@@ -101,6 +112,15 @@ const FAN_OUT: Action[] = ["linkGuardians"];
 /** Artifact-repair sweep control actions (no patient id, run-scoped). */
 const SWEEP_ACTIONS: Action[] = ["sweepStart", "sweepStatus", "sweepReset"];
 
+/**
+ * Auto-resume driver control. `driverStart` and `driverResume` arm an
+ * UNATTENDED PHI migration, so they carry the apply tier (super_admin + written
+ * reason + attribution first). `driverStop` is the kill switch: admin is enough
+ * to STOP something — never gate a stop behind a higher tier than the start —
+ * but it is still attributed. `driverStatus` is a read.
+ */
+const DRIVER_ACTIONS: Action[] = ["driverStart", "driverStatus", "driverStop", "driverResume"];
+
 /** Actions that act on a set of members rather than a single patient. */
 const BATCH_ACTIONS: Action[] = [
   "provision",
@@ -109,6 +129,7 @@ const BATCH_ACTIONS: Action[] = [
   "smoke",
   "unclaimedGuardians",
   ...SWEEP_ACTIONS,
+  ...DRIVER_ACTIONS,
   ...BULK_MIGRATIONS,
 ];
 
@@ -926,6 +947,46 @@ Deno.serve(async (req) => {
     }
   }
 
+  /**
+   * Auto-resume driver control (#466).
+   *   - `driverStatus` is a read: admin, no reason, no audit row.
+   *   - `driverStart` / `driverResume` arm an UNATTENDED PHI migration, so they
+   *     carry the apply tier: super_admin resolved server-side from the verified
+   *     session, a written reason, and attribution BEFORE the upstream call.
+   *   - `driverStop` is the kill switch. Stopping is admin-level on purpose —
+   *     a stop must never be harder to reach than a start — and is attributed.
+   */
+  const isDriver = DRIVER_ACTIONS.includes(action);
+  const driverStatusOnly = action === "driverStatus";
+  let driverIds: string[] = [];
+  if (isDriver) {
+    if (!(await isAdmin(ctx))) {
+      return deny(403, "Only administrators can view or control the auto-resume driver.");
+    }
+    if (!driverStatusOnly) {
+      if (!reason) {
+        return deny(400, "A written reason is required for this driver action.");
+      }
+      if (action !== "driverStop" && !(await isSuperAdmin(ctx))) {
+        return deny(403, "Only a super administrator can arm the auto-resume driver.");
+      }
+      if (action === "driverStart") {
+        if (!RUN_ID_RE.test(String(body.backfillRunId ?? ""))) {
+          return deny(400, "A valid backfill runId is required to arm the driver.");
+        }
+        const raw = Array.isArray(body.patientIds) ? body.patientIds : [];
+        if (raw.length === 0) return deny(400, "The driver needs the cohort's patient ids.");
+        if (raw.length > MAX_MINOR_IDS_APPLY) return deny(400, "That cohort is too large.");
+        const seen = new Set<string>();
+        for (const item of raw) {
+          const id = String(item ?? "").trim();
+          if (!/^\d{6,25}$/.test(id)) return deny(400, "One of those patient ids is not valid.");
+          if (!seen.has(id)) { seen.add(id); driverIds.push(id); }
+        }
+      }
+    }
+  }
+
 
 
   const bulkApply = isBulk && !statusPoll && body.apply === true;
@@ -1276,6 +1337,38 @@ Deno.serve(async (req) => {
     }
   }
 
+  if (isDriver) {
+    // Driver wire shape. The Cloud Function takes exactly one of
+    // start | status | stop | resume; nothing else on the payload is read.
+    for (const k of Object.keys(upstreamPayload)) delete upstreamPayload[k];
+    upstreamPayload.action = action === "driverStart"
+      ? "start"
+      : action === "driverStop"
+        ? "stop"
+        : action === "driverResume"
+          ? "resume"
+          : "status";
+    upstreamPayload.actor = actor;
+    if (typeof body.driverId === "string" && /^[a-z0-9_-]{3,40}$/.test(body.driverId)) {
+      upstreamPayload.driverId = body.driverId;
+    }
+    if (!driverStatusOnly) upstreamPayload.reason = reason;
+    if (action === "driverStart") {
+      upstreamPayload.backfillRunId = String(body.backfillRunId);
+      upstreamPayload.patientIds = driverIds;
+      upstreamPayload.cohort = cohort;
+      if (body.options && typeof body.options === "object") upstreamPayload.options = body.options;
+      if (Number(body.maxCycles) > 0) upstreamPayload.maxCycles = Number(body.maxCycles);
+      if (Number(body.failedRateThreshold) > 0) {
+        upstreamPayload.failedRateThreshold = Number(body.failedRateThreshold);
+      }
+      if (Number(body.noProgressLimit) > 0) {
+        upstreamPayload.noProgressLimit = Number(body.noProgressLimit);
+      }
+      if (body.autoAudit === false) upstreamPayload.autoAudit = false;
+    }
+  }
+
 
 
 
@@ -1288,13 +1381,16 @@ Deno.serve(async (req) => {
   // writes that drive PHI fetches, so they sit in the same gate; a status
   // poll does not.
   const sweepWrite = isSweep && !sweepStatusOnly;
-  if (bulkApply || isReset || sweepWrite) {
+  const driverWrite = isDriver && !driverStatusOnly;
+  if (bulkApply || isReset || sweepWrite || driverWrite) {
     const attributed = await recordActionStrict(ctx, {
       action: isReset
         ? "backfillRun:reset"
         : sweepWrite
           ? `artifactSweep:${action === "sweepStart" ? "start" : "reset"}`
-          : `${action}:apply`,
+          : driverWrite
+            ? `autoResumeDriver:${action.replace("driver", "").toLowerCase()}`
+            : `${action}:apply`,
       reason,
       after: {
         limit: upstreamPayload.limit ?? null,
@@ -1303,6 +1399,8 @@ Deno.serve(async (req) => {
         force: isReset || sweepWrite ? body.force === true : undefined,
         maxItems: sweepWrite ? (sweepMaxItems || null) : undefined,
         clearGlobalPause: action === "sweepReset" ? body.clearGlobalPause === true : undefined,
+        driverPatientCount: action === "driverStart" ? driverIds.length : undefined,
+        backfillRunId: action === "driverStart" ? String(body.backfillRunId) : undefined,
         patientIds: action === "backfillMinorReports" ? minorIds : undefined,
         patientCount: action === "backfillMinorReports" ? minorIds.length : undefined,
         cohort: action === "backfillMinorReports" ? cohort : undefined,
@@ -1442,7 +1540,17 @@ Deno.serve(async (req) => {
       httpStatus: status,
       errorMessage,
     });
-  } else if (isSweep) {
+  } else if (driverWrite) {
+    await recordAction(ctx, {
+      elationPatientId: null,
+      action: `autoResumeDriver:${action.replace("driver", "").toLowerCase()}-result`,
+      reason,
+      after: payload,
+      ok,
+      httpStatus: status,
+      errorMessage,
+    });
+  } else if (isSweep || isDriver) {
     // Status poll: counters only, not audited per call.
   } else if (ADMIN_ONLY.includes(action)) {
     await recordAction(ctx, {
