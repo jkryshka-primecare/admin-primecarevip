@@ -595,6 +595,96 @@ export function useResetBackfillRun() {
 }
 
 // ---------------------------------------------------------------------------
+// Artifact repair sweep (large-tail drain).
+//
+// Same shape as the report-ingest run: start/resume is async upstream (202 +
+// runId), status is a counters-only poll, reset clears a zombie run doc.
+// Start and reset are super-admin + written reason, enforced and audited
+// server-side; status is admin-only and unaudited.
+// ---------------------------------------------------------------------------
+
+export type SweepReport = {
+  started?: boolean;
+  async?: boolean;
+  runId?: string;
+  status?: string;
+  maxItems?: number | null;
+  processed?: number;
+  counters?: Record<string, number>;
+  parkedThisRun?: number;
+  remaining?: number;
+  cursor?: string | null;
+  cycles?: number;
+  pauseReason?: string | null;
+  errorReason?: string | null;
+  leaseExpiresAt?: number;
+  leaseLive?: boolean;
+  resumable?: boolean;
+  staleLease?: boolean;
+  globalPaused?: boolean;
+  globalPauseReason?: string | null;
+  alreadyComplete?: boolean;
+  reset?: boolean;
+};
+
+/** Start a new sweep run, or resume one by passing its runId. */
+export function useRunArtifactSweep() {
+  return useMutation({
+    mutationFn: async (vars: { reason: string; runId?: string; maxItems?: number }) => {
+      const res = await callPortalAdmin<SweepReport>({
+        action: "sweepStart",
+        reason: vars.reason,
+        ...(vars.runId ? { runId: vars.runId } : {}),
+        ...(vars.maxItems ? { maxItems: vars.maxItems } : {}),
+      });
+      return res.data ?? ({} as SweepReport);
+    },
+  });
+}
+
+export function useArtifactSweepStatus(runId: string | null, enabled: boolean) {
+  const validRunId = typeof runId === "string" && RUN_ID_RE.test(runId.trim());
+  return useQuery({
+    queryKey: ["portal-admin", "artifact-sweep-run", runId],
+    enabled: validRunId && enabled,
+    retry: false,
+    refetchInterval: (q) => (validRunId && enabled && !q.state.error ? 10_000 : false),
+    queryFn: async () => {
+      const res = await callPortalAdmin<SweepReport>({
+        action: "sweepStatus",
+        runId: (runId ?? "").trim(),
+      });
+      return res.data ?? ({} as SweepReport);
+    },
+  });
+}
+
+export function useResetArtifactSweep() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (vars: {
+      runId: string;
+      reason: string;
+      force?: boolean;
+      clearGlobalPause?: boolean;
+    }) => {
+      const res = await callPortalAdmin<SweepReport>({
+        action: "sweepReset",
+        runId: vars.runId,
+        reason: vars.reason,
+        ...(vars.force ? { force: true } : {}),
+        ...(vars.clearGlobalPause ? { clearGlobalPause: true } : {}),
+      });
+      return res.data ?? ({} as SweepReport);
+    },
+    onSuccess: (_d, vars) => {
+      qc.invalidateQueries({ queryKey: ["portal-admin", "artifact-sweep-run", vars.runId] });
+    },
+  });
+}
+
+
+// ---------------------------------------------------------------------------
 // Release 2b Step 1 — guardian link loader (console replacement for
 // scripts/load-guardian-links.js). The CSV is sent as raw text and parsed
 // server-side; nothing about authority is read from it.

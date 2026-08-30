@@ -35,7 +35,10 @@ type Action =
   | "backfillArtifacts"
   | "backfillMinorReports"
   | "linkGuardians"
-  | "reset";
+  | "reset"
+  | "sweepStart"
+  | "sweepStatus"
+  | "sweepReset";
 
 const FUNCTION_BY_ACTION: Record<Action, string> = {
   get: "adminGetPortalAccess",
@@ -55,6 +58,12 @@ const FUNCTION_BY_ACTION: Record<Action, string> = {
   // authenticated path — a raw gcloud identity token cannot satisfy
   // `requireAdminCaller`, which wants a Firebase super_admin ID token.
   reset: "backfillElationReports",
+  // Artifact repair sweep (large-tail drain). Same run-doc/lease/heartbeat
+  // durability model as the report ingest, and every artifact fetch goes
+  // through the one process-wide Elation gate.
+  sweepStart: "adminRunArtifactRepairSweep",
+  sweepStatus: "adminRunArtifactRepairSweep",
+  sweepReset: "adminRunArtifactRepairSweep",
 };
 
 const MUTATIONS: Action[] = ["invite", "revoke", "setAccess", "provision"];
@@ -89,6 +98,9 @@ const BULK_MIGRATIONS: Action[] = [
  */
 const FAN_OUT: Action[] = ["linkGuardians"];
 
+/** Artifact-repair sweep control actions (no patient id, run-scoped). */
+const SWEEP_ACTIONS: Action[] = ["sweepStart", "sweepStatus", "sweepReset"];
+
 /** Actions that act on a set of members rather than a single patient. */
 const BATCH_ACTIONS: Action[] = [
   "provision",
@@ -96,6 +108,7 @@ const BATCH_ACTIONS: Action[] = [
   "runAudit",
   "smoke",
   "unclaimedGuardians",
+  ...SWEEP_ACTIONS,
   ...BULK_MIGRATIONS,
 ];
 
@@ -876,6 +889,45 @@ Deno.serve(async (req) => {
     }
   }
 
+  /**
+   * Artifact-repair sweep control.
+   *   - `sweepStatus` reads run counters only: admin, no reason, no audit row.
+   *   - `sweepStart` (start OR resume) and `sweepReset` write migration state
+   *     and drive PHI fetches, so they carry the apply tier: super_admin
+   *     resolved server-side, a written reason, and attribution first.
+   */
+  const isSweep = SWEEP_ACTIONS.includes(action);
+  const sweepStatusOnly = action === "sweepStatus";
+  let sweepMaxItems = 0;
+  if (isSweep) {
+    if (!(await isAdmin(ctx))) {
+      return deny(403, "Only administrators can drive the artifact repair sweep.");
+    }
+    if (sweepStatusOnly) {
+      if (!RUN_ID_RE.test(runId)) {
+        return deny(400, "A valid runId is required to check sweep progress.");
+      }
+    } else {
+      if (!(await isSuperAdmin(ctx))) {
+        return deny(403, "Only a super administrator can run or reset the artifact repair sweep.");
+      }
+      if (!reason) {
+        return deny(400, "A written reason is required for this sweep action.");
+      }
+      if (action === "sweepReset" && !RUN_ID_RE.test(runId)) {
+        return deny(400, "A valid runId is required to reset a sweep run.");
+      }
+      // A start may omit runId (upstream mints one); a resume supplies it.
+      if (action === "sweepStart" && runId && !RUN_ID_RE.test(runId)) {
+        return deny(400, "That runId is not valid.");
+      }
+      const raw = Number(body.maxItems);
+      sweepMaxItems = Number.isFinite(raw) && raw > 0 ? Math.min(Math.floor(raw), 5000) : 0;
+    }
+  }
+
+
+
   const bulkApply = isBulk && !statusPoll && body.apply === true;
   let minorIds: string[] = [];
   // Report-ingest cohort switch. The Cloud Function wrapper is the authority
@@ -1203,22 +1255,54 @@ Deno.serve(async (req) => {
     upstreamPayload.actor = actor;
   }
 
+  if (isSweep) {
+    // Sweep wire shape. The Cloud Function takes exactly one of
+    // start | status | reset; nothing else on the payload is read.
+    for (const k of Object.keys(upstreamPayload)) delete upstreamPayload[k];
+    upstreamPayload.action = action === "sweepStart"
+      ? "start"
+      : action === "sweepReset"
+        ? "reset"
+        : "status";
+    upstreamPayload.actor = actor;
+    if (runId) upstreamPayload.runId = runId;
+    if (!sweepStatusOnly) upstreamPayload.reason = reason;
+    if (action === "sweepStart" && sweepMaxItems) upstreamPayload.maxItems = sweepMaxItems;
+    if (action === "sweepReset") {
+      if (body.force === true) upstreamPayload.force = true;
+      // The global circuit breaker is separate from the run doc: clearing it
+      // is always an explicit operator choice, never implied by a reset.
+      if (body.clearGlobalPause === true) upstreamPayload.clearGlobalPause = true;
+    }
+  }
+
+
+
 
   const fnName = FUNCTION_BY_ACTION[action];
   const url = `${FUNCTIONS_BASE}/${fnName}`;
   const started = Date.now();
 
   // GUARDRAIL 3 — attribution before action. A bulk apply does not happen
-  // unless the human is on the record first.
-  if (bulkApply || isReset) {
+  // unless the human is on the record first. The sweep's start/reset are
+  // writes that drive PHI fetches, so they sit in the same gate; a status
+  // poll does not.
+  const sweepWrite = isSweep && !sweepStatusOnly;
+  if (bulkApply || isReset || sweepWrite) {
     const attributed = await recordActionStrict(ctx, {
-      action: isReset ? "backfillRun:reset" : `${action}:apply`,
+      action: isReset
+        ? "backfillRun:reset"
+        : sweepWrite
+          ? `artifactSweep:${action === "sweepStart" ? "start" : "reset"}`
+          : `${action}:apply`,
       reason,
       after: {
         limit: upstreamPayload.limit ?? null,
         cursor: upstreamPayload.cursor ?? null,
         runId: upstreamPayload.runId ?? null,
-        force: isReset ? body.force === true : undefined,
+        force: isReset || sweepWrite ? body.force === true : undefined,
+        maxItems: sweepWrite ? (sweepMaxItems || null) : undefined,
+        clearGlobalPause: action === "sweepReset" ? body.clearGlobalPause === true : undefined,
         patientIds: action === "backfillMinorReports" ? minorIds : undefined,
         patientCount: action === "backfillMinorReports" ? minorIds.length : undefined,
         cohort: action === "backfillMinorReports" ? cohort : undefined,
@@ -1348,6 +1432,18 @@ Deno.serve(async (req) => {
       httpStatus: status,
       errorMessage,
     });
+  } else if (sweepWrite) {
+    await recordAction(ctx, {
+      elationPatientId: null,
+      action: `artifactSweep:${action === "sweepStart" ? "start" : "reset"}-result`,
+      reason,
+      after: payload,
+      ok,
+      httpStatus: status,
+      errorMessage,
+    });
+  } else if (isSweep) {
+    // Status poll: counters only, not audited per call.
   } else if (ADMIN_ONLY.includes(action)) {
     await recordAction(ctx, {
       elationPatientId: null,

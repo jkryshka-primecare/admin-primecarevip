@@ -7,6 +7,7 @@ import SeedDataPanel from "@/components/admin/SeedDataPanel";
 import ArtifactCoveragePanel from "@/components/admin/ArtifactCoveragePanel";
 import UnclaimedGuardiansPanel from "@/components/admin/UnclaimedGuardiansPanel";
 import BackfillRunner from "@/components/admin/BackfillRunner";
+import ArtifactSweepRunner from "@/components/admin/ArtifactSweepRunner";
 import GuardianLinkLoader from "@/components/admin/GuardianLinkLoader";
 import GoLiveChecklist from "@/components/admin/GoLiveChecklist";
 import MemberBillingPanel from "@/components/firestore/MemberBillingPanel";
@@ -62,6 +63,8 @@ export default function AdminHome() {
           <div className="space-y-4">
             <GuardianLinkLoader />
             <BackfillRunner />
+            <ArtifactSweepRunner />
+
           </div>
         )}
         {tab === "go-live" && <GoLiveChecklist />}
