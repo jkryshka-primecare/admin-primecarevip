@@ -619,8 +619,6 @@ async function backfillPatient(db, FieldValue, bucket, elationPatientId, counter
     }
   }
 
-
-
   // D-068 HARD containment gate.
   if (!isIngestAllowed(pid)) {
     counters.patientsSkippedNotAllowlisted += 1;
