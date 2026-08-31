@@ -600,6 +600,25 @@ async function backfillPatient(db, FieldValue, bucket, elationPatientId, counter
     errorDetails: [], lastError: null,
   };
 
+  // TEMPORARY (canary only — remove after the failed-rate-brake test).
+  // Sole activation path: env var DRIVER_FAULT_INJECT_PATIENT set AND exactly ===
+  // this patient's Elation id (string equality, no prefix/list/wildcard).
+  // Unset => this block is a no-op and behaviour is byte-identical to before.
+  if (process.env.DRIVER_FAULT_INJECT_PATIENT) {
+    log('backfillElationReports', 'DRIVER_FAULT_INJECT active', {
+      target: String(process.env.DRIVER_FAULT_INJECT_PATIENT), elationPatientId: pid,
+    });
+    if (String(process.env.DRIVER_FAULT_INJECT_PATIENT) === pid) {
+      const err = new Error('DRIVER_FAULT_INJECT: forced patient-level failure');
+      err.reason = 'DRIVER_FAULT_INJECT';
+      counters.patientsErrored += 1;
+      pc.errors += 1;
+      noteError(pc, 'fault-inject', err);
+      logError('backfillElationReports', 'fault-inject-failed', err, { elationPatientId: pid });
+      return pc; // terminal patient-level failure — same branch shape as list-failed
+    }
+  }
+
   // D-068 HARD containment gate.
   if (!isIngestAllowed(pid)) {
     counters.patientsSkippedNotAllowlisted += 1;
