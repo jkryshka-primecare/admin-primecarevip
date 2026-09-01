@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import AppLayout from "@/components/AppLayout";
 import UsersAdmin from "@/components/admin/UsersAdmin";
 import PhiAuditLog from "@/components/admin/PhiAuditLog";
@@ -31,8 +31,17 @@ const tabs = [
 
 type TabId = (typeof tabs)[number]["id"];
 
+const TAB_STORAGE_KEY = "admin.activeTab";
+
 export default function AdminHome() {
-  const [tab, setTab] = useState<TabId>("users");
+  const [tab, setTab] = useState<TabId>(() => {
+    const saved = sessionStorage.getItem(TAB_STORAGE_KEY);
+    return tabs.some((t) => t.id === saved) ? (saved as TabId) : "users";
+  });
+
+  useEffect(() => {
+    sessionStorage.setItem(TAB_STORAGE_KEY, tab);
+  }, [tab]);
 
   return (
     <AppLayout title="Administration">
