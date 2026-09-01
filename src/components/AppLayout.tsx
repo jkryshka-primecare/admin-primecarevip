@@ -153,9 +153,11 @@ export default function AppLayout({
 }) {
   const { signOut, user } = useAuth();
 
-  // HIPAA-style 30-minute idle auto-logout.
-  useIdleTimeout(30 * 60 * 1000, async () => {
-    toast.info("Signed out for inactivity (30 min).");
+  // Idle auto-logout. Long-running admin jobs (migrations/backfills) can run
+  // for a while with no input, so the window is generous.
+  const IDLE_MINUTES = 120;
+  useIdleTimeout(IDLE_MINUTES * 60 * 1000, async () => {
+    toast.info(`Signed out for inactivity (${IDLE_MINUTES} min).`);
     await signOut();
   });
 
