@@ -33,13 +33,12 @@ export default function PortalAccessTriage({ rows }: { rows: ReconRow[] }) {
     const needle = query.trim().toLowerCase();
     if (!needle) return [];
     return rows
-      .filter((row) => row.elationId)
       .filter((row) =>
         [row.name, row.email, row.phone, row.hintId, row.elationId, row.dob].some(
           (value) => value && String(value).toLowerCase().includes(needle),
         ),
       )
-      .slice(0, 8);
+      .slice(0, 12);
   }, [rows, query]);
 
   const runSearch = () => {
@@ -49,13 +48,14 @@ export default function PortalAccessTriage({ rows }: { rows: ReconRow[] }) {
   };
 
 
-  const selected = rows.find((row) => row.elationId === selectedId) ?? null;
-  const { snapshot, loading, error, refetch } = usePortalAccess(selectedId);
-  const { issueInvite, revokeInvite, setAccess } = usePortalMutations(selectedId);
+  const selected = rows.find((row) => row.key === selectedId) ?? null;
+  const { snapshot, loading, error, refetch } = usePortalAccess(selected?.elationId ?? null);
+  const { issueInvite, revokeInvite, setAccess } = usePortalMutations(selected?.elationId ?? null);
   const busy = issueInvite.isPending || revokeInvite.isPending || setAccess.isPending;
   const suspended = snapshot?.access?.status === "suspended";
   const pendingInvite = snapshot?.inviteStatus === "pending";
   const needsInvite = snapshot?.inviteStatus === "none" || snapshot?.inviteStatus === "revoked";
+
 
   const clearSelection = () => {
     setSelectedId(null);
@@ -156,7 +156,7 @@ export default function PortalAccessTriage({ rows }: { rows: ReconRow[] }) {
                 type="button"
                 variant="ghost"
                 className="h-auto w-full justify-start rounded-none px-3 py-2 text-left first:rounded-t-md last:rounded-b-md"
-                onClick={() => setSelectedId(row.elationId)}
+                onClick={() => setSelectedId(row.key)}
               >
                 <span className="min-w-0 flex-1">
                   <span className="block truncate text-xs font-medium">{row.name}</span>
@@ -165,7 +165,7 @@ export default function PortalAccessTriage({ rows }: { rows: ReconRow[] }) {
                   </span>
                 </span>
                 <Badge variant="secondary" className="ml-2 shrink-0 text-[10px]">
-                  {formatState(row.portalStatus)}
+                  {row.elationId ? formatState(row.portalStatus) : "no portal record"}
                 </Badge>
               </Button>
             ))}
@@ -197,14 +197,24 @@ export default function PortalAccessTriage({ rows }: { rows: ReconRow[] }) {
               </div>
             </div>
 
-            {error && (
+            {!selected.elationId && (
+              <div className="flex items-start gap-2 rounded-md border border-border bg-muted/40 p-2.5 text-xs text-muted-foreground">
+                <ShieldAlert className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+                <span>
+                  This member has no portal record yet, so there is nothing to invite or restore. Provision them from the
+                  “Ready to provision” exception list below first.
+                </span>
+              </div>
+            )}
+
+            {selected.elationId && error && (
               <div className="flex items-start gap-2 rounded-md border border-destructive/40 bg-destructive/10 p-2.5 text-xs text-destructive">
                 <AlertCircle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
                 <span>{error}</span>
               </div>
             )}
 
-            {loading ? (
+            {!selected.elationId ? null : loading ? (
               <div className="flex items-center gap-2 py-3 text-xs text-muted-foreground">
                 <Loader2 className="h-4 w-4 animate-spin" /> Checking the live portal state…
               </div>
