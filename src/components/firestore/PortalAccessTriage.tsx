@@ -43,9 +43,10 @@ export default function PortalAccessTriage({ rows }: { rows: ReconRow[] }) {
 
   const selected = rows.find((row) => row.elationId === selectedId) ?? null;
   const { snapshot, loading, error, refetch } = usePortalAccess(selectedId);
-  const { issueInvite, setAccess } = usePortalMutations(selectedId);
-  const busy = issueInvite.isPending || setAccess.isPending;
+  const { issueInvite, revokeInvite, setAccess } = usePortalMutations(selectedId);
+  const busy = issueInvite.isPending || revokeInvite.isPending || setAccess.isPending;
   const suspended = snapshot?.access?.status === "suspended";
+  const pendingInvite = snapshot?.inviteStatus === "pending";
   const needsInvite = snapshot?.inviteStatus === "none" || snapshot?.inviteStatus === "revoked";
 
   const clearSelection = () => {
