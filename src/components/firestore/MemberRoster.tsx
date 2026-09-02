@@ -6,6 +6,7 @@ import {
   type ReconBucket,
 } from "@/hooks/useMemberReconciliation";
 import { useAuth } from "@/hooks/useAuth";
+import PortalAccessTriage from "@/components/firestore/PortalAccessTriage";
 import ProvisionMissingDialog from "@/components/firestore/ProvisionMissingDialog";
 import RosterExceptions from "@/components/firestore/RosterExceptions";
 import DependentMatches from "@/components/firestore/DependentMatches";
@@ -34,6 +35,7 @@ const FILTERS: { id: Filter; label: string }[] = [
   { id: "member_active", label: "Portal active" },
   { id: "member_invited", label: "Invited" },
   { id: "member_no_portal", label: "No portal record" },
+  { id: "locked_out", label: "Locked out" },
   { id: "portal_no_membership", label: "Former member" },
 ];
 
@@ -41,6 +43,7 @@ const BUCKET_TONE: Record<ReconBucket, string> = {
   member_active: "bg-success/15 text-success border-success/30",
   member_invited: "bg-accent/15 text-accent border-accent/30",
   member_no_portal: "bg-destructive/10 text-destructive border-destructive/30",
+  locked_out: "bg-destructive/10 text-destructive border-destructive/30",
   portal_no_membership: "bg-muted text-muted-foreground border-border",
 };
 
@@ -174,6 +177,8 @@ export default function MemberRoster() {
           </CardContent>
         </Card>
       )}
+
+      {!loading && !error && <PortalAccessTriage rows={rows} />}
 
       {!loading && !error && (
         <RosterExceptions missing={missingMembers} rows={rows} />

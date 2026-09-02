@@ -17,6 +17,7 @@ export type ReconBucket =
   | "member_active" // active member, portal claimed
   | "member_invited" // active member, invited but not claimed
   | "member_no_portal" // active member with no portal record at all
+  | "locked_out" // explicit revoked, expired, suspended, or locked state
   | "portal_no_membership"; // portal record with no active membership
 
 export type ReconRow = {
@@ -41,6 +42,7 @@ export const BUCKET_LABELS: Record<ReconBucket, string> = {
   member_active: "Member · portal active",
   member_invited: "Member · invited",
   member_no_portal: "Member · no portal record",
+  locked_out: "Member · locked out",
   portal_no_membership: "Former member · access retained",
 };
 
@@ -59,7 +61,11 @@ function portalName(doc: FirestoreDoc): string {
 
 function bucketForMember(member: HintMember, portal: FirestoreDoc | null): ReconBucket {
   if (!portal) return "member_no_portal";
-  return norm(portal.status) === "active" ? "member_active" : "member_invited";
+  const portalStatus = norm(portal.status);
+  if (["expired", "expired_or_revoked", "locked_out", "revoked", "suspended"].includes(portalStatus)) {
+    return "locked_out";
+  }
+  return portalStatus === "active" ? "member_active" : "member_invited";
 }
 
 export function useMemberReconciliation(enabled = true) {
@@ -147,6 +153,7 @@ export function useMemberReconciliation(enabled = true) {
       member_active: 0,
       member_invited: 0,
       member_no_portal: 0,
+      locked_out: 0,
       portal_no_membership: 0,
     };
     for (const r of rows) c[r.bucket] += 1;
@@ -164,11 +171,11 @@ export function useMemberReconciliation(enabled = true) {
 
   const totals = useMemo(() => {
     const activeMembers =
-      counts.member_active + counts.member_invited + counts.member_no_portal;
+      counts.member_active + counts.member_invited + counts.member_no_portal + counts.locked_out;
     const fixtures = firestore.docs.filter((d) => isFixtureDoc(d as Record<string, unknown>)).length;
     return {
       activeMembers,
-      withPortal: counts.member_active + counts.member_invited,
+      withPortal: counts.member_active + counts.member_invited + counts.locked_out,
       hintPatients: hint.members.length,
       portalRecords: firestore.docs.length - fixtures,
       fixturesExcluded: fixtures,

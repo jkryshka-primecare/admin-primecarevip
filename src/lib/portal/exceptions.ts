@@ -55,6 +55,7 @@ export type ExceptionListId =
   | "minors_held"
   | "identity_incomplete"
   | "ambiguous_identity"
+  | "locked_out"
   | "portal_no_membership";
 
 export type ExceptionList = {
@@ -94,6 +95,7 @@ export function buildExceptionLists(
   const minors: ReconRow[] = [];
   const incomplete: ReconRow[] = [];
   const ambiguous: ReconRow[] = [];
+  const lockedOut = allRows.filter((r) => r.bucket === "locked_out");
 
   for (const r of missing) {
     if (
@@ -152,6 +154,14 @@ export function buildExceptionLists(
       rows: ambiguous,
     },
     {
+      id: "locked_out",
+      label: "Locked out",
+      description:
+        "An active member has an explicit expired, revoked, suspended, or locked portal state. Review in Portal access triage; membership status does not remove access.",
+      blocking: false,
+      rows: lockedOut,
+    },
+    {
       id: "portal_no_membership",
       label: "Former members (access retained)",
       description:
@@ -159,7 +169,6 @@ export function buildExceptionLists(
       blocking: false,
       rows: lapsed,
     },
-
   ];
 }
 
