@@ -153,6 +153,7 @@ export function useMemberReconciliation(enabled = true) {
       member_active: 0,
       member_invited: 0,
       member_no_portal: 0,
+      locked_out: 0,
       portal_no_membership: 0,
     };
     for (const r of rows) c[r.bucket] += 1;
