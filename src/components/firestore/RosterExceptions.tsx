@@ -62,8 +62,7 @@ export default function RosterExceptions({
               Exception lists
             </CardTitle>
             <p className="mt-1 text-xs text-muted-foreground">
-              Every active member without a portal record, bucketed by why they can or
-              cannot be provisioned today.
+              Every active member needing review, bucketed by provisioning or portal-access state.
             </p>
           </div>
           <Button variant="outline" size="sm" onClick={exportAll}>
@@ -78,7 +77,7 @@ export default function RosterExceptions({
             <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
             <span>
               {blockingCount} member{blockingCount === 1 ? "" : "s"} need a human before
-              they can ever be provisioned — the resolver writes nothing for them.
+              they can be provisioned — the resolver writes nothing for them.
             </span>
           </div>
         )}
