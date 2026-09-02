@@ -165,7 +165,7 @@ export default function PortalAccessTriage({ rows }: { rows: ReconRow[] }) {
                   </span>
                 </span>
                 <Badge variant="secondary" className="ml-2 shrink-0 text-[10px]">
-                  {formatState(row.portalStatus)}
+                  {row.elationId ? formatState(row.portalStatus) : "no portal record"}
                 </Badge>
               </Button>
             ))}
