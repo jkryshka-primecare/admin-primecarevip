@@ -25,21 +25,29 @@ function formatDate(value: string | null | undefined): string {
 export default function PortalAccessTriage({ rows }: { rows: ReconRow[] }) {
   const { isAdmin } = useAuth();
   const [search, setSearch] = useState("");
+  const [query, setQuery] = useState("");
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [reason, setReason] = useState("");
 
   const matches = useMemo(() => {
-    const query = search.trim().toLowerCase();
-    if (!query) return [];
+    const needle = query.trim().toLowerCase();
+    if (!needle) return [];
     return rows
       .filter((row) => row.elationId)
       .filter((row) =>
         [row.name, row.email, row.phone, row.hintId, row.elationId, row.dob].some(
-          (value) => value && String(value).toLowerCase().includes(query),
+          (value) => value && String(value).toLowerCase().includes(needle),
         ),
       )
       .slice(0, 8);
-  }, [rows, search]);
+  }, [rows, query]);
+
+  const runSearch = () => {
+    setSelectedId(null);
+    setReason("");
+    setQuery(search);
+  };
+
 
   const selected = rows.find((row) => row.elationId === selectedId) ?? null;
   const { snapshot, loading, error, refetch } = usePortalAccess(selectedId);
