@@ -244,7 +244,7 @@ export default function PortalAccessTriage({ rows }: { rows: ReconRow[] }) {
                 <span className="min-w-0 flex-1">
                   <span className="block truncate text-xs font-medium">{row.name}</span>
                   <span className="block truncate text-[11px] text-muted-foreground">
-                    {[row.email, row.dob, row.elationId].filter(Boolean).join(" · ")}
+                    {[row.email, formatDob(row.dob), row.elationId].filter(Boolean).join(" · ")}
                   </span>
                 </span>
                 <Badge variant="secondary" className="ml-2 shrink-0 text-[10px]">
@@ -269,7 +269,7 @@ export default function PortalAccessTriage({ rows }: { rows: ReconRow[] }) {
               <div>
                 <p className="text-sm font-medium text-foreground">{selected.name}</p>
                 <p className="text-xs text-muted-foreground">
-                  {[selected.email, selected.dob, selected.elationId].filter(Boolean).join(" · ")}
+                  {[selected.email, formatDob(selected.dob), selected.elationId].filter(Boolean).join(" · ")}
                 </p>
               </div>
               <div className="flex items-center gap-1">
