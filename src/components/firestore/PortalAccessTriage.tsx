@@ -13,7 +13,7 @@ import { Textarea } from "@/components/ui/textarea";
 
 function formatState(value: string | null | undefined): string {
   if (!value) return "—";
-  return value.replaceAll("_", " ");
+  return value.replace(/_/g, " ");
 }
 
 function formatDate(value: string | null | undefined): string {
