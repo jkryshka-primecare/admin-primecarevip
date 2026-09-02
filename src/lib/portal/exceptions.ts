@@ -55,6 +55,7 @@ export type ExceptionListId =
   | "minors_held"
   | "identity_incomplete"
   | "ambiguous_identity"
+  | "locked_out"
   | "portal_no_membership";
 
 export type ExceptionList = {

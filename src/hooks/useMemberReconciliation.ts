@@ -17,6 +17,7 @@ export type ReconBucket =
   | "member_active" // active member, portal claimed
   | "member_invited" // active member, invited but not claimed
   | "member_no_portal" // active member with no portal record at all
+  | "locked_out" // explicit revoked, expired, suspended, or locked state
   | "portal_no_membership"; // portal record with no active membership
 
 export type ReconRow = {
@@ -41,6 +42,7 @@ export const BUCKET_LABELS: Record<ReconBucket, string> = {
   member_active: "Member · portal active",
   member_invited: "Member · invited",
   member_no_portal: "Member · no portal record",
+  locked_out: "Member · locked out",
   portal_no_membership: "Former member · access retained",
 };
 
@@ -59,7 +61,11 @@ function portalName(doc: FirestoreDoc): string {
 
 function bucketForMember(member: HintMember, portal: FirestoreDoc | null): ReconBucket {
   if (!portal) return "member_no_portal";
-  return norm(portal.status) === "active" ? "member_active" : "member_invited";
+  const portalStatus = norm(portal.status);
+  if (["expired", "expired_or_revoked", "locked_out", "revoked", "suspended"].includes(portalStatus)) {
+    return "locked_out";
+  }
+  return portalStatus === "active" ? "member_active" : "member_invited";
 }
 
 export function useMemberReconciliation(enabled = true) {
