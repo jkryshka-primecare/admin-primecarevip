@@ -25,21 +25,29 @@ function formatDate(value: string | null | undefined): string {
 export default function PortalAccessTriage({ rows }: { rows: ReconRow[] }) {
   const { isAdmin } = useAuth();
   const [search, setSearch] = useState("");
+  const [query, setQuery] = useState("");
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [reason, setReason] = useState("");
 
   const matches = useMemo(() => {
-    const query = search.trim().toLowerCase();
-    if (!query) return [];
+    const needle = query.trim().toLowerCase();
+    if (!needle) return [];
     return rows
       .filter((row) => row.elationId)
       .filter((row) =>
         [row.name, row.email, row.phone, row.hintId, row.elationId, row.dob].some(
-          (value) => value && String(value).toLowerCase().includes(query),
+          (value) => value && String(value).toLowerCase().includes(needle),
         ),
       )
       .slice(0, 8);
-  }, [rows, search]);
+  }, [rows, query]);
+
+  const runSearch = () => {
+    setSelectedId(null);
+    setReason("");
+    setQuery(search);
+  };
+
 
   const selected = rows.find((row) => row.elationId === selectedId) ?? null;
   const { snapshot, loading, error, refetch } = usePortalAccess(selectedId);
@@ -101,16 +109,44 @@ export default function PortalAccessTriage({ rows }: { rows: ReconRow[] }) {
         </p>
       </CardHeader>
       <CardContent className="space-y-3">
-        <div className="relative max-w-lg">
-          <Search className="absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
-          <Input
-            value={search}
-            onChange={(event) => setSearch(event.target.value)}
-            placeholder="Search a member to triage…"
-            className="h-9 pl-8 text-xs"
-            aria-label="Search portal access"
-          />
-        </div>
+        <form
+          className="flex max-w-2xl flex-wrap items-center gap-2"
+          onSubmit={(event) => {
+            event.preventDefault();
+            runSearch();
+          }}
+        >
+          <div className="relative min-w-[240px] flex-1">
+            <Search className="absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
+            <Input
+              value={search}
+              onChange={(event) => setSearch(event.target.value)}
+              placeholder="Search a member to triage…"
+              className="h-9 pl-8 text-xs"
+              aria-label="Search portal access"
+            />
+          </div>
+          <Button type="submit" size="sm" className="h-9" disabled={!search.trim()}>
+            <Search className="mr-1 h-3.5 w-3.5" />
+            Search
+          </Button>
+          {(query || search) && (
+            <Button
+              type="button"
+              size="sm"
+              variant="ghost"
+              className="h-9"
+              onClick={() => {
+                setSearch("");
+                setQuery("");
+                setSelectedId(null);
+                setReason("");
+              }}
+            >
+              Clear
+            </Button>
+          )}
+        </form>
 
         {matches.length > 0 && !selected && (
           <div className="divide-y rounded-md border border-border">
@@ -136,9 +172,13 @@ export default function PortalAccessTriage({ rows }: { rows: ReconRow[] }) {
           </div>
         )}
 
-        {search.trim() && matches.length === 0 && !selected && (
-          <p className="text-xs text-muted-foreground">No portal record matches that search.</p>
+        {query.trim() && matches.length === 0 && !selected && (
+          <p className="text-xs text-muted-foreground">
+            No member in the reconciled roster matches “{query.trim()}”. Try an email, date of birth, or Elation ID — if
+            nothing matches, this person has no portal record yet.
+          </p>
         )}
+
 
         {selected && (
           <div className="space-y-3 rounded-md border border-border p-3">
