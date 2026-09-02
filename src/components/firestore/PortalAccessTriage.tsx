@@ -204,20 +204,31 @@ export default function PortalAccessTriage({ rows }: { rows: ReconRow[] }) {
                       className="text-xs"
                     />
                     <div className="flex flex-wrap gap-2">
-                      {needsInvite && (
+                      {(needsInvite || pendingInvite) && (
                         <Button
                           size="sm"
                           disabled={!isAdmin || busy}
                           onClick={() => guard() && run(
-                            issueInvite.mutateAsync({
-                              reason,
-                              reissue: snapshot.inviteStatus === "pending",
-                            }),
-                            snapshot.inviteStatus === "revoked" ? "Replacement invite sent" : "Invite sent",
+                            issueInvite.mutateAsync({ reason, reissue: pendingInvite }),
+                            pendingInvite || snapshot.inviteStatus === "revoked" ? "Invite re-sent" : "Invite sent",
                           )}
                         >
                           {issueInvite.isPending ? <Loader2 className="mr-1 h-3.5 w-3.5 animate-spin" /> : <Mail className="mr-1 h-3.5 w-3.5" />}
-                          {snapshot.inviteStatus === "revoked" ? "Send replacement invite" : "Send invite"}
+                          {pendingInvite ? "Resend invite" : snapshot.inviteStatus === "revoked" ? "Send replacement invite" : "Send invite"}
+                        </Button>
+                      )}
+                      {pendingInvite && (
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          disabled={!isAdmin || busy}
+                          onClick={() => guard() && run(
+                            revokeInvite.mutateAsync({ reason }),
+                            "Invite revoked",
+                          )}
+                        >
+                          {revokeInvite.isPending ? <Loader2 className="mr-1 h-3.5 w-3.5 animate-spin" /> : <MailX className="mr-1 h-3.5 w-3.5" />}
+                          Revoke invite
                         </Button>
                       )}
                       {suspended && (
