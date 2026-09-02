@@ -156,7 +156,7 @@ export default function PortalAccessTriage({ rows }: { rows: ReconRow[] }) {
                 type="button"
                 variant="ghost"
                 className="h-auto w-full justify-start rounded-none px-3 py-2 text-left first:rounded-t-md last:rounded-b-md"
-                onClick={() => setSelectedId(row.elationId)}
+                onClick={() => setSelectedId(row.key)}
               >
                 <span className="min-w-0 flex-1">
                   <span className="block truncate text-xs font-medium">{row.name}</span>
