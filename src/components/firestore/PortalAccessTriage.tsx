@@ -1,5 +1,5 @@
 import { useMemo, useState } from "react";
-import { AlertCircle, CheckCircle2, Loader2, Mail, RefreshCw, Search, ShieldAlert, ShieldCheck } from "lucide-react";
+import { AlertCircle, CheckCircle2, Loader2, Mail, MailX, RefreshCw, Search, ShieldAlert, ShieldCheck } from "lucide-react";
 
 import type { ReconRow } from "@/hooks/useMemberReconciliation";
 import { useAuth } from "@/hooks/useAuth";
