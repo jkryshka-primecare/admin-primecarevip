@@ -249,7 +249,7 @@ export default function PortalAccessTriage({ rows }: { rows: ReconRow[] }) {
                   </>
                 )}
 
-                {!needsInvite && !suspended && (
+                {!needsInvite && !pendingInvite && !suspended && (
                   <div className="flex items-center gap-2 text-xs text-success">
                     <CheckCircle2 className="h-4 w-4" /> This account is claimed and currently active.
                   </div>
