@@ -171,11 +171,11 @@ export function useMemberReconciliation(enabled = true) {
 
   const totals = useMemo(() => {
     const activeMembers =
-      counts.member_active + counts.member_invited + counts.member_no_portal;
+      counts.member_active + counts.member_invited + counts.member_no_portal + counts.locked_out;
     const fixtures = firestore.docs.filter((d) => isFixtureDoc(d as Record<string, unknown>)).length;
     return {
       activeMembers,
-      withPortal: counts.member_active + counts.member_invited,
+      withPortal: counts.member_active + counts.member_invited + counts.locked_out,
       hintPatients: hint.members.length,
       portalRecords: firestore.docs.length - fixtures,
       fixturesExcluded: fixtures,
