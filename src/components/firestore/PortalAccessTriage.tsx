@@ -197,14 +197,24 @@ export default function PortalAccessTriage({ rows }: { rows: ReconRow[] }) {
               </div>
             </div>
 
-            {error && (
+            {!selected.elationId && (
+              <div className="flex items-start gap-2 rounded-md border border-border bg-muted/40 p-2.5 text-xs text-muted-foreground">
+                <ShieldAlert className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+                <span>
+                  This member has no portal record yet, so there is nothing to invite or restore. Provision them from the
+                  “Ready to provision” exception list below first.
+                </span>
+              </div>
+            )}
+
+            {selected.elationId && error && (
               <div className="flex items-start gap-2 rounded-md border border-destructive/40 bg-destructive/10 p-2.5 text-xs text-destructive">
                 <AlertCircle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
                 <span>{error}</span>
               </div>
             )}
 
-            {loading ? (
+            {!selected.elationId ? null : loading ? (
               <div className="flex items-center gap-2 py-3 text-xs text-muted-foreground">
                 <Loader2 className="h-4 w-4 animate-spin" /> Checking the live portal state…
               </div>
