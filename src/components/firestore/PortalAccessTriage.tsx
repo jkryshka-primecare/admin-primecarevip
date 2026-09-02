@@ -33,13 +33,12 @@ export default function PortalAccessTriage({ rows }: { rows: ReconRow[] }) {
     const needle = query.trim().toLowerCase();
     if (!needle) return [];
     return rows
-      .filter((row) => row.elationId)
       .filter((row) =>
         [row.name, row.email, row.phone, row.hintId, row.elationId, row.dob].some(
           (value) => value && String(value).toLowerCase().includes(needle),
         ),
       )
-      .slice(0, 8);
+      .slice(0, 12);
   }, [rows, query]);
 
   const runSearch = () => {
@@ -49,13 +48,14 @@ export default function PortalAccessTriage({ rows }: { rows: ReconRow[] }) {
   };
 
 
-  const selected = rows.find((row) => row.elationId === selectedId) ?? null;
-  const { snapshot, loading, error, refetch } = usePortalAccess(selectedId);
-  const { issueInvite, revokeInvite, setAccess } = usePortalMutations(selectedId);
+  const selected = rows.find((row) => row.key === selectedId) ?? null;
+  const { snapshot, loading, error, refetch } = usePortalAccess(selected?.elationId ?? null);
+  const { issueInvite, revokeInvite, setAccess } = usePortalMutations(selected?.elationId ?? null);
   const busy = issueInvite.isPending || revokeInvite.isPending || setAccess.isPending;
   const suspended = snapshot?.access?.status === "suspended";
   const pendingInvite = snapshot?.inviteStatus === "pending";
   const needsInvite = snapshot?.inviteStatus === "none" || snapshot?.inviteStatus === "revoked";
+
 
   const clearSelection = () => {
     setSelectedId(null);
