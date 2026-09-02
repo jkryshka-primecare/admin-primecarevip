@@ -19,7 +19,53 @@ function formatState(value: string | null | undefined): string {
 function formatDate(value: string | null | undefined): string {
   if (!value) return "—";
   const date = new Date(value);
-  return Number.isNaN(date.getTime()) ? value : date.toLocaleDateString();
+  return Number.isNaN(date.getTime()) ? value : date.toLocaleDateString("en-US");
+}
+
+/** Always render a date of birth as MM/DD/YYYY, whatever shape it arrives in. */
+function formatDob(value: string | null | undefined): string | null {
+  if (!value) return null;
+  const raw = String(value).trim();
+  const iso = raw.match(/^(\d{4})-(\d{2})-(\d{2})/);
+  if (iso) return `${iso[2]}/${iso[3]}/${iso[1]}`;
+  const us = raw.match(/^(\d{1,2})[/-](\d{1,2})[/-](\d{4})$/);
+  if (us) return `${us[1].padStart(2, "0")}/${us[2].padStart(2, "0")}/${us[3]}`;
+  return raw;
+}
+
+/** Digits-only DOB key so 10/29/1983, 1983-10-29 and 10-29-83 all compare equal. */
+function dobKey(value: string | null | undefined): string {
+  const formatted = formatDob(value);
+  if (!formatted) return "";
+  const digits = formatted.replace(/\D/g, "");
+  return digits.length >= 8 ? digits.slice(0, 8) : digits;
+}
+
+function levenshtein(a: string, b: string): number {
+  if (a === b) return 0;
+  if (!a.length || !b.length) return Math.max(a.length, b.length);
+  let prev = Array.from({ length: b.length + 1 }, (_, i) => i);
+  for (let i = 1; i <= a.length; i += 1) {
+    const row = [i];
+    for (let j = 1; j <= b.length; j += 1) {
+      row[j] = Math.min(
+        prev[j] + 1,
+        row[j - 1] + 1,
+        prev[j - 1] + (a[i - 1] === b[j - 1] ? 0 : 1),
+      );
+    }
+    prev = row;
+  }
+  return prev[b.length];
+}
+
+/** Allow one typo for short words, two for longer ones. */
+function closeEnough(token: string, word: string): boolean {
+  if (!token || !word) return false;
+  if (word.includes(token) || token.includes(word)) return true;
+  if (token.length < 4) return false;
+  const budget = token.length > 7 ? 2 : 1;
+  return levenshtein(token, word) <= budget;
 }
 
 export default function PortalAccessTriage({ rows }: { rows: ReconRow[] }) {
@@ -32,14 +78,51 @@ export default function PortalAccessTriage({ rows }: { rows: ReconRow[] }) {
   const matches = useMemo(() => {
     const needle = query.trim().toLowerCase();
     if (!needle) return [];
-    return rows
-      .filter((row) =>
-        [row.name, row.email, row.phone, row.hintId, row.elationId, row.dob].some(
-          (value) => value && String(value).toLowerCase().includes(needle),
-        ),
-      )
-      .slice(0, 12);
+    const needleDob = dobKey(needle);
+    const tokens = needle.split(/[\s,]+/).filter(Boolean);
+
+    const scored = rows
+      .map((row) => {
+        const fields = [row.name, row.email, row.phone, row.hintId, row.elationId]
+          .filter(Boolean)
+          .map((value) => String(value).toLowerCase());
+        const rowDob = dobKey(row.dob);
+        const haystack = fields.join(" ");
+        let score = 0;
+
+        // Exact-ish whole-string hits rank highest.
+        if (haystack.includes(needle)) score += 100;
+        if (needleDob.length === 8 && rowDob && rowDob === needleDob) score += 100;
+
+        // Every token must land somewhere: exact substring, or a close (typo-tolerant) word.
+        const words = haystack.split(/[^a-z0-9@.]+/).filter(Boolean);
+        const allTokens = tokens.every((token) => {
+          const tokenDob = dobKey(token);
+          if (tokenDob.length === 8 && rowDob === tokenDob) {
+            score += 40;
+            return true;
+          }
+          if (haystack.includes(token)) {
+            score += 20;
+            return true;
+          }
+          if (words.some((word) => closeEnough(token, word))) {
+            score += 8;
+            return true;
+          }
+          return false;
+        });
+
+        return allTokens && score > 0 ? { row, score } : null;
+      })
+      .filter((entry): entry is { row: ReconRow; score: number } => entry !== null);
+
+    return scored
+      .sort((a, b) => b.score - a.score || a.row.name.localeCompare(b.row.name))
+      .slice(0, 12)
+      .map((entry) => entry.row);
   }, [rows, query]);
+
 
   const runSearch = () => {
     setSelectedId(null);
