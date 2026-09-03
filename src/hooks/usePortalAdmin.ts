@@ -193,15 +193,17 @@ export function usePortalMutations(elationPatientId: string | null) {
     qc.invalidateQueries({ queryKey: ["portal-admin", "access", elationPatientId] });
 
   const issueInvite = useMutation({
-    mutationFn: (vars: { reason: string; reissue?: boolean }) =>
+    mutationFn: (vars: { reason: string; reissue?: boolean; resetClaim?: boolean }) =>
       callPortalAdmin({
         action: "invite",
         elationPatientId,
         reason: vars.reason,
         reissue: vars.reissue ?? false,
+        resetClaim: vars.resetClaim ?? false,
       }),
     onSuccess: invalidate,
   });
+
 
   const revokeInvite = useMutation({
     mutationFn: (vars: { reason: string }) =>
