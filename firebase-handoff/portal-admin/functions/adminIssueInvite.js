@@ -156,7 +156,7 @@ exports.adminIssueInvite = functions
     const recipient = typeof patient.email === 'string' ? patient.email.trim() : '';
     if (!recipient) return jsonError(res, 422, 'FAILED_PRECONDITION', 'NO_EMAIL_ON_ROSTER');
 
-    if (reissue) {
+    if (reissue || resetClaim) {
       try {
         await revokeLiveTokens(elationPatientId, actor, `reissue: ${reason}`);
       } catch (e) {
