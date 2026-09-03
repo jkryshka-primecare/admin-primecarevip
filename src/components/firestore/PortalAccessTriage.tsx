@@ -138,6 +138,10 @@ export default function PortalAccessTriage({ rows }: { rows: ReconRow[] }) {
   const suspended = snapshot?.access?.status === "suspended";
   const pendingInvite = snapshot?.inviteStatus === "pending";
   const needsInvite = snapshot?.inviteStatus === "none" || snapshot?.inviteStatus === "revoked";
+  // Claimed on paper, but the member never actually got in: no claim timestamp
+  // and no verified sign-in. This is the "shows active but can't log in" case.
+  const stuckClaim = Boolean(snapshot?.claimed && !snapshot?.claimedAt && !snapshot?.webAccessVerifiedAt);
+
 
 
   const clearSelection = () => {
