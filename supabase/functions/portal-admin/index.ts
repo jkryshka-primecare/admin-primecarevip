@@ -1240,7 +1240,12 @@ Deno.serve(async (req) => {
   };
   if (action === "invite") {
     upstreamPayload.reissue = body.reissue === true;
+    // Recovery for a claimed-but-unusable account: clears the Firebase Auth
+    // user + claim marker upstream, then sends a fresh claim link. Same admin
+    // tier and audit row as any other invite mutation.
+    upstreamPayload.resetClaim = body.resetClaim === true;
   }
+
   if (action === "setAccess") {
     upstreamPayload.patch = body.patch ?? {};
   }

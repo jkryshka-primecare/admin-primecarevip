@@ -98,6 +98,11 @@ exports.adminIssueInvite = functions
     const actor = String(body.actor || '').trim().toLowerCase();
     const reason = String(body.reason || '').slice(0, 500);
     const reissue = body.reissue === true;
+    // Recovery path for a member whose roster doc says "claimed" but who has no
+    // usable credential (claim link consumed, password never set, or the auth
+    // user is gone). It deletes the Firebase Auth user, clears the claim marker
+    // and then mints a fresh invite. Destructive, so it is explicit and audited.
+    const resetClaim = body.resetClaim === true;
 
     if (!elationPatientId) return jsonError(res, 400, 'INVALID_ARGUMENT', 'PATIENT_ID_REQUIRED');
     if (!actor) return jsonError(res, 400, 'INVALID_ARGUMENT', 'ACTOR_REQUIRED');
@@ -106,9 +111,10 @@ exports.adminIssueInvite = functions
     // caller-supplied override: the emailed link is a single-use account-claim
     // token, so directing it at an arbitrary address would be an account-
     // takeover path. Wrong roster email => fix the roster, then invite.
+    const patientRef = admin.firestore().collection('patients').doc(elationPatientId);
     let patient;
     try {
-      const snap = await admin.firestore().collection('patients').doc(elationPatientId).get();
+      const snap = await patientRef.get();
       if (!snap.exists) return jsonError(res, 404, 'NOT_FOUND', 'NO_ROSTER_DOC');
       patient = snap.data() || {};
     } catch (e) {
@@ -117,13 +123,40 @@ exports.adminIssueInvite = functions
     }
 
     if (patient.firebaseUid) {
-      return jsonError(res, 409, 'ALREADY_EXISTS', 'ALREADY_CLAIMED',
-        'This member has already activated their portal account.');
+      if (!resetClaim) {
+        return jsonError(res, 409, 'ALREADY_EXISTS', 'ALREADY_CLAIMED',
+          'This member has already activated their portal account.');
+      }
+      const previousUid = String(patient.firebaseUid);
+      try {
+        try {
+          await admin.auth().deleteUser(previousUid);
+        } catch (e) {
+          if (e.code !== 'auth/user-not-found') throw e;
+        }
+        await patientRef.update({
+          firebaseUid: admin.firestore.FieldValue.delete(),
+          claimedAt: admin.firestore.FieldValue.delete(),
+          webAccessVerifiedAt: admin.firestore.FieldValue.delete(),
+          claimReset: {
+            at: admin.firestore.Timestamp.now(),
+            by: actor,
+            reason,
+            previousUid,
+          },
+        });
+      } catch (e) {
+        logError('adminIssueInvite', 'claim-reset-failed', { elationPatientId, message: e.message });
+        return jsonError(res, 500, 'INTERNAL', 'CLAIM_RESET_FAILED');
+      }
+      await audit({ action: 'claim_reset', elationPatientId, actor, reason, previousUid, ok: true });
+      log('adminIssueInvite', 'claim-reset', { elationPatientId });
     }
+
     const recipient = typeof patient.email === 'string' ? patient.email.trim() : '';
     if (!recipient) return jsonError(res, 422, 'FAILED_PRECONDITION', 'NO_EMAIL_ON_ROSTER');
 
-    if (reissue) {
+    if (reissue || resetClaim) {
       try {
         await revokeLiveTokens(elationPatientId, actor, `reissue: ${reason}`);
       } catch (e) {

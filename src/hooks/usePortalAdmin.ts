@@ -48,6 +48,9 @@ export type PortalAccessState = {
 export type PortalAccessSnapshot = {
   claimed?: boolean;
   claimedAt?: string | null;
+  /** Null on a claimed record means the member never completed a portal sign-in. */
+  webAccessVerifiedAt?: string | null;
+
   inviteStatus?: "none" | "pending" | "claimed" | "revoked" | string;
   inviteSentAt?: string | null;
   inviteExpiresAt?: string | null;
@@ -120,6 +123,8 @@ function normalizeSnapshot(raw: RawAccessResponse | null | undefined): PortalAcc
   return {
     claimed: claim.state === "claimed",
     claimedAt: claim.claimedAt ?? null,
+    webAccessVerifiedAt: claim.webAccessVerifiedAt ?? null,
+
     inviteStatus,
     inviteSentAt: claim.liveToken?.issuedAt ?? claim.lastIssuedAt ?? null,
     inviteExpiresAt: claim.liveToken?.expiresAt ?? null,
@@ -193,15 +198,17 @@ export function usePortalMutations(elationPatientId: string | null) {
     qc.invalidateQueries({ queryKey: ["portal-admin", "access", elationPatientId] });
 
   const issueInvite = useMutation({
-    mutationFn: (vars: { reason: string; reissue?: boolean }) =>
+    mutationFn: (vars: { reason: string; reissue?: boolean; resetClaim?: boolean }) =>
       callPortalAdmin({
         action: "invite",
         elationPatientId,
         reason: vars.reason,
         reissue: vars.reissue ?? false,
+        resetClaim: vars.resetClaim ?? false,
       }),
     onSuccess: invalidate,
   });
+
 
   const revokeInvite = useMutation({
     mutationFn: (vars: { reason: string }) =>
