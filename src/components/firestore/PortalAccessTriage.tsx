@@ -324,9 +324,27 @@ export default function PortalAccessTriage({ rows }: { rows: ReconRow[] }) {
                     <p className="uppercase tracking-wide text-muted-foreground">Invite sent</p>
                     <p className="font-mono text-foreground">{formatDate(snapshot.inviteSentAt)}</p>
                   </div>
+                  <div>
+                    <p className="uppercase tracking-wide text-muted-foreground">Claimed on</p>
+                    <p className="font-mono text-foreground">{formatDate(snapshot.claimedAt)}</p>
+                  </div>
+                  <div>
+                    <p className="uppercase tracking-wide text-muted-foreground">Sign-in verified</p>
+                    <p className="font-mono text-foreground">{formatDate(snapshot.webAccessVerifiedAt)}</p>
+                  </div>
                 </div>
 
-                {(needsInvite || suspended) && (
+                {stuckClaim && (
+                  <div className="flex items-start gap-2 rounded-md border border-border bg-muted/40 p-2.5 text-xs text-muted-foreground">
+                    <ShieldAlert className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+                    <span>
+                      The invite link was consumed, but this member has never completed a portal sign-in. Resetting the
+                      claim removes the half-created account and sends a fresh activation link to the roster email.
+                    </span>
+                  </div>
+                )}
+
+                {(needsInvite || pendingInvite || suspended || snapshot.claimed) && (
                   <>
                     <Textarea
                       value={reason}
@@ -364,6 +382,27 @@ export default function PortalAccessTriage({ rows }: { rows: ReconRow[] }) {
                           Revoke invite
                         </Button>
                       )}
+                      {snapshot.claimed && (
+                        <Button
+                          size="sm"
+                          variant="destructive"
+                          disabled={!isAdmin || busy}
+                          onClick={() => {
+                            if (!guard()) return;
+                            const ok = window.confirm(
+                              `Reset the portal claim for ${selected.name}? Their existing portal login will be deleted and a new activation link emailed to ${snapshot.email ?? "the roster email"}.`,
+                            );
+                            if (!ok) return;
+                            run(
+                              issueInvite.mutateAsync({ reason, reissue: true, resetClaim: true }),
+                              "Claim reset — new invite sent",
+                            );
+                          }}
+                        >
+                          {issueInvite.isPending ? <Loader2 className="mr-1 h-3.5 w-3.5 animate-spin" /> : <RotateCcw className="mr-1 h-3.5 w-3.5" />}
+                          Reset claim & send new invite
+                        </Button>
+                      )}
                       {suspended && (
                         <Button
                           size="sm"
@@ -382,11 +421,12 @@ export default function PortalAccessTriage({ rows }: { rows: ReconRow[] }) {
                   </>
                 )}
 
-                {!needsInvite && !pendingInvite && !suspended && (
+                {!needsInvite && !pendingInvite && !suspended && !stuckClaim && (
                   <div className="flex items-center gap-2 text-xs text-success">
                     <CheckCircle2 className="h-4 w-4" /> This account is claimed and currently active.
                   </div>
                 )}
+
               </>
             ) : (
               <div className="flex items-center gap-2 text-xs text-muted-foreground">
