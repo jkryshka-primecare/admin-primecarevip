@@ -48,6 +48,9 @@ export type PortalAccessState = {
 export type PortalAccessSnapshot = {
   claimed?: boolean;
   claimedAt?: string | null;
+  /** Null on a claimed record means the member never completed a portal sign-in. */
+  webAccessVerifiedAt?: string | null;
+
   inviteStatus?: "none" | "pending" | "claimed" | "revoked" | string;
   inviteSentAt?: string | null;
   inviteExpiresAt?: string | null;
