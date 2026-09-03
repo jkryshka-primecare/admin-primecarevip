@@ -123,6 +123,8 @@ function normalizeSnapshot(raw: RawAccessResponse | null | undefined): PortalAcc
   return {
     claimed: claim.state === "claimed",
     claimedAt: claim.claimedAt ?? null,
+    webAccessVerifiedAt: claim.webAccessVerifiedAt ?? null,
+
     inviteStatus,
     inviteSentAt: claim.liveToken?.issuedAt ?? claim.lastIssuedAt ?? null,
     inviteExpiresAt: claim.liveToken?.expiresAt ?? null,
