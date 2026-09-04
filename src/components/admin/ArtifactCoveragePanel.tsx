@@ -45,7 +45,10 @@ export default function ArtifactCoveragePanel() {
 
 
   const pct = report?.coveragePct;
-  const healthy = pct !== null && pct !== undefined && pct >= 100;
+  // D-307: health tracks the achievable number (ingestable coverage), not raw
+  // presence — the residual that can never be fetched must not read as unhealthy.
+  const healthy =
+    !!report && report.ingestableDenominator > 0 && report.ingestableMissingCount === 0;
 
   const triggerAudit = async () => {
     try {
