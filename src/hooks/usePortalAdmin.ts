@@ -847,3 +847,56 @@ export function useResumeDriver() {
     onSuccess: () => qc.invalidateQueries({ queryKey: ["portal-admin", "backfill-driver"] }),
   });
 }
+
+// --- Stale-claim bulk reset --------------------------------------------------
+
+export type BulkResetTarget = { elationPatientId: string; name: string };
+export type BulkResetOutcome = BulkResetTarget & { ok: boolean; error?: string };
+
+/**
+ * Resets a batch of stale portal claims, one member at a time.
+ *
+ * Deliberately sequential: each member is a separate audited `invite` call
+ * upstream and sends one email, so a parallel fan-out would both hammer the
+ * control plane and make a partial failure impossible to attribute. Failures
+ * are collected per member rather than aborting the run, and the caller gets
+ * progress as it goes.
+ */
+export function useBulkClaimReset() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (vars: {
+      targets: BulkResetTarget[];
+      reason: string;
+      onProgress?: (done: number, total: number, last: BulkResetOutcome) => void;
+    }) => {
+      const results: BulkResetOutcome[] = [];
+      for (const target of vars.targets) {
+        let outcome: BulkResetOutcome;
+        try {
+          await callPortalAdmin({
+            action: "invite",
+            elationPatientId: target.elationPatientId,
+            reason: vars.reason,
+            reissue: true,
+            resetClaim: true,
+          });
+          outcome = { ...target, ok: true };
+        } catch (cause) {
+          outcome = {
+            ...target,
+            ok: false,
+            error: cause instanceof Error ? cause.message : String(cause),
+          };
+        }
+        results.push(outcome);
+        vars.onProgress?.(results.length, vars.targets.length, outcome);
+      }
+      return results;
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["portal-admin"] });
+      qc.invalidateQueries({ queryKey: ["firestore"] });
+    },
+  });
+}

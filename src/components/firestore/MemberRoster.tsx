@@ -7,6 +7,7 @@ import {
 } from "@/hooks/useMemberReconciliation";
 import { useAuth } from "@/hooks/useAuth";
 import PortalAccessTriage from "@/components/firestore/PortalAccessTriage";
+import StaleClaimScreening from "@/components/firestore/StaleClaimScreening";
 import ProvisionMissingDialog from "@/components/firestore/ProvisionMissingDialog";
 import RosterExceptions from "@/components/firestore/RosterExceptions";
 import DependentMatches from "@/components/firestore/DependentMatches";
@@ -179,6 +180,8 @@ export default function MemberRoster() {
       )}
 
       {!loading && !error && <PortalAccessTriage rows={rows} />}
+
+      {!loading && !error && <StaleClaimScreening />}
 
       {!loading && !error && (
         <RosterExceptions missing={missingMembers} rows={rows} />
