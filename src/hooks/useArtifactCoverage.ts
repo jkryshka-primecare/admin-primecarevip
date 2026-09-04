@@ -350,6 +350,16 @@ export function evaluateGate(report: CoverageReport): GateVerdict {
         : "Fallback was ON (or unrecorded) — legacy-path objects counted as present. Re-run with the fallback disabled to evaluate the gate.",
     },
     {
+      key: "converged",
+      label: "Residual converged",
+      pass: report.convergence?.converged === true,
+      detail: report.convergence
+        ? report.convergence.converged
+          ? `Residual ${report.convergence.residualSeries.join(" → ")} across ${report.convergence.windowRuns} runs, no failed probes.`
+          : `Residual ${report.convergence.residualSeries.join(" → ")} — needs 3 consecutive non-increasing runs with zero failed probes.`
+        : "This run predates the convergence signal.",
+    },
+    {
       key: "unpathed",
       label: "No unpathed references",
       pass: report.unpathedCount === 0,
