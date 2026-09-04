@@ -26,8 +26,13 @@ function segLine(label: string, s: {
   unpathed: number;
   errored: number;
   coveragePct: number | null;
+  ingestableCoveragePct?: number | null;
+  ingestableDenominator?: number;
+  ingestableMissing?: number;
+  excluded?: number;
 }) {
-  const pct = s.coveragePct === null ? "n/a" : `${s.coveragePct.toFixed(1)}%`;
+  const ip = s.ingestableCoveragePct;
+  const pct = ip === undefined || ip === null ? "n/a" : `${ip.toFixed(1)}%`;
   return `| ${label} | ${pct} | ${s.referenced} | ${s.present} | ${s.missing} | ${s.unpathed} | ${s.errored} |`;
 }
 
@@ -53,6 +58,19 @@ export function buildCoverageHandoff(opts: HandoffOptions): string {
   L.push("");
   L.push(`- Referenced artifacts present: **${pct}**`);
   L.push(`- Referenced: ${report.totalReferenced} · present: ${report.presentCount} · missing: ${report.missingCount}`);
+  // D-307: the residual as a named list — this is the clinical-ops sign-off line.
+  L.push(
+    `- Residual by reason: ingestable ${report.byReason.ingestable} · unsigned ${report.byReason.unsigned} · deleted in Elation ${report.byReason.deletedInElation} · pending sweep ${report.byReason.pendingSweep}`,
+  );
+  L.push(
+    `- Ingestable coverage: ${report.ingestableCoveragePct === null ? "n/a" : `${report.ingestableCoveragePct.toFixed(2)}%`} over ${report.ingestableDenominator} documents`,
+  );
+  L.push(`- Unclaimed patients with pending reports (D-111): ${report.unclaimedWithPendingReports}`);
+  if (report.convergence) {
+    L.push(
+      `- Convergence: residual ${report.convergence.residualSeries.join(" → ")} · ${report.convergence.converged ? "converged" : "not yet converged"}`,
+    );
+  }
   L.push(`- Parked (alerting): ${report.parkedCount}`);
   L.push(`- Unpathed (no storage key, excluded from %): ${report.unpathedCount}`);
   L.push(`- Failed storage probes: ${report.erroredCount}${
@@ -118,8 +136,8 @@ export function buildCoverageHandoff(opts: HandoffOptions): string {
     L.push("Storage was unreadable on this run — no number here is trustworthy. Fix storage access and re-run the audit before anything else.");
   } else if (!report.legacyFallbackDisabled) {
     L.push("This run counted legacy-keyed objects as present. Re-run the strict audit before evaluating the gate.");
-  } else if (report.missingCount > 0) {
-    L.push(`${report.missingCount} referenced artifact(s) are missing. Run the repair sweep, then re-run the audit and confirm the count drops.`);
+  } else if (report.ingestableMissingCount > 0) {
+    L.push(`${report.ingestableMissingCount} ingestable artifact(s) are missing (of ${report.missingCount} total misses; the rest are unsigned or deleted in Elation and are excluded). Run the repair sweep, then re-run the audit and confirm the count drops.`);
   } else if (smoke?.failed) {
     L.push("Coverage is clean but the read-path smoke has failures — investigate those checks before widening guardian reads.");
   } else if (gate.pass) {
