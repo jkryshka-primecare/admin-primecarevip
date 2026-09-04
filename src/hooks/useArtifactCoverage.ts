@@ -49,6 +49,33 @@ export type SegmentCounts = {
   unpathed: number;
   errored: number;
   coveragePct: number | null;
+  /** Misses that SHOULD have bytes — the only ones the gate counts. */
+  ingestableMissing: number;
+  /** Machine-excluded misses (unsigned / deleted upstream / still in grace). */
+  excluded: number;
+  /** present + ingestableMissing. Zero is never a pass. */
+  ingestableDenominator: number;
+  /** THE gate number for this cohort. */
+  ingestableCoveragePct: number | null;
+};
+
+/** Named residual buckets (D-307), so the number is a list, not a mystery. */
+export type ReasonCounts = {
+  unsigned: number;
+  deletedInElation: number;
+  pendingSweep: number;
+  ingestable: number;
+};
+
+/** The explicit exit criterion for residual monitoring. */
+export type Convergence = {
+  windowRuns: number;
+  residualSeries: number[];
+  erroredSeries: number[];
+  nonIncreasing: boolean;
+  erroredClean: boolean;
+  sweptWithinCycle: boolean;
+  converged: boolean;
 };
 
 export type CoverageReport = {
@@ -78,6 +105,15 @@ export type CoverageReport = {
   legacyFallbackDisabled: boolean;
 
   coveragePct: number | null;
+  /** Coverage over the ingestable denominator — what the gate reads. */
+  ingestableCoveragePct: number | null;
+  ingestableDenominator: number;
+  ingestableMissingCount: number;
+  excludedCount: number;
+  byReason: ReasonCounts;
+  /** D-111 decay metric: unclaimed patients still owed artifact work. */
+  unclaimedWithPendingReports: number;
+  convergence: Convergence | null;
   adult: SegmentCounts;
   minor: SegmentCounts;
   minorChartBacked: SegmentCounts;
@@ -108,12 +144,20 @@ const EMPTY_SEGMENT: SegmentCounts = {
   unpathed: 0,
   errored: 0,
   coveragePct: null,
+  ingestableMissing: 0,
+  excluded: 0,
+  ingestableDenominator: 0,
+  ingestableCoveragePct: null,
 };
 
 function toSegment(raw: unknown): SegmentCounts {
   const o = (raw ?? {}) as Record<string, unknown>;
   const pct =
     o.coveragePct === undefined || o.coveragePct === null ? null : num(o.coveragePct);
+  const ipct =
+    o.ingestableCoveragePct === undefined || o.ingestableCoveragePct === null
+      ? null
+      : num(o.ingestableCoveragePct);
   return {
     referenced: num(o.referenced),
     present: num(o.present),
@@ -121,6 +165,10 @@ function toSegment(raw: unknown): SegmentCounts {
     unpathed: num(o.unpathed),
     errored: num(o.errored),
     coveragePct: pct,
+    ingestableMissing: num(o.ingestableMissing),
+    excluded: num(o.excluded),
+    ingestableDenominator: num(o.ingestableDenominator),
+    ingestableCoveragePct: ipct,
   };
 }
 
@@ -152,6 +200,20 @@ function toUnpathed(raw: unknown): CoverageUnpathed {
   };
 }
 
+function toConvergence(raw: unknown): Convergence {
+  const o = (raw ?? {}) as Record<string, unknown>;
+  const series = (v: unknown) => (Array.isArray(v) ? v.map(num) : []);
+  return {
+    windowRuns: num(o.windowRuns),
+    residualSeries: series(o.residualSeries),
+    erroredSeries: series(o.erroredSeries),
+    nonIncreasing: o.nonIncreasing === true,
+    erroredClean: o.erroredClean === true,
+    sweptWithinCycle: o.sweptWithinCycle === true,
+    converged: o.converged === true,
+  };
+}
+
 function toReport(doc: FirestoreDoc): CoverageReport {
   const total = num(doc.totalReferenced);
   const present = num(doc.presentCount);
@@ -160,6 +222,7 @@ function toReport(doc: FirestoreDoc): CoverageReport {
   const unpathedRaw = Array.isArray(doc.unpathed) ? doc.unpathed : [];
 
   const bySegment = (doc.bySegment ?? {}) as Record<string, unknown>;
+  const reason = (doc.byReason ?? {}) as Record<string, unknown>;
   const minorRaw = (bySegment.minor ?? {}) as Record<string, unknown>;
   const byLinkage = (minorRaw.byLinkage ?? {}) as Record<string, unknown>;
 
@@ -186,6 +249,21 @@ function toReport(doc: FirestoreDoc): CoverageReport {
         : total > 0
           ? (present / total) * 100
           : null,
+    ingestableCoveragePct:
+      doc.ingestableCoveragePct === undefined || doc.ingestableCoveragePct === null
+        ? null
+        : num(doc.ingestableCoveragePct),
+    ingestableDenominator: num(doc.ingestableDenominator),
+    ingestableMissingCount: num(doc.ingestableMissingCount),
+    excludedCount: num(doc.excludedCount),
+    byReason: {
+      unsigned: num(reason.unsigned),
+      deletedInElation: num(reason.deletedInElation),
+      pendingSweep: num(reason.pendingSweep),
+      ingestable: num(reason.ingestable),
+    },
+    unclaimedWithPendingReports: num(doc.unclaimedWithPendingReports),
+    convergence: doc.convergence ? toConvergence(doc.convergence) : null,
     adult: bySegment.adult ? toSegment(bySegment.adult) : EMPTY_SEGMENT,
     minor: bySegment.minor ? toSegment(minorRaw) : EMPTY_SEGMENT,
     minorChartBacked: byLinkage.chartBacked ? toSegment(byLinkage.chartBacked) : EMPTY_SEGMENT,
@@ -196,19 +274,30 @@ function toReport(doc: FirestoreDoc): CoverageReport {
 }
 
 /**
- * A segment passes ONLY at 100% over a non-zero denominator. A null
- * coveragePct means nothing was referenced in that bucket — which is exactly
- * how a whole cohort hides inside a rounded overall 100%, so it fails.
+ * D-307 — a segment passes at 100% of INGESTABLE over a non-zero ingestable
+ * denominator. Documents that can never become an object (unsigned per D-079,
+ * deleted in Elation) leave the denominator; documents inside the sweep's first
+ * cycle are held out only for that cycle. A null figure — nothing ingestable
+ * counted — is NOT a pass: that is exactly how a cohort hides inside a rounded
+ * 100%.
  */
 export function segmentPasses(s: SegmentCounts): boolean {
-  return s.referenced > 0 && s.coveragePct !== null && s.coveragePct >= 100;
+  return (
+    s.ingestableDenominator > 0 &&
+    s.ingestableCoveragePct !== null &&
+    s.ingestableCoveragePct >= 100
+  );
 }
 
 function lineDetail(s: SegmentCounts): string {
-  if (s.referenced === 0) return "Nothing referenced yet — zero denominator is not a pass.";
-  if (s.coveragePct === null) return "No coverage figure — storage probes could not be trusted.";
-  if (s.coveragePct < 100) return `${s.missing.toLocaleString()} missing in Storage.`;
-  return `${s.present.toLocaleString()} of ${s.referenced.toLocaleString()} present.`;
+  if (s.ingestableDenominator === 0)
+    return "Nothing ingestable counted — a zero denominator is not a pass.";
+  if (s.ingestableCoveragePct === null)
+    return "No coverage figure — storage probes could not be trusted.";
+  const tail = s.excluded > 0 ? ` (${s.excluded.toLocaleString()} not ingestable, excluded)` : "";
+  if (s.ingestableCoveragePct < 100)
+    return `${s.ingestableMissing.toLocaleString()} ingestable documents missing in Storage${tail}.`;
+  return `${s.present.toLocaleString()} of ${s.ingestableDenominator.toLocaleString()} present${tail}.`;
 }
 
 /** The four cohort lines the Part B join gate reads. */
