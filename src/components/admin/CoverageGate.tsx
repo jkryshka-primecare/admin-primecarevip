@@ -5,7 +5,9 @@ import { evaluateGate, type CoverageReport, type SegmentCounts } from "@/hooks/u
  * Release 2b Part B — the go/no-go gate for flipping `GUARDIAN_READS_ENABLED`.
  *
  * This is a gate dashboard, not a data dump: counts, percentages and an
- * explicit pass/fail per cohort line. A `null` coveragePct (zero denominator)
+ * explicit pass/fail per cohort line. The percentage shown is coverage of
+ * INGESTABLE documents (D-307): unsigned and deleted-in-Elation references
+ * leave the denominator, so the figure is achievable. A zero denominator
  * renders as a visible FAIL, never as blank and never as 100% — a whole cohort
  * that never populated is exactly what this surface exists to expose.
  *
@@ -116,7 +118,7 @@ function Mark({ pass }: { pass: boolean }) {
  * It must never read as blank (looks like a rendering bug) or as 100%.
  */
 function Pct({ counts, pass }: { counts: SegmentCounts; pass: boolean }) {
-  if (counts.coveragePct === null) {
+  if (counts.ingestableDenominator === 0 || counts.ingestableCoveragePct === null) {
     return (
       <span className="text-destructive">
         — <span className="font-sans text-[11px]">no denominator</span>
@@ -125,7 +127,7 @@ function Pct({ counts, pass }: { counts: SegmentCounts; pass: boolean }) {
   }
   return (
     <span className={pass ? "text-success" : "text-destructive"}>
-      {counts.coveragePct.toFixed(1)}%
+      {counts.ingestableCoveragePct.toFixed(1)}%
     </span>
   );
 }
