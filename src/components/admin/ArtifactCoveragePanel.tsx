@@ -379,14 +379,54 @@ export default function ArtifactCoveragePanel() {
         <>
           <div className="mt-5 grid gap-3 sm:grid-cols-4">
             <Stat
-              label="Referenced artifacts present"
-              value={pct === null ? "—" : `${pct.toFixed(1)}%`}
-              tone={healthy ? "good" : "warn"}
+              label="Ingestable artifacts present"
+              value={
+                report.ingestableCoveragePct === null
+                  ? "—"
+                  : `${report.ingestableCoveragePct.toFixed(1)}%`
+              }
+              tone={report.ingestableMissingCount === 0 && report.ingestableDenominator > 0 ? "good" : "warn"}
             />
             <Stat label="Referenced" value={report.totalReferenced.toLocaleString()} />
-            <Stat label="Missing" value={report.missingCount.toLocaleString()} tone={report.missingCount ? "warn" : "good"} />
+            <Stat
+              label="Missing (ingestable)"
+              value={report.ingestableMissingCount.toLocaleString()}
+              tone={report.ingestableMissingCount ? "warn" : "good"}
+            />
             <Stat label="Parked (alerting)" value={report.parkedCount.toLocaleString()} tone={report.parkedCount ? "bad" : "good"} />
           </div>
+
+          {/*
+            D-307 — the residual as a named list. "146 missing" was unreviewable;
+            these four counts are what clinical ops actually sign off on. Only
+            the first can hold the gate red.
+          */}
+          <div className="mt-3 grid gap-3 sm:grid-cols-4">
+            <Stat
+              label="Still owed (gate)"
+              value={report.byReason.ingestable.toLocaleString()}
+              tone={report.byReason.ingestable ? "warn" : "good"}
+            />
+            <Stat label="Unsigned in Elation" value={report.byReason.unsigned.toLocaleString()} />
+            <Stat label="Deleted in Elation" value={report.byReason.deletedInElation.toLocaleString()} />
+            <Stat label="Awaiting first sweep" value={report.byReason.pendingSweep.toLocaleString()} />
+          </div>
+          <p className="mt-2 text-[11px] text-muted-foreground">
+            Unsigned and deleted documents have nothing to fetch, so they are excluded from the
+            percentage rather than counted as failures. Overall presence including them is{" "}
+            {pct === null ? "—" : `${pct.toFixed(1)}%`}. Unclaimed members still owed documents:{" "}
+            {report.unclaimedWithPendingReports.toLocaleString()}.
+          </p>
+
+          {report.convergence && (
+            <p className="mt-2 text-[11px] text-muted-foreground">
+              Residual across recent runs: {report.convergence.residualSeries.join(" → ") || "—"} ·{" "}
+              {report.convergence.converged
+                ? "converged — monitoring can stop"
+                : "not yet converged (needs 3 non-increasing runs with zero failed probes)"}
+            </p>
+          )}
+
 
           {report.systemicStorageFailure && (
             <p className="mt-3 flex items-center gap-2 rounded-lg bg-destructive/10 px-3 py-2 text-xs text-destructive">
