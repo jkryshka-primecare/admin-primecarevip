@@ -50,6 +50,9 @@ const functions = require('firebase-functions');
 const admin = require('firebase-admin');
 const { requireAdminCaller, selfAudience } = require('./middleware/requireAdminCaller');
 const { artifactBucketName } = require('./core/config/artifactBucket');
+// D-308 fence. SHARED rule — knows both the claimed-active adult path and the
+// guardian-proxied minor path. Never re-implement `status === 'active'` here.
+const { ingestEligibility } = require('./core/services/patient/ingestEligibility');
 // THE SHARED THROTTLE. Requiring these (rather than re-implementing a fetch)
 // is what guarantees one gate process-wide.
 const {
@@ -129,16 +132,63 @@ async function resumeGlobal() {
 }
 
 /**
- * Repair one queue row. Returns 'healed' | 'failed' | 'deferred' | 'blocked'.
+ * D-308 backstop fence. The audit no longer ENQUEUES docs for patients who are
+ * not ingestable yet (rostered-but-unclaimed); this is the second line so that
+ * rows already sitting in the queue — and any future enqueuer — cannot pull a
+ * non-ingestable patient's PHI out of Elation ahead of their claim.
+ *
+ * It delegates to the SHARED `ingestEligibility`, never to a local
+ * `status === 'active'` check. That matters for minors: a dependent never
+ * claims, so an adult-only rule would fence out exactly the chart-backing docs
+ * the gate's `minorChartBacked` line measures. `ingestEligibility` returns
+ * eligible for a minor via its guardian-proxied path (`dependent.isMinor` +
+ * >= 1 guardian with `status === 'active'`), and for anyone claimed-active.
+ *
+ * Fail-open on a read error: a Firestore blip must not look like ineligibility
+ * and silently stall repairs. A MISSING patient doc, by contrast, is a hard
+ * skip — there is no one to authorize the read to.
+ */
+async function isRepairEligible(row) {
+  const patientId = row && row.patientId;
+  if (!patientId) return { eligible: false, reason: 'no-patient-id' };
+  let snap;
+  try {
+    snap = await db().collection('patients').doc(String(patientId)).get();
+  } catch (err) {
+    functions.logger.warn('artifact sweep: eligibility read failed, proceeding', {
+      patientId, error: String(err && err.message).slice(0, 200),
+    });
+    return { eligible: true, reason: 'eligibility-read-failed-open' };
+  }
+  if (!snap.exists) return { eligible: false, reason: 'no-patient-doc' };
+  const { eligible, reason, cohort } = ingestEligibility(snap.data() || {});
+  return { eligible, reason, cohort };
+}
+
+/**
+ * Repair one queue row. Returns 'healed' | 'failed' | 'deferred' | 'blocked'
+ * | 'ineligible'.
  *
  * The fetch runs inside `withPatientDeadline`, which is what gives the shared
  * gate's retry logic a budget to charge against, and inside the #462 artifact
  * sub-budget accounting — the same code the backfill uses.
  */
 async function repairOne(row, ref, tally) {
+  const gate = await isRepairEligible(row);
+  if (!gate.eligible) {
+    // Inert, not destroyed: no failures increment, no park. A claim mid-cycle
+    // simply makes the same row eligible on the next pass.
+    await ref.set(
+      { skippedReason: gate.reason, skippedAt: new Date().toISOString() },
+      { merge: true },
+    );
+    if (tally) tally.ineligible = (tally.ineligible || 0) + 1;
+    return 'ineligible';
+  }
   try {
     const file = bucket().file(row.path);
     await withPatientDeadline(Date.now() + ITEM_BUDGET_MS, async () => {
+
       await uploadArtifact(file, row.documentId);
       // A successful save does not prove valid bytes: a corrupt source would be
       // stored and counted present by the next audit — a false green.
@@ -271,6 +321,7 @@ async function driveRun(runId, opts) {
     healed: Number(prior.healed) || 0,
     failed: Number(prior.failed) || 0,
     deferred: Number(prior.deferred) || 0,
+    ineligible: Number(prior.ineligible) || 0,
     parked: 0,
     parkedSample: [],
   };
@@ -329,7 +380,8 @@ async function driveRun(runId, opts) {
     }, { merge: true });
     return {
       runId, status, pauseReason: pauseReason || null, processed, remaining,
-      healed: tally.healed, failed: tally.failed, deferred: tally.deferred, parked: tally.parked,
+      healed: tally.healed, failed: tally.failed, deferred: tally.deferred,
+      ineligible: tally.ineligible || 0, parked: tally.parked,
     };
   };
 
@@ -359,13 +411,20 @@ async function driveRun(runId, opts) {
 
         if (outcome === 'healed') tally.healed += 1;
         else if (outcome === 'deferred') tally.deferred += 1;
-        else if (outcome !== 'blocked') tally.failed += 1;
+        // 'ineligible' is neither progress nor failure: the row is inert until
+        // the patient claims, so it must not consume a failure budget.
+        else if (outcome !== 'blocked' && outcome !== 'ineligible') tally.failed += 1;
 
         // Durable per-item checkpoint: a kill after this loses no progress.
         await runRef.set({
           cursor,
           processed,
-          counters: { healed: tally.healed, failed: tally.failed, deferred: tally.deferred },
+          counters: {
+            healed: tally.healed,
+            failed: tally.failed,
+            deferred: tally.deferred,
+            ineligible: tally.ineligible || 0,
+          },
           lastItemAt: FieldValue.serverTimestamp(),
           ...renewLease(),
         }, { merge: true });
@@ -613,3 +672,5 @@ exports.adminRunArtifactRepairSweep = functions
 
 exports._sweep = sweep;
 exports._driveRun = driveRun;
+exports._repairOne = repairOne;
+exports._isRepairEligible = isRepairEligible;

@@ -62,6 +62,9 @@ const ALLOWED_COLLECTIONS = new Set([
   // document ids and storage paths, so it is PHI: staff-only, read-only,
   // and every read lands in phi_access_log like any other patient read.
   "artifact_coverage_reports",
+  // Observability for the repair fence work (D-308): queue rows carry patient
+  // ids, document ids and storage paths, so same staff-only, logged treatment.
+  "artifact_repair_queue",
 ]);
 
 
