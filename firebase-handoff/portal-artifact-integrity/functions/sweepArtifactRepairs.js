@@ -272,6 +272,12 @@ async function repairOne(row, ref, tally) {
       tally.parked += 1;
       if (tally.parkedSample.length < 10) tally.parkedSample.push(row.documentId);
     }
+    if (networkBlip) {
+      functions.logger.warn('artifact sweep: network/timeout (status 0), deferring run', {
+        status, failures, documentId: row.documentId,
+      });
+      return 'deferred';
+    }
     return 'failed';
   }
 }
