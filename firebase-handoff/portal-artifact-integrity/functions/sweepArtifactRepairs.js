@@ -253,6 +253,7 @@ async function repairOne(row, ref, tally) {
 
     const failures = (row.failures || 0) + 1;
     const parked = failures >= MAX_FAILURES;
+    const networkBlip = status === NETWORK_STATUS && !parked;
     await ref.set(
       { failures, parked, lastError: String(err && err.reason ? err.reason : err && err.message).slice(0, 200), updatedAt: new Date().toISOString() },
       { merge: true },
