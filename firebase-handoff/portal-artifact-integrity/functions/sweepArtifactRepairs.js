@@ -50,6 +50,9 @@ const functions = require('firebase-functions');
 const admin = require('firebase-admin');
 const { requireAdminCaller, selfAudience } = require('./middleware/requireAdminCaller');
 const { artifactBucketName } = require('./core/config/artifactBucket');
+// D-308 fence. SHARED rule — knows both the claimed-active adult path and the
+// guardian-proxied minor path. Never re-implement `status === 'active'` here.
+const { ingestEligibility } = require('./core/services/patient/ingestEligibility');
 // THE SHARED THROTTLE. Requiring these (rather than re-implementing a fetch)
 // is what guarantees one gate process-wide.
 const {
@@ -318,6 +321,7 @@ async function driveRun(runId, opts) {
     healed: Number(prior.healed) || 0,
     failed: Number(prior.failed) || 0,
     deferred: Number(prior.deferred) || 0,
+    ineligible: Number(prior.ineligible) || 0,
     parked: 0,
     parkedSample: [],
   };
@@ -376,7 +380,8 @@ async function driveRun(runId, opts) {
     }, { merge: true });
     return {
       runId, status, pauseReason: pauseReason || null, processed, remaining,
-      healed: tally.healed, failed: tally.failed, deferred: tally.deferred, parked: tally.parked,
+      healed: tally.healed, failed: tally.failed, deferred: tally.deferred,
+      ineligible: tally.ineligible || 0, parked: tally.parked,
     };
   };
 
@@ -406,13 +411,20 @@ async function driveRun(runId, opts) {
 
         if (outcome === 'healed') tally.healed += 1;
         else if (outcome === 'deferred') tally.deferred += 1;
-        else if (outcome !== 'blocked') tally.failed += 1;
+        // 'ineligible' is neither progress nor failure: the row is inert until
+        // the patient claims, so it must not consume a failure budget.
+        else if (outcome !== 'blocked' && outcome !== 'ineligible') tally.failed += 1;
 
         // Durable per-item checkpoint: a kill after this loses no progress.
         await runRef.set({
           cursor,
           processed,
-          counters: { healed: tally.healed, failed: tally.failed, deferred: tally.deferred },
+          counters: {
+            healed: tally.healed,
+            failed: tally.failed,
+            deferred: tally.deferred,
+            ineligible: tally.ineligible || 0,
+          },
           lastItemAt: FieldValue.serverTimestamp(),
           ...renewLease(),
         }, { merge: true });
@@ -660,3 +672,5 @@ exports.adminRunArtifactRepairSweep = functions
 
 exports._sweep = sweep;
 exports._driveRun = driveRun;
+exports._repairOne = repairOne;
+exports._isRepairEligible = isRepairEligible;
