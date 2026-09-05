@@ -96,6 +96,22 @@ const INSTANCE_ID = `${process.env.K_REVISION || 'local'}-${Date.now().toString(
 /** Transient upstream statuses: back the run off, never park the document. */
 const TRANSIENT = new Set([429, 500, 502, 503, 504]);
 
+/**
+ * D-308a follow-on. `elationStatus: 0` is OUR client's code for a
+ * network/timeout/abort — the same class as ARTIFACT_FETCH_TIMEOUT, which
+ * self-heals off-peak. Before this it fell through to the hard-failure path and
+ * five flaky fetches parked a perfectly retryable row (the parked minor
+ * 1228288623050753).
+ *
+ * It is deliberately NOT folded into TRANSIENT: a pure transient defers the run
+ * without charging the row, which would let a genuinely unreachable document
+ * retry forever. Status 0 still charges an attempt, so a row that can never be
+ * fetched still parks at MAX_FAILURES and still raises the parked alert — it
+ * just gets its full retry budget across runs instead of being parked by
+ * flakiness alone.
+ */
+const NETWORK_STATUS = 0;
+
 const db = () => admin.firestore();
 const stateRef = () => db().collection('artifact_repair_state');
 
