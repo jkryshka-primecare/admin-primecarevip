@@ -255,15 +255,26 @@ async function driveRun(runId, opts) {
   const maxItems = Math.max(1, Math.min(MAX_ITEMS, Number(options.maxItems || run.maxItems || MAX_ITEMS)));
   const probeOnly = options.probeOnly === true;
 
-  let cursor = run.cursor || null;
-  let processed = Number(run.processed) || 0;
+  // D-308a — a FINISHED run must not resume from its own end cursor.
+  // The cron claims a DATE-KEYED run id (`cron-YYYY-MM-DD`), so a second
+  // invocation on the same day re-opened the completed run doc, started AFTER
+  // the last visited id, read an empty page and declared 'complete' without
+  // touching a single row. Rows re-primed by an operator during the day
+  // (unparked, failures reset) were therefore never driven until the next
+  // calendar day minted a fresh run id — which is exactly the "ad-hoc repairs
+  // are impossible" gap. A completed run starts a NEW pass from the top.
+  const isFreshPass = run.status === 'complete';
+  let cursor = isFreshPass ? null : (run.cursor || null);
+  let processed = isFreshPass ? 0 : (Number(run.processed) || 0);
+  const prior = isFreshPass ? {} : (run.counters || {});
   const tally = {
-    healed: Number((run.counters || {}).healed) || 0,
-    failed: Number((run.counters || {}).failed) || 0,
-    deferred: Number((run.counters || {}).deferred) || 0,
+    healed: Number(prior.healed) || 0,
+    failed: Number(prior.failed) || 0,
+    deferred: Number(prior.deferred) || 0,
     parked: 0,
     parkedSample: [],
   };
+
 
   await runRef.set({
     runId,
@@ -302,7 +313,10 @@ async function driveRun(runId, opts) {
     await runRef.set({
       status,
       pauseReason: pauseReason || null,
-      cursor,
+      // Belt-and-braces for the same defect: a completed run stores no cursor,
+      // so nothing can resume past the end of the queue.
+      cursor: status === 'complete' ? null : cursor,
+
       processed,
       counters: { healed: tally.healed, failed: tally.failed, deferred: tally.deferred },
       parkedThisRun: tally.parked,
