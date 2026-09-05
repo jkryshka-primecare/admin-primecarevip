@@ -313,7 +313,10 @@ async function driveRun(runId, opts) {
     await runRef.set({
       status,
       pauseReason: pauseReason || null,
-      cursor,
+      // Belt-and-braces for the same defect: a completed run stores no cursor,
+      // so nothing can resume past the end of the queue.
+      cursor: status === 'complete' ? null : cursor,
+
       processed,
       counters: { healed: tally.healed, failed: tally.failed, deferred: tally.deferred },
       parkedThisRun: tally.parked,
