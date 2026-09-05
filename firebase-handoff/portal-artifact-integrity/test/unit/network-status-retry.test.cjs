@@ -11,8 +11,6 @@
  *   - a real HTTP failure (e.g. 404) is untouched by any of this.
  */
 
-const admin = require('firebase-admin');
-
 const MAX_FAILURES = 5;
 
 function makeRef() {
@@ -87,6 +85,3 @@ describe('status 0 is a retryable network class', () => {
     expect(failures).toBe(4);
   });
 });
-
-// keep the admin import meaningful for the shared jest setup
-expect(typeof admin.firestore).toBe('function');
