@@ -96,6 +96,22 @@ const INSTANCE_ID = `${process.env.K_REVISION || 'local'}-${Date.now().toString(
 /** Transient upstream statuses: back the run off, never park the document. */
 const TRANSIENT = new Set([429, 500, 502, 503, 504]);
 
+/**
+ * D-308a follow-on. `elationStatus: 0` is OUR client's code for a
+ * network/timeout/abort — the same class as ARTIFACT_FETCH_TIMEOUT, which
+ * self-heals off-peak. Before this it fell through to the hard-failure path and
+ * five flaky fetches parked a perfectly retryable row (the parked minor
+ * 1228288623050753).
+ *
+ * It is deliberately NOT folded into TRANSIENT: a pure transient defers the run
+ * without charging the row, which would let a genuinely unreachable document
+ * retry forever. Status 0 still charges an attempt, so a row that can never be
+ * fetched still parks at MAX_FAILURES and still raises the parked alert — it
+ * just gets its full retry budget across runs instead of being parked by
+ * flakiness alone.
+ */
+const NETWORK_STATUS = 0;
+
 const db = () => admin.firestore();
 const stateRef = () => db().collection('artifact_repair_state');
 
@@ -237,6 +253,7 @@ async function repairOne(row, ref, tally) {
 
     const failures = (row.failures || 0) + 1;
     const parked = failures >= MAX_FAILURES;
+    const networkBlip = status === NETWORK_STATUS && !parked;
     await ref.set(
       { failures, parked, lastError: String(err && err.reason ? err.reason : err && err.message).slice(0, 200), updatedAt: new Date().toISOString() },
       { merge: true },
@@ -254,6 +271,12 @@ async function repairOne(row, ref, tally) {
       // the run (see emitParkedAlert).
       tally.parked += 1;
       if (tally.parkedSample.length < 10) tally.parkedSample.push(row.documentId);
+    }
+    if (networkBlip) {
+      functions.logger.warn('artifact sweep: network/timeout (status 0), deferring run', {
+        status, failures, documentId: row.documentId,
+      });
+      return 'deferred';
     }
     return 'failed';
   }
