@@ -129,16 +129,63 @@ async function resumeGlobal() {
 }
 
 /**
- * Repair one queue row. Returns 'healed' | 'failed' | 'deferred' | 'blocked'.
+ * D-308 backstop fence. The audit no longer ENQUEUES docs for patients who are
+ * not ingestable yet (rostered-but-unclaimed); this is the second line so that
+ * rows already sitting in the queue — and any future enqueuer — cannot pull a
+ * non-ingestable patient's PHI out of Elation ahead of their claim.
+ *
+ * It delegates to the SHARED `ingestEligibility`, never to a local
+ * `status === 'active'` check. That matters for minors: a dependent never
+ * claims, so an adult-only rule would fence out exactly the chart-backing docs
+ * the gate's `minorChartBacked` line measures. `ingestEligibility` returns
+ * eligible for a minor via its guardian-proxied path (`dependent.isMinor` +
+ * >= 1 guardian with `status === 'active'`), and for anyone claimed-active.
+ *
+ * Fail-open on a read error: a Firestore blip must not look like ineligibility
+ * and silently stall repairs. A MISSING patient doc, by contrast, is a hard
+ * skip — there is no one to authorize the read to.
+ */
+async function isRepairEligible(row) {
+  const patientId = row && row.patientId;
+  if (!patientId) return { eligible: false, reason: 'no-patient-id' };
+  let snap;
+  try {
+    snap = await db().collection('patients').doc(String(patientId)).get();
+  } catch (err) {
+    functions.logger.warn('artifact sweep: eligibility read failed, proceeding', {
+      patientId, error: String(err && err.message).slice(0, 200),
+    });
+    return { eligible: true, reason: 'eligibility-read-failed-open' };
+  }
+  if (!snap.exists) return { eligible: false, reason: 'no-patient-doc' };
+  const { eligible, reason, cohort } = ingestEligibility(snap.data() || {});
+  return { eligible, reason, cohort };
+}
+
+/**
+ * Repair one queue row. Returns 'healed' | 'failed' | 'deferred' | 'blocked'
+ * | 'ineligible'.
  *
  * The fetch runs inside `withPatientDeadline`, which is what gives the shared
  * gate's retry logic a budget to charge against, and inside the #462 artifact
  * sub-budget accounting — the same code the backfill uses.
  */
 async function repairOne(row, ref, tally) {
+  const gate = await isRepairEligible(row);
+  if (!gate.eligible) {
+    // Inert, not destroyed: no failures increment, no park. A claim mid-cycle
+    // simply makes the same row eligible on the next pass.
+    await ref.set(
+      { skippedReason: gate.reason, skippedAt: new Date().toISOString() },
+      { merge: true },
+    );
+    if (tally) tally.ineligible = (tally.ineligible || 0) + 1;
+    return 'ineligible';
+  }
   try {
     const file = bucket().file(row.path);
     await withPatientDeadline(Date.now() + ITEM_BUDGET_MS, async () => {
+
       await uploadArtifact(file, row.documentId);
       // A successful save does not prove valid bytes: a corrupt source would be
       // stored and counted present by the next audit — a false green.
