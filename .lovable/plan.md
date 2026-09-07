@@ -1,53 +1,37 @@
-# CORS patch — env-driven allowed origins
+# Wire PORTAL_ALLOWED_ORIGINS through the deploy pipeline
 
-Two files. Nothing else is touched, and no guardian/elation env wiring is modified.
+One file, two added lines: `.github/workflows/deploy-production.yml`.
+`functions/core/config/allowedOrigins.js` is not touched.
 
-## 1. `functions/core/config/allowedOrigins.js`
+## Diff
 
-Replace the hardcoded array with a baseline-union-env list:
-
-- **Baseline, hardcoded and never removable:** `https://care.primecarevip.com`,
-  `http://localhost:5173`. A bad or empty secret can never take the live portal offline.
-- **Additive from env:** read `process.env.CORS_ALLOWED_ORIGINS`, split on comma, `.trim()`
-  each entry, drop empties.
-- **Final list** = baseline ∪ env, de-duplicated, baseline first. Exact-match string compare
-  is preserved — no normalisation, no wildcards, no regex.
-- Unset or empty `CORS_ALLOWED_ORIGINS` yields exactly the current baseline array: zero
-  behavior change when the secret is not set.
-- Export shape and every existing helper signature stay byte-compatible, so no call-site in
-  the CORS middleware changes. Env is read at call time so a value set after module load
-  still applies.
-
-Deliverable: the full new file content, pasteable.
-
-## 2. `.github/workflows/deploy-production.yml` — one added line
-
-In the step that writes `functions/.env.prive-care-vip`, add, matching the existing pattern:
-
-```
-echo "CORS_ALLOWED_ORIGINS=${CORS_ALLOWED_ORIGINS}" >> functions/.env.prive-care-vip
+```diff
+@@ env: block of the env-file-writing step
+             GUARDIAN_READS_ENABLED: ${{ secrets.GUARDIAN_READS_ENABLED_PRODUCTION }}
+             GUARDIAN_READS_ALLOWLIST: ${{ secrets.GUARDIAN_READS_ALLOWLIST_PRODUCTION }}
++            PORTAL_ALLOWED_ORIGINS: ${{ secrets.PORTAL_ALLOWED_ORIGINS_PRODUCTION }}
+@@ run: | block writing functions/.env.prive-care-vip
+             echo "GUARDIAN_READS_ENABLED=${GUARDIAN_READS_ENABLED:-false}" >> functions/.env.prive-care-vip
+             echo "GUARDIAN_READS_ALLOWLIST=${GUARDIAN_READS_ALLOWLIST:-}" >> functions/.env.prive-care-vip
++            echo "PORTAL_ALLOWED_ORIGINS=${PORTAL_ALLOWED_ORIGINS:-}" >> functions/.env.prive-care-vip
 ```
 
-and map the secret into that step's `env:` block the same way the other `*_PRODUCTION`
-secrets are mapped:
+Both additions use the existing 10-space indentation and the same `:-` default form as the
+line above them. Unset secret → empty value → baseline-only origins, so the live portal is
+unaffected either way.
 
-```
-CORS_ALLOWED_ORIGINS: ${{ secrets.CORS_ALLOWED_ORIGINS_PRODUCTION }}
-```
+No `GUARDIAN_READS_*`, `ELATION_*` or `ENFORCE_AUTH` line is modified, and
+`allowedOrigins.js` is untouched.
 
-Unset → empty value written → baseline only, which is safe. Every
-`GUARDIAN_READS_*` and `ELATION_READ_ALLOWLIST` line is left exactly as-is.
+## Contract note
 
-Deliverable: the diff with surrounding context so you can see it lands in the right block.
-Since I don't have the workflow file here, the context lines are reconstructed from the
-pattern you quoted — if the hunk doesn't apply cleanly, paste the step and I'll re-cut it.
+One line appended to `plans/INTEGRATION-CONTRACT.md`:
 
-## 3. Contract note
-
-One line for `plans/INTEGRATION-CONTRACT.md` recording that allowed CORS origins are now
-env-driven via `CORS_ALLOWED_ORIGINS`, with the baseline always including
-`care.primecarevip.com`.
+> `PORTAL_ALLOWED_ORIGINS` (additive CORS origins, comma-separated; unioned with the hardcoded
+> baseline that always includes `https://care.primecarevip.com`) is now wired through
+> `deploy-production.yml` from the `PORTAL_ALLOWED_ORIGINS_PRODUCTION` secret; unset means
+> baseline only.
 
 ## Not done here
 
-The secret value is yours to set after merge; I set nothing.
+The secret value stays yours to set after merge.
