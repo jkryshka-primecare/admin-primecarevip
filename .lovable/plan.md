@@ -5,15 +5,19 @@ Answers to the three blockers, plus one small addition to the fixture script.
 ## 1. Sign-in credential for the fixture guardian
 
 Correct — the fixture writes chart records only; nothing creates the sign-in account.
-The account has to be created with the exact uid `smokeguardianuid000000000001`, because
-that string is what the chart record stores as `firebaseUid` and what the allowlist matches.
+Correct — the fixture writes chart records only; nothing creates the sign-in account.
+The sign-in uid and the `firebaseUid` on the guardian's chart record must be the same string,
+and that string is what `GUARDIAN_READS_ALLOWLIST` matches. If you already created an account
+(uid `usEWzqPQVMNdv4R7k5I4DewZjC12`), that uid wins and the script's placeholder must yield.
 
 Planned change to `seed-guardian-fixture.js`:
 
+- New `--guardian-uid=<uid>` flag, defaulting to the pinned placeholder: whatever is passed is
+  written as the chart `firebaseUid`, used for the auth account, and echoed in the printout.
 - New step in `seed()` (runs under `--apply`, printed in dry run): create the auth user with
-  the pinned uid, the fixture email, a password supplied by the operator via
-  `--password=...` or the `SMOKE_GUARDIAN_PASSWORD` environment variable (never hardcoded,
-  never printed back), email marked verified so no invite mail is needed.
+  that uid, the fixture email, a password supplied via `--password=...` or the
+  `SMOKE_GUARDIAN_PASSWORD` environment variable (never hardcoded, never printed back), email
+  marked verified so no invite mail is needed.
 - Idempotent: if the uid already exists, update email/password instead of failing, and
   refuse if an existing account with that uid carries a different, non-fixture email.
 - `--cleanup --apply` deletes the auth user too, so teardown stays complete.
