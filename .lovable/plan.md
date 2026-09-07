@@ -91,9 +91,45 @@ Your intended values are right, with two notes:
 variables through the shared read path, so all three must carry identical values — which the
 `.env.prive-care-vip` route gives you automatically, and per-function gcloud edits would not.
 
+## 4. CORS on the read functions — hardcoded today, make it env-driven
+
+Each function file declares its own constant:
+
+```js
+const ALLOWED_ORIGINS = ['https://care.primecarevip.com', 'http://localhost:5173'];
+```
+
+`setCors` only echoes `Access-Control-Allow-Origin` when the request origin is in that list.
+The preflight still returns 204 (it is answered before the check), which is exactly the
+symptom you saw: OPTIONS succeeds, the real POST is blocked. So today this needs a code change
+and a deploy — there is no `CORS_ALLOWED_ORIGINS`.
+
+Proposed change, so this is the last time a test origin costs a code change:
+
+- New shared helper `functions/core/config/corsOrigins.js`: a pinned base list
+  (`https://care.primecarevip.com`, `http://localhost:5173`) merged with any origins in
+  `CORS_ALLOWED_ORIGINS` (comma-separated). Entries are trimmed, lower-cased, and must parse as
+  absolute `https://` URLs (`http://localhost` excepted) — anything else is dropped, so a
+  malformed value can never widen to a wildcard. The pinned base is never removable.
+- All read/patient-facing functions replace their local constant with this helper. Same
+  `setCors` behavior otherwise: exact-match only, no wildcard, `Vary: Origin` kept.
+- Then adding the test URL is a secret + redeploy, identical to section 3:
+  `CORS_ALLOWED_ORIGINS=https://vital-records-access.lovable.app`, removed after the cutover.
+
+If you want the smoke test unblocked before that helper lands, the minimum change is adding the
+one origin to the constant in each affected file and deploying — but it is the same deploy
+either way, so the env-driven version is the better use of it.
+
+Note `getMyPatientRecord` is not in this handoff folder; the same constant lives in it and in
+every other patient-facing function, so the sweep must cover all of them, not just the three
+artifact readers — one missed file leaves a partially broken hub.
 
 ## Deliverable
 
-One file changes: `firebase-handoff/portal-testfixture/seed-guardian-fixture.js` — the auth
-user create/update on seed, the delete on cleanup, and an updated "next steps" printout that
-lists both allowlists with the exact ids.
+- `firebase-handoff/portal-testfixture/seed-guardian-fixture.js` — `--guardian-uid`, the auth
+  user create/update on seed, the delete on cleanup, and a printout listing both allowlists
+  with the exact ids.
+- `firebase-handoff/portal-artifact-integrity/functions/core/config/corsOrigins.js` plus the
+  `setCors` swap in `getLabs`, `getImaging`, `getMedicalRecords`, and a handoff note naming the
+  remaining functions your repo must sweep the same way.
+
