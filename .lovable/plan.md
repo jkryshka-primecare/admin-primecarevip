@@ -5,15 +5,19 @@ Answers to the three blockers, plus one small addition to the fixture script.
 ## 1. Sign-in credential for the fixture guardian
 
 Correct — the fixture writes chart records only; nothing creates the sign-in account.
-The account has to be created with the exact uid `smokeguardianuid000000000001`, because
-that string is what the chart record stores as `firebaseUid` and what the allowlist matches.
+Correct — the fixture writes chart records only; nothing creates the sign-in account.
+The sign-in uid and the `firebaseUid` on the guardian's chart record must be the same string,
+and that string is what `GUARDIAN_READS_ALLOWLIST` matches. If you already created an account
+(uid `usEWzqPQVMNdv4R7k5I4DewZjC12`), that uid wins and the script's placeholder must yield.
 
 Planned change to `seed-guardian-fixture.js`:
 
+- New `--guardian-uid=<uid>` flag, defaulting to the pinned placeholder: whatever is passed is
+  written as the chart `firebaseUid`, used for the auth account, and echoed in the printout.
 - New step in `seed()` (runs under `--apply`, printed in dry run): create the auth user with
-  the pinned uid, the fixture email, a password supplied by the operator via
-  `--password=...` or the `SMOKE_GUARDIAN_PASSWORD` environment variable (never hardcoded,
-  never printed back), email marked verified so no invite mail is needed.
+  that uid, the fixture email, a password supplied via `--password=...` or the
+  `SMOKE_GUARDIAN_PASSWORD` environment variable (never hardcoded, never printed back), email
+  marked verified so no invite mail is needed.
 - Idempotent: if the uid already exists, update email/password instead of failing, and
   refuse if an existing account with that uid carries a different, non-fixture email.
 - `--cleanup --apply` deletes the auth user too, so teardown stays complete.
@@ -37,48 +41,56 @@ Missing the child in `ELATION_READ_ALLOWLIST` produces a 403 "Records access is 
 for this account yet", which is a different failure from the guardian gate (which answers as
 absence, 404) — useful to tell the two apart during the run.
 
-## 3. Setting the flags on the deployed functions
+## 3. Setting the flags on the deployed functions — do NOT use gcloud here
 
-The values are read from `process.env` at request time, so they are per-function runtime
-environment variables — there is no config document, and nothing picks them up without an
-update to the function. Three functions serve artifacts and must all carry the flags:
-`getLabs`, `getImaging`, `getMedicalRecords`.
+Confirmed by your describe: these are **1st-gen** functions (vars at top-level
+`environmentVariables`, not `serviceConfig`). Two consequences:
 
-`--update-env-vars` merges (it does not clear the others). Comma-separated values need the
-alternate delimiter, otherwise gcloud splits them into separate variables:
+- `gcloud functions deploy getLabs --update-env-vars ...` with no `--source` defaults to
+  `--source=.` — the **current directory**. From a Cloud Shell without `functions/` it would
+  package the wrong tree and clobber the deployed code. It is not source-safe. Do not run it.
+- There is no gen1 "update env only" command; every env change is a full redeploy.
 
-```bash
-for FN in getLabs getImaging getMedicalRecords; do
-  gcloud functions deploy "$FN" \
-    --region=us-central1 \
-    --project=prive-care-vip \
-    --update-env-vars "^@^GUARDIAN_READS_ENABLED=true@GUARDIAN_READS_ALLOWLIST=smokeguardianuid000000000001,SMOKE-GUARDIAN-1@ELATION_READ_ALLOWLIST=SMOKE-MINOR-1,SMOKE-GUARDIAN-1"
-done
-```
+The correct channel is the one already used for allowlist appends (GO-LIVE.md):
 
-Note this rewrites `ELATION_READ_ALLOWLIST` wholesale — read the current value first and
-append the two fixture ids to it rather than replacing it:
+1. Snapshot the current deployed values to `~/allow-deployed.txt` (your rollback artifact —
+   not `/tmp`, Cloud Shell wipes it):
+   ```bash
+   gcloud functions describe getLabs --region=us-central1 --project=prive-care-vip \
+     --format='value(environmentVariables)' > ~/allow-deployed.txt
+   ```
+2. Build the new `ELATION_READ_ALLOWLIST` as `<old>,SMOKE-MINOR-1,SMOKE-GUARDIAN-1` with
+   `printf '%s'` (no trailing newline), keeping all ~800 existing ids.
+3. Set the repository secrets and re-run the workflow:
+   ```bash
+   printf '%s' "$(cat ~/allow-new.txt)" | gh secret set ELATION_READ_ALLOWLIST_PRODUCTION
+   printf '%s' 'true' | gh secret set GUARDIAN_READS_ENABLED_PRODUCTION
+   printf '%s' 'usEWzqPQVMNdv4R7k5I4DewZjC12,SMOKE-GUARDIAN-1' | gh secret set GUARDIAN_READS_ALLOWLIST_PRODUCTION
+   ```
+   Confirm those secret names against `deploy-production.yml` before running — if
+   `GUARDIAN_READS_*` are not yet wired into the workflow's `.env.prive-care-vip` writer, that
+   wiring is a one-line workflow change and must land first, or the redeploy silently drops them.
+4. Re-run the last **Deploy to Production** run from the Actions tab (not an empty commit —
+   `main` is branch-protected). The re-run re-reads secrets and rewrites
+   `functions/.env.prive-care-vip`.
 
-```bash
-gcloud functions describe getLabs --region=us-central1 --project=prive-care-vip \
-  --format='value(serviceConfig.environmentVariables)'
-```
+Verification, content-based rather than CI-green: `sorted diff` of old vs new
+`ELATION_READ_ALLOWLIST` shows exactly two `>` lines (the two fixture ids) and N → N+2, and
+`updateTime` advanced on `getLabs`, `getImaging` and `getMedicalRecords` — the D-071 silent
+no-op trap.
 
-Turning it back off after the smoke test:
+Your intended values are right, with two notes:
 
-```bash
-for FN in getLabs getImaging getMedicalRecords; do
-  gcloud functions deploy "$FN" --region=us-central1 --project=prive-care-vip \
-    --update-env-vars GUARDIAN_READS_ENABLED=false
-done
-```
+- Replacing `GUARDIAN_READS_ALLOWLIST` (currently `hpqpnevnzuveuph0nu0v3yrqsz02`) removes that
+  existing canary guardian. Record it in the rollback file if it is still wanted.
+- Matching is case-insensitive on both sides, so `usEWzqPQVMNdv4R7k5I4DewZjC12` matches fine —
+  but that uid must be the one stored as `firebaseUid` on the guardian's chart record, so seed
+  the fixture with that uid rather than the placeholder in the script.
 
-Setting `GUARDIAN_READS_ENABLED=false`, or clearing the allowlist, denies every guardian read
-— the gate fails closed by design.
+`getImaging` and `getMedicalRecords` are the same gen1 setup and read the same three
+variables through the shared read path, so all three must carry identical values — which the
+`.env.prive-care-vip` route gives you automatically, and per-function gcloud edits would not.
 
-If your deploy pipeline owns the runtime environment (a `functions/.env.<project>` file or the
-deploy workflow), make the same change there as well, or the next production deploy will
-silently drop the flags.
 
 ## Deliverable
 
