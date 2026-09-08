@@ -91,6 +91,16 @@
   ],
   "fieldOverrides": [
     {
+      "collectionGroup": "phi_access_log",
+      "fieldPath": "timestamp",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "phi_access_log",
+      "fieldPath": "action",
+      "indexes": []
+    },
+    {
       "collectionGroup": "labs",
       "fieldPath": "hasArtifact",
       "indexes": [
