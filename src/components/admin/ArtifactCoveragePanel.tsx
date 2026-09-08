@@ -255,25 +255,42 @@ export default function ArtifactCoveragePanel() {
           className={`mt-4 rounded-xl border px-4 py-3 ${
             auditProgress.finished
               ? "border-success/30 bg-success/5"
-              : "border-accent/30 bg-accent/5"
+              : auditProgress.stalled
+                ? "border-destructive/30 bg-destructive/5"
+                : "border-accent/30 bg-accent/5"
           }`}
         >
           <div className="flex flex-wrap items-center justify-between gap-2">
             <p className="flex items-center gap-2 text-xs font-medium text-foreground">
               {auditProgress.finished ? (
                 <CheckCircle2 className="h-3.5 w-3.5 text-success" />
+              ) : auditProgress.stalled ? (
+                <AlertTriangle className="h-3.5 w-3.5 text-destructive" />
               ) : (
                 <Loader2 className="h-3.5 w-3.5 animate-spin text-accent" />
               )}
               {auditProgress.finished
                 ? "Audit complete — the results below are from this run."
-                : "Audit running — this page updates itself, no need to refresh."}
+                : auditProgress.stalled
+                  ? "No results after far longer than a normal run — this audit looks stuck."
+                  : "Audit running — this page updates itself, no need to refresh."}
             </p>
             <div className="flex items-center gap-3 text-xs text-muted-foreground">
               <span className="font-mono tabular-nums">
                 {formatElapsed(auditProgress.elapsedMs)}
                 {auditProgress.finished ? "" : ` / ~${formatElapsed(auditProgress.expectedMs)}`}
               </span>
+              {auditProgress.stalled && (
+                <button
+                  onClick={() => {
+                    auditProgress.dismiss();
+                    void triggerAudit();
+                  }}
+                  className="rounded-md border border-border px-2 py-1 hover:bg-muted"
+                >
+                  Start again
+                </button>
+              )}
               <button
                 onClick={auditProgress.dismiss}
                 className="rounded-md border border-border px-2 py-1 hover:bg-muted"
@@ -285,7 +302,11 @@ export default function ArtifactCoveragePanel() {
           <div className="mt-2 h-1.5 w-full overflow-hidden rounded-full bg-muted">
             <div
               className={`h-full rounded-full transition-all duration-1000 ${
-                auditProgress.finished ? "bg-success" : "bg-accent"
+                auditProgress.finished
+                  ? "bg-success"
+                  : auditProgress.stalled
+                    ? "bg-destructive"
+                    : "bg-accent"
               }`}
               style={{ width: `${auditProgress.progress}%` }}
             />
@@ -293,10 +314,13 @@ export default function ArtifactCoveragePanel() {
           <p className="mt-2 text-[11px] text-muted-foreground">
             {auditProgress.finished
               ? `Run ${report?.runId ?? ""} · ${report?.generatedAt ? new Date(report.generatedAt).toLocaleString() : ""}`
-              : "The job reports only when it finishes, so the bar shows elapsed time against a typical run. Checking every 15 seconds; results appear here automatically."}
+              : auditProgress.stalled
+                ? "A typical run publishes in about 4 minutes. Nothing new has been published, so the job most likely failed before it could report. Start it again, and if it stalls a second time the numbers below are still the last good run."
+                : "The job reports only when it finishes, so the bar shows elapsed time against a typical run. Checking every 15 seconds; results appear here automatically."}
           </p>
         </div>
       )}
+
 
 
       <div className="mt-3 flex flex-wrap items-center justify-between gap-2 rounded-lg bg-muted/50 px-3 py-2">
