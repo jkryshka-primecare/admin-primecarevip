@@ -54,6 +54,7 @@ export default function ArtifactCoveragePanel() {
 
   const auditProgress = useAuditRunProgress({
     currentRunId: report?.runId ?? null,
+    currentGeneratedAt: report?.generatedAt ?? null,
     refetch,
   });
 
