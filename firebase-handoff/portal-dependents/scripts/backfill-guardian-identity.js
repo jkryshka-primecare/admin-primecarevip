@@ -17,27 +17,34 @@
  *
  * WHAT THIS DOES
  * --------------
- * READ-ONLY by default. For every active guardian entry on a minor:
- *   1. Resolve the guardian's own Elation chart by email
- *      (patients where lower(email) == guardianEmail), and
+ * READ-ONLY by default. For every ACTIVE guardian entry on a minor:
+ *   1. Resolve the guardian's OWN chart from the (often shared) family inbox —
+ *      see resolveGuardianChart: the child and every minor on that email are
+ *      dropped first, then a single remaining adult matches, else an exact
+ *      guardianName match breaks the tie, else it is reported ambiguous.
  *   2. Resolve the guardian's Firebase Auth uid by email.
  * Writes ONLY the two identity fields on that one entry:
  *      guardianElationId (if resolved and currently null)
  *      guardianUid       (if resolved and currently null)
- * Nothing else on the child doc is touched: status, source, confirmedBy,
- * dependent{}, artifacts — all untouched.
+ * Nothing else is touched: status, source, confirmedBy/At, reason, other
+ * guardian entries on the same child, dependent{}, artifacts.
  *
- * SAFETY RULES (all fail-closed; ambiguity is reported, never guessed)
- *   - AMBIGUOUS_CHART   : email matches >1 patient chart      -> skip
- *   - SELF_LINK         : resolved chart id == child id       -> skip
- *   - CHART_IS_MINOR    : resolved chart is itself a minor    -> skip
- *   - UID_CONFLICT      : entry already bound to another uid  -> skip
- *   - NO_AUTH_USER      : guardian has no Auth account yet    -> chart-only fill
- *   - NO_MATCH          : neither chart nor uid resolvable    -> report row
+ * SKIP / REPORT REASONS (all fail-closed; ambiguity is reported, never guessed)
+ *   - SELF_LINK             : resolved chart id == child id          -> skip
+ *   - AMBIGUOUS_CHART       : >1 adult on the email, no name tiebreak-> skip
+ *   - ONLY_MINORS_ON_EMAIL  : the inbox carries only the kids        -> needsInvite
+ *   - UID_CONFLICT          : entry already bound to another uid     -> skip
+ *   - NO_EMAIL              : entry has no guardianEmail             -> skip
+ *   - CHART_LOOKUP_FAILED:* : Firestore query error                  -> skip
+ *   - NO_CHART_NO_AUTH_ACCOUNT : nothing resolvable                  -> needsInvite
  *
  * A guardian with no chart AND no Auth account cannot be made readable by any
  * backfill — those parents need the normal self-invite first. This script
  * emits them as `needsInvite` so staff can act on a concrete list.
+ *
+ * NOTE ON READABILITY AFTER THE RUN
+ *   guardianUid filled  -> readable immediately (bound-uid fast path)
+ *   chart only filled   -> readable once that parent signs in (chart path)
  *
  * USAGE
  *   node backfill-guardian-identity.js                 # dry run, full report
