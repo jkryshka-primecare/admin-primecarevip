@@ -105,3 +105,45 @@ Nothing appends a *newly added* minor to the read list after launch. Until
 onboarding automates it (#496), a new dependent needs the same append. Worth a
 weekly check: minors eligible per §3 minus ids present in the deployed list
 should be empty.
+
+---
+
+## Verified 2026-09-08 — the append is already done (no-op)
+
+Live check against the deployed `getLabs` env: all 174 eligible minors
+(`dependent.isMinor` + ≥1 `active` guardian) are present. to-add 0, MISSING 0.
+§§2–3 above stay as the *procedure*; there is nothing to run today.
+
+### What put them there
+
+The **step 7 widen** in `ADULT-BACKFILL.md`: "Widen `ELATION_READ_ALLOWLIST` by
+the A−B delta (~197), lockstep on both functions." A = `ELATION_INGEST_ALLOWLIST`
+= 960 active adults ∪ **174 minor ids**; B = the 937-entry read list. Widening by
+A−B necessarily carried the whole minor set across. So the read list was **not**
+held at 937 — that line describes the state *before* step 7, and step 7 ran.
+
+Two corroborating details: the count matches the ingest set exactly (174, not a
+subset), and the one duplicate id `1189873388814337` is the fingerprint of a
+manual `printf '%s' "$old,$new"` concat, not of per-claim appends. Duplicates are
+harmless — the gate is a `Set.has()`.
+
+### Is it stable? Yes for these ids, no as a mechanism
+
+Nothing *maintains* the list. It is a plain env var written from
+`ELATION_READ_ALLOWLIST_PRODUCTION` on each Deploy to Production run. The 174 ids
+persist for exactly as long as nobody rebuilds the secret from an older snapshot.
+The real risk is not drift, it is a bad rebuild: always snapshot the deployed
+value first (`GO-LIVE.md` §"Appending an id") and diff old vs new after redeploy.
+
+### §5 standing gap — still real, unchanged
+
+Step 7 was a **one-time batch**, not automation. No code path appends to
+`ELATION_READ_ALLOWLIST` on claim, on `adminLinkGuardian`, or on
+`adminProvisionPatients`. Any dependent added **after** that batch — new minor,
+or an existing minor whose first guardian link goes `active` later — is missing
+from the read list and fails 403 `NOT_IN_ALLOWLIST` on the guardian's first read.
+Same for a guardian revoked-then-reinstated child if the id was never added.
+
+Until #496 automates it, keep the weekly reconciliation from §3: eligible ids per
+the query minus ids in the deployed list must be empty. That check is what turns
+an unmaintained env var into a supervised one.
