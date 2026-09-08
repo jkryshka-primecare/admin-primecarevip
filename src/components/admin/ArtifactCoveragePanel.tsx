@@ -52,14 +52,20 @@ export default function ArtifactCoveragePanel() {
   const healthy =
     !!report && report.ingestableDenominator > 0 && report.ingestableMissingCount === 0;
 
+  const auditProgress = useAuditRunProgress({
+    currentRunId: report?.runId ?? null,
+    refetch,
+  });
+
   const triggerAudit = async () => {
     try {
       const res = await runAudit.mutateAsync({});
+      auditProgress.start(res?.runId ?? null);
       toast({
         title: "Audit started",
         description: res?.runId
-          ? `Run ${res.runId} queued. Refresh in a few minutes for the report.`
-          : "The coverage job is running. Refresh in a few minutes for the report.",
+          ? `Run ${res.runId} queued. The progress bar below updates on its own.`
+          : "The coverage job is running. The progress bar below updates on its own.",
       });
     } catch (e) {
       toast({
@@ -69,6 +75,7 @@ export default function ArtifactCoveragePanel() {
       });
     }
   };
+
 
 
   const triggerSmoke = async () => {
