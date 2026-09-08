@@ -229,8 +229,11 @@ async function main() {
       }
 
       /* eslint-disable no-await-in-loop */
-      const chart = hasChart ? { id: String(g.guardianElationId), reason: 'PREEXISTING' }
-        : await resolveChartByEmail(email);
+      // Shared family inbox: resolveGuardianChart drops the child and every
+      // minor sharing this email before it will call anything a match.
+      const chart = hasChart
+        ? { id: String(g.guardianElationId), reason: 'PREEXISTING' }
+        : await resolveGuardianChart(email, childId, g.guardianName);
       const uid = hasUid ? lower(g.guardianUid) : await resolveUidByEmail(email);
 
       if (chart.id && chart.id === String(childId)) {
@@ -238,14 +241,17 @@ async function main() {
         report.skipped.push({ childId, index: i, email, reason: 'SELF_LINK', chartId: chart.id });
         continue;
       }
-      if (chart.id && !hasChart && (await isMinorDoc(chart.id))) {
-        report.counts.skipped += 1;
-        report.skipped.push({ childId, index: i, email, reason: 'CHART_IS_MINOR', chartId: chart.id });
-        continue;
-      }
       if (chart.reason === 'AMBIGUOUS_CHART') {
         report.counts.skipped += 1;
-        report.skipped.push({ childId, index: i, email, reason: 'AMBIGUOUS_CHART', candidates: chart.candidates });
+        report.skipped.push({
+          childId, index: i, email, reason: 'AMBIGUOUS_CHART',
+          guardianName: g.guardianName || null, candidates: chart.candidates,
+        });
+        continue;
+      }
+      if (String(chart.reason || '').startsWith('CHART_LOOKUP_FAILED')) {
+        report.counts.skipped += 1;
+        report.skipped.push({ childId, index: i, email, reason: chart.reason });
         continue;
       }
       if (hasUid && uid && lower(g.guardianUid) !== uid) {
