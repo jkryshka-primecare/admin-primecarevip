@@ -1,11 +1,13 @@
 import { forwardRef, useState } from "react";
 import { motion } from "framer-motion";
-import { ShieldCheck, RefreshCw, Download, AlertTriangle, FileWarning, PlayCircle, Stethoscope, Check, X, MinusCircle, Eye, EyeOff, FileText, Copy } from "lucide-react";
+import { ShieldCheck, RefreshCw, Download, AlertTriangle, FileWarning, PlayCircle, Stethoscope, Check, X, MinusCircle, Eye, EyeOff, FileText, Copy, Loader2, CheckCircle2 } from "lucide-react";
 import { useArtifactCoverage, missesToCsv } from "@/hooks/useArtifactCoverage";
 import CoverageGate from "@/components/admin/CoverageGate";
 import { useRunArtifactAudit, useRunReadPathSmoke, type SmokeReport, type SmokeFixtureOverrides } from "@/hooks/usePortalAdmin";
+import { useAuditRunProgress, formatElapsed } from "@/hooks/useAuditRunProgress";
 import { buildCoverageHandoff } from "@/lib/portal/coverageHandoff";
 import { useToast } from "@/hooks/use-toast";
+
 
 
 /**
@@ -50,14 +52,20 @@ export default function ArtifactCoveragePanel() {
   const healthy =
     !!report && report.ingestableDenominator > 0 && report.ingestableMissingCount === 0;
 
+  const auditProgress = useAuditRunProgress({
+    currentRunId: report?.runId ?? null,
+    refetch,
+  });
+
   const triggerAudit = async () => {
     try {
       const res = await runAudit.mutateAsync({});
+      auditProgress.start(res?.runId ?? null);
       toast({
         title: "Audit started",
         description: res?.runId
-          ? `Run ${res.runId} queued. Refresh in a few minutes for the report.`
-          : "The coverage job is running. Refresh in a few minutes for the report.",
+          ? `Run ${res.runId} queued. The progress bar below updates on its own.`
+          : "The coverage job is running. The progress bar below updates on its own.",
       });
     } catch (e) {
       toast({
@@ -67,6 +75,7 @@ export default function ArtifactCoveragePanel() {
       });
     }
   };
+
 
 
   const triggerSmoke = async () => {
@@ -239,6 +248,55 @@ export default function ArtifactCoveragePanel() {
         </div>
 
       </div>
+
+      {auditProgress.run && (
+        <div
+          className={`mt-4 rounded-xl border px-4 py-3 ${
+            auditProgress.finished
+              ? "border-success/30 bg-success/5"
+              : "border-accent/30 bg-accent/5"
+          }`}
+        >
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <p className="flex items-center gap-2 text-xs font-medium text-foreground">
+              {auditProgress.finished ? (
+                <CheckCircle2 className="h-3.5 w-3.5 text-success" />
+              ) : (
+                <Loader2 className="h-3.5 w-3.5 animate-spin text-accent" />
+              )}
+              {auditProgress.finished
+                ? "Audit complete — the results below are from this run."
+                : "Audit running — this page updates itself, no need to refresh."}
+            </p>
+            <div className="flex items-center gap-3 text-xs text-muted-foreground">
+              <span className="font-mono tabular-nums">
+                {formatElapsed(auditProgress.elapsedMs)}
+                {auditProgress.finished ? "" : ` / ~${formatElapsed(auditProgress.expectedMs)}`}
+              </span>
+              <button
+                onClick={auditProgress.dismiss}
+                className="rounded-md border border-border px-2 py-1 hover:bg-muted"
+              >
+                Dismiss
+              </button>
+            </div>
+          </div>
+          <div className="mt-2 h-1.5 w-full overflow-hidden rounded-full bg-muted">
+            <div
+              className={`h-full rounded-full transition-all duration-1000 ${
+                auditProgress.finished ? "bg-success" : "bg-accent"
+              }`}
+              style={{ width: `${auditProgress.progress}%` }}
+            />
+          </div>
+          <p className="mt-2 text-[11px] text-muted-foreground">
+            {auditProgress.finished
+              ? `Run ${report?.runId ?? ""} · ${report?.generatedAt ? new Date(report.generatedAt).toLocaleString() : ""}`
+              : "The job reports only when it finishes, so the bar shows elapsed time against a typical run. Checking every 15 seconds; results appear here automatically."}
+          </p>
+        </div>
+      )}
+
 
       <div className="mt-3 flex flex-wrap items-center justify-between gap-2 rounded-lg bg-muted/50 px-3 py-2">
         <p className="text-xs text-muted-foreground">
