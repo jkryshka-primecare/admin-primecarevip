@@ -394,9 +394,13 @@ export function evaluateGate(report: CoverageReport): GateVerdict {
   };
 }
 
-/** Latest nightly report. Sorted client-side so no Firestore index is required. */
+/** Latest report. Order on the server so the 30-row page contains newest runs. */
 export function useArtifactCoverage(enabled = true) {
-  const list = useFirestoreList("artifact_coverage_reports", { limit: 30 }, enabled);
+  const list = useFirestoreList(
+    "artifact_coverage_reports",
+    { orderBy: { field: "generatedAt", direction: "desc" }, limit: 30 },
+    enabled,
+  );
 
   const report = useMemo<CoverageReport | null>(() => {
     if (!list.docs.length) return null;
