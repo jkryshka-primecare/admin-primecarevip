@@ -88,6 +88,52 @@
         }
       ]
     }
+    {
+      "collectionGroup": "phi_access_log",
+      "queryScope": "COLLECTION",
+      "fields": [
+        {
+          "fieldPath": "elationPatientId",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "timestamp",
+          "order": "DESCENDING"
+        }
+      ]
+    },
+    {
+      "collectionGroup": "phi_access_log",
+      "queryScope": "COLLECTION",
+      "fields": [
+        {
+          "fieldPath": "uid",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "timestamp",
+          "order": "DESCENDING"
+        }
+      ]
+    },
+    {
+      "collectionGroup": "phi_access_log",
+      "queryScope": "COLLECTION",
+      "fields": [
+        {
+          "fieldPath": "elationPatientId",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "action",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "timestamp",
+          "order": "DESCENDING"
+        }
+      ]
+    }
   ],
   "fieldOverrides": [
     {
