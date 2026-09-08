@@ -290,10 +290,14 @@ async function main() {
         index: i,
         email,
         source: g.source || null,
+        matchReason: chart.reason,
         set: {
           ...(setChart ? { guardianElationId: chart.id } : {}),
           ...(setUid ? { guardianUid: uid } : {}),
         },
+        // Full entry snapshot, before and after — this IS the dry-run diff.
+        before: g,
+        after: next[i],
       });
     }
 
