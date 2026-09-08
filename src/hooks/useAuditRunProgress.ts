@@ -10,6 +10,8 @@ const KEY = "admin.auditRun";
 /** Typical full-walk run length. Only drives the bar's visual pace. */
 const EXPECTED_MS = 4 * 60 * 1000;
 const POLL_MS = 15000;
+/** Past this with nothing published, the run is treated as stuck, not slow. */
+const STALL_MS = 20 * 60 * 1000;
 
 export type AuditRunState = {
   startedAt: number;
@@ -38,9 +40,11 @@ function save(s: AuditRunState | null) {
 
 export function useAuditRunProgress(opts: {
   currentRunId: string | null | undefined;
+  /** ISO time of the report on screen — a fresher one also means "landed". */
+  currentGeneratedAt?: string | null;
   refetch: () => void;
 }) {
-  const { currentRunId, refetch } = opts;
+  const { currentRunId, currentGeneratedAt, refetch } = opts;
   const [run, setRun] = useState<AuditRunState | null>(() => load());
   const [now, setNow] = useState(() => Date.now());
   const refetchRef = useRef(refetch);
@@ -67,15 +71,17 @@ export function useAuditRunProgress(opts: {
 
   const running = !!run && !run.finishedAt;
 
-  // A newer report id than the one on screen when we started = the run landed.
+  // A newer report id — or a report generated after we started — = the run landed.
   useEffect(() => {
     if (!running || !run) return;
-    if (currentRunId && currentRunId !== run.baselineRunId) {
-      const done = { ...run, finishedAt: Date.now(), runId: currentRunId };
+    const genMs = currentGeneratedAt ? Date.parse(currentGeneratedAt) : NaN;
+    const fresher = Number.isFinite(genMs) && genMs > run.startedAt;
+    if ((currentRunId && currentRunId !== run.baselineRunId) || fresher) {
+      const done = { ...run, finishedAt: Date.now(), runId: currentRunId ?? run.runId };
       setRun(done);
       save(done);
     }
-  }, [currentRunId, running, run]);
+  }, [currentRunId, currentGeneratedAt, running, run]);
 
   // Tick for the elapsed clock, poll the bridge for a fresh report.
   useEffect(() => {
@@ -94,9 +100,13 @@ export function useAuditRunProgress(opts: {
     ? 100
     : Math.min(95, 100 * (1 - Math.exp(-elapsedMs / (EXPECTED_MS / 2))));
 
+  // Far past a typical run with nothing published: the job is not coming back.
+  const stalled = running && elapsedMs > STALL_MS;
+
   return {
     run,
     running,
+    stalled,
     finished: !!run?.finishedAt,
     elapsedMs,
     progress,
@@ -105,6 +115,7 @@ export function useAuditRunProgress(opts: {
     dismiss,
   };
 }
+
 
 export function formatElapsed(ms: number): string {
   const s = Math.max(0, Math.floor(ms / 1000));
