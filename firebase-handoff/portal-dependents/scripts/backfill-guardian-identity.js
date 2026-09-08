@@ -70,28 +70,94 @@ const auth = admin.auth();
 
 const lower = (v) => String(v || '').trim().toLowerCase();
 
-const chartCache = new Map(); // email -> { id, reason } | null
+const candidateCache = new Map(); // email -> [{ id, isMinor, name, dob }]
 const uidCache = new Map(); // email -> uid | null
 
-async function resolveChartByEmail(email) {
-  if (chartCache.has(email)) return chartCache.get(email);
-  let out = { id: null, reason: 'NO_MATCH' };
+function docName(d) {
+  const first = d.get('firstName') || d.get('first_name') || '';
+  const last = d.get('lastName') || d.get('last_name') || '';
+  const full = d.get('name') || d.get('fullName') || `${first} ${last}`;
+  return lower(full).replace(/\s+/g, ' ').trim();
+}
+
+function isMinorSnap(d) {
+  if (d.get('dependent.isMinor') === true) return true;
+  const dob = String(d.get('dob') || d.get('dateOfBirth') || '').trim();
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(dob);
+  if (!m) return false; // unknown age -> not proven a minor; name/self fences still apply
+  const eighteen = Date.UTC(Number(m[1]) + 18, Number(m[2]) - 1, Number(m[3]));
+  return Date.now() < eighteen;
+}
+
+/** All roster docs carrying this email, with the facts needed to disambiguate. */
+async function candidatesForEmail(email) {
+  if (candidateCache.has(email)) return candidateCache.get(email);
+  let list = [];
   try {
     // Roster docs store email in `email`; some carry `emailLower`.
     const snaps = await Promise.all([
-      db.collection('patients').where('emailLower', '==', email).limit(5).get(),
-      db.collection('patients').where('email', '==', email).limit(5).get(),
+      db.collection('patients').where('emailLower', '==', email).limit(25).get(),
+      db.collection('patients').where('email', '==', email).limit(25).get(),
     ]);
-    const ids = new Set();
-    for (const s of snaps) for (const d of s.docs) ids.add(d.id);
-    const list = [...ids];
-    if (list.length === 1) out = { id: list[0], reason: 'CHART_MATCH' };
-    else if (list.length > 1) out = { id: null, reason: 'AMBIGUOUS_CHART', candidates: list };
+    const seen = new Map();
+    for (const s of snaps) {
+      for (const d of s.docs) {
+        if (!seen.has(d.id)) {
+          seen.set(d.id, {
+            id: d.id,
+            isMinor: isMinorSnap(d),
+            name: docName(d),
+            dob: String(d.get('dob') || d.get('dateOfBirth') || '') || null,
+          });
+        }
+      }
+    }
+    list = [...seen.values()];
   } catch (e) {
-    out = { id: null, reason: `CHART_LOOKUP_FAILED:${e.code || e.message}` };
+    candidateCache.set(email, { error: `CHART_LOOKUP_FAILED:${e.code || e.message}` });
+    return { error: `CHART_LOOKUP_FAILED:${e.code || e.message}` };
   }
-  chartCache.set(email, out);
-  return out;
+  candidateCache.set(email, list);
+  return list;
+}
+
+/**
+ * Resolve the GUARDIAN's own chart from a shared family inbox.
+ *
+ * A parent's email sits on the child's record too — that is exactly how the
+ * email_on_file cohort was matched — so a bare email lookup returns the child
+ * (and siblings). Disambiguation, in order:
+ *   1. drop the child itself,
+ *   2. drop every candidate that is a minor (dependent.isMinor, or DOB < 18),
+ *   3. if one adult remains -> match,
+ *   4. if several remain -> require an exact normalized name match against the
+ *      entry's guardianName; one hit matches, zero or many is AMBIGUOUS_CHART.
+ * Never guesses.
+ */
+async function resolveGuardianChart(email, childId, guardianName) {
+  const all = await candidatesForEmail(email);
+  if (all && all.error) return { id: null, reason: all.error };
+
+  const adults = all.filter((c) => c.id !== String(childId) && !c.isMinor);
+  if (adults.length === 0) {
+    return {
+      id: null,
+      reason: all.length ? 'ONLY_MINORS_ON_EMAIL' : 'NO_MATCH',
+      candidates: all.map((c) => c.id),
+    };
+  }
+  if (adults.length === 1) return { id: adults[0].id, reason: 'CHART_MATCH_ADULT' };
+
+  const want = lower(guardianName).replace(/\s+/g, ' ').trim();
+  if (want) {
+    const named = adults.filter((c) => c.name && c.name === want);
+    if (named.length === 1) return { id: named[0].id, reason: 'CHART_MATCH_ADULT_NAME' };
+  }
+  return {
+    id: null,
+    reason: 'AMBIGUOUS_CHART',
+    candidates: adults.map((c) => ({ id: c.id, name: c.name, dob: c.dob })),
+  };
 }
 
 async function resolveUidByEmail(email) {
@@ -105,15 +171,6 @@ async function resolveUidByEmail(email) {
   }
   uidCache.set(email, uid);
   return uid;
-}
-
-async function isMinorDoc(id) {
-  try {
-    const s = await db.collection('patients').doc(id).get();
-    return Boolean(s.exists && s.get('dependent.isMinor'));
-  } catch (_e) {
-    return false;
-  }
 }
 
 async function main() {
