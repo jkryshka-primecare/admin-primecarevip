@@ -87,7 +87,7 @@
           "order": "ASCENDING"
         }
       ]
-    }
+    },
     {
       "collectionGroup": "phi_access_log",
       "queryScope": "COLLECTION",
