@@ -168,7 +168,7 @@ change, no disclosure, most of the UX win.
 Ship this as a **separate PR** from the `customToken` change; it touches error
 mapping and the hub maps reasons as-is today.
 
-## 6. GitHub issue body
+## 6. GitHub issue body (filed as #505)
 
 Title: `claimAccount: return additive customToken for one-step activation`
 
