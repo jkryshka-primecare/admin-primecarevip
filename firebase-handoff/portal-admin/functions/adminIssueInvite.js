@@ -122,22 +122,37 @@ exports.adminIssueInvite = functions
       return jsonError(res, 500, 'INTERNAL', 'ROSTER_READ_FAILED');
     }
 
-    if (patient.firebaseUid) {
+    // A member counts as claimed if EITHER binding marker is present.
+    // `bindMember` writes `authUid` (+ `boundAt`), `claimAccount` writes
+    // `firebaseUid`. Resetting only `firebaseUid` left a stale `authUid`
+    // pointing at a deleted Auth user, so the claim page refused the fresh
+    // invite ("already bound") — see Lainey Kieffer, 2026-09-08.
+    const boundUid = String(patient.firebaseUid || patient.authUid || '');
+    if (boundUid) {
       if (!resetClaim) {
         return jsonError(res, 409, 'ALREADY_EXISTS', 'ALREADY_CLAIMED',
           'This member has already activated their portal account.');
       }
-      const previousUid = String(patient.firebaseUid);
+      const previousUid = boundUid;
       try {
-        try {
-          await admin.auth().deleteUser(previousUid);
-        } catch (e) {
-          if (e.code !== 'auth/user-not-found') throw e;
+        const uids = [...new Set([patient.firebaseUid, patient.authUid].filter(Boolean).map(String))];
+        for (const uid of uids) {
+          try {
+            await admin.auth().deleteUser(uid);
+          } catch (e) {
+            if (e.code !== 'auth/user-not-found') throw e;
+          }
         }
         await patientRef.update({
           firebaseUid: admin.firestore.FieldValue.delete(),
+          authUid: admin.firestore.FieldValue.delete(),
+          boundAt: admin.firestore.FieldValue.delete(),
           claimedAt: admin.firestore.FieldValue.delete(),
           webAccessVerifiedAt: admin.firestore.FieldValue.delete(),
+          // Must end up unset, not 'pending': claimAccount only re-fires
+          // hydration when it is absent (GO-LIVE.md §reset).
+          hydrationStatus: admin.firestore.FieldValue.delete(),
+          hydrationPendingAt: admin.firestore.FieldValue.delete(),
           claimReset: {
             at: admin.firestore.Timestamp.now(),
             by: actor,
@@ -152,6 +167,7 @@ exports.adminIssueInvite = functions
       await audit({ action: 'claim_reset', elationPatientId, actor, reason, previousUid, ok: true });
       log('adminIssueInvite', 'claim-reset', { elationPatientId });
     }
+
 
     const recipient = typeof patient.email === 'string' ? patient.email.trim() : '';
     if (!recipient) return jsonError(res, 422, 'FAILED_PRECONDITION', 'NO_EMAIL_ON_ROSTER');
