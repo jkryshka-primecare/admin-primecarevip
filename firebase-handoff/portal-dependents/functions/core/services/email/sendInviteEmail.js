@@ -59,7 +59,10 @@ async function sendInviteEmail({ to, token }) {
     to: recipient,
     from: { email: 'health@primecarevip.com', name: 'Prime Care VIP' },
     subject: 'Your Prime Care VIP patient portal is ready',
-    content: [{ type: 'text/html', value: claimEmailHtml(`${CLAIM_BASE}?t=${token}`) }],
+    // The new My Health Hub /claim route reads the query param `token`.
+    // The legacy Firebase portal used `t`; sending `token` (and keeping `t`
+    // for the old build during the parallel window) keeps both live.
+    content: [{ type: 'text/html', value: claimEmailHtml(`${CLAIM_BASE}?token=${token}&t=${token}`) }],
   });
 }
 
