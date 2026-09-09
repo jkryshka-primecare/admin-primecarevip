@@ -462,3 +462,119 @@ describe('coverage audit resolves the uid from the parent patient doc', () => {
     expect(rows.some((r) => r.documentId === seededUnbound.documentId)).toBe(false);
   });
 });
+
+/**
+ * GO-LIVE GATE (guardian reads live: GUARDIAN_READS_ENABLED=true, ALLOWLIST=*).
+ *
+ * Two fences the suite did not previously exercise:
+ *
+ *  1. UID CASE DRIFT. D-016 keys Firestore on a lower-cased uid; D-112 Auth
+ *     uids are case-sensitive; admin/CSV guardian loads wrote the raw
+ *     mixed-case uid. `guardians.normalizeUid` folds case on BOTH sides — a
+ *     legitimate guardian must still resolve, and folding case must not widen
+ *     the match to a different uid.
+ *  2. D-068 SUBJECT GATE. `ELATION_READ_ALLOWLIST` is checked on the CHILD, not
+ *     the guardian. If the harness leaves ELATION_FULL_SYNC_ENABLED=true the
+ *     gate is never exercised, so these cases pin both env vars themselves.
+ */
+describe('[go-live] guardian uid case drift + D-068 subject gate', () => {
+  const prior = {};
+  beforeAll(() => {
+    prior.enabled = process.env.GUARDIAN_READS_ENABLED;
+    prior.allow = process.env.GUARDIAN_READS_ALLOWLIST;
+    prior.sync = process.env.ELATION_FULL_SYNC_ENABLED;
+    prior.readAllow = process.env.ELATION_READ_ALLOWLIST;
+    process.env.GUARDIAN_READS_ENABLED = 'true';
+    process.env.GUARDIAN_READS_ALLOWLIST = '*';
+  });
+  afterAll(() => {
+    process.env.GUARDIAN_READS_ENABLED = prior.enabled;
+    process.env.GUARDIAN_READS_ALLOWLIST = prior.allow;
+    process.env.ELATION_FULL_SYNC_ENABLED = prior.sync;
+    process.env.ELATION_READ_ALLOWLIST = prior.readAllow;
+  });
+
+  async function family() {
+    const guardian = await seedPatient();
+    const child = await seedPatient({ minor: true });
+    await child.linkGuardian(guardian);
+    const doc = await seedDocument(child, { module: 'labs' });
+    return { guardian, child, doc };
+  }
+
+  /** Open the D-068 gate for exactly these subjects, nothing else. */
+  function allowSubjects(...ids) {
+    process.env.ELATION_FULL_SYNC_ENABLED = 'false';
+    process.env.ELATION_READ_ALLOWLIST = ids.join(',');
+  }
+
+  test('a mixed-case stored guardianUid still authorizes the lower-cased caller', async () => {
+    const { guardian, child, doc } = await family();
+    allowSubjects(child.patientId);
+    await child.setGuardianUidRaw(guardian, String(guardian.firebaseUid).toUpperCase());
+
+    const res = await readArtifact({ as: guardian, of: child, doc });
+    expect(res.status).toBe(200);
+    expect(res.signedUrl).toEqual(expect.any(String));
+  });
+
+  test('case folding does not widen the match to a DIFFERENT uid', async () => {
+    const { guardian, child, doc } = await family();
+    allowSubjects(child.patientId);
+    // Same uid with one character changed, then upper-cased: must NOT match.
+    const near = `${String(guardian.firebaseUid).slice(0, -1)}z`.toUpperCase();
+    await child.setGuardianUidRaw(guardian, near);
+
+    const res = await readArtifact({ as: guardian, of: child, doc });
+    expect(res.status).toBe(404);
+    expect(res.signedUrl).toBeUndefined();
+  });
+
+  test('D-068 is enforced on the CHILD: guardian allowed, child not allowlisted -> 403', async () => {
+    const { guardian, child, doc } = await family();
+    // The GUARDIAN's own id is allowlisted; the SUBJECT's is not.
+    allowSubjects(guardian.patientId);
+
+    const res = await readArtifact({ as: guardian, of: child, doc });
+    expect(res.status).toBe(403);
+    expect(res.body.reason).toBe('NOT_IN_ALLOWLIST');
+    expect(res.signedUrl).toBeUndefined();
+  });
+
+  test('D-068 fails closed when the allowlist is empty', async () => {
+    const { guardian, child, doc } = await family();
+    allowSubjects();
+    const res = await readArtifact({ as: guardian, of: child, doc });
+    expect(res.status).toBe(403);
+  });
+
+  test('an email-only link (no uid, no chart id) is denied on every wrapper', async () => {
+    const guardian = await seedPatient();
+    const child = await seedPatient({ minor: true });
+    await child.linkGuardian(guardian, { emailOnly: true });
+    allowSubjects(child.patientId, guardian.patientId);
+
+    for (const mod of ['labs', 'imaging', 'records']) {
+      const doc = await seedDocument(child, { module: mod });
+      const res = await readArtifact({ as: guardian, of: child, doc });
+      expect([403, 404]).toContain(res.status);
+      expect(res.signedUrl).toBeUndefined();
+    }
+  });
+
+  test('the subject resolves identically on all three wrappers for a bound guardian', async () => {
+    const { guardian, child } = await family();
+    const other = await seedPatient({ minor: true });
+    allowSubjects(child.patientId, other.patientId);
+
+    for (const mod of ['labs', 'imaging', 'records']) {
+      const mine = await seedDocument(child, { module: mod });
+      const theirs = await seedDocument(other, { module: mod });
+      expect((await readArtifact({ as: guardian, of: child, doc: mine })).status).toBe(200);
+      // Same wrapper, unrelated subject: never served, never confirmed.
+      const cross = await readArtifact({ as: guardian, of: other, doc: theirs });
+      expect(cross.status).toBe(404);
+      expect(cross.signedUrl).toBeUndefined();
+    }
+  });
+});

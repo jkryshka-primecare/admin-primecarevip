@@ -137,3 +137,84 @@ throwaway in-process RSA key and initializes the Admin SDK with it whenever
 `STORAGE_EMULATOR_HOST` is set and no ADC is configured. GOOG4-RSA signing is
 local, and the emulator does not verify the signature, so the real serve path
 (including `getSignedUrl`) stays under test and the five reads return 200.
+
+---
+
+# Go-live addendum (guardian reads live) — 2026-09-09
+
+## The suite cannot be run "against the deployed production build"
+
+By construction, and this is not a limitation to work around:
+
+- every stateful case **seeds** patients, guardian links, documents and PDF
+  objects. `test/redteam/helpers/env.js` aborts the run when the resolved
+  project is `prive-care-vip` or the bucket starts with it
+  (`refusing to seed production project`).
+- the harness calls `functions/core/services/artifacts/readArtifact` **in
+  process**. It never issues an HTTPS request to a deployed function, so a
+  green run attests to the code at that commit, not to a deployed revision.
+
+The production-safe equivalent on the deployed build is the D-304 read-path
+canary, `adminRunReadPathSmoke` (see `RUN-CANARY-GUARDIAN.md`). Correct division
+of labour for the go-live tick:
+
+| Gate | Instrument | Target |
+|---|---|---|
+| Red-team suite green | `npm run test:redteam` | emulator / dedicated test project, at the deployed commit |
+| Deployed build behaves | `adminRunReadPathSmoke` | production, read-only, real fixtures |
+| Real family | manual guardian E2E | production |
+
+Tick "red-team suite green on the deployed build" only when the suite is green
+**on the exact commit SHA that is deployed**, and the canary is green against
+production. Record both SHAs side by side below.
+
+## How to get the run
+
+CI already does it: `.github/workflows/redteam.yml` runs on every pull request.
+The cheapest green run at the deployed SHA is to open a no-op PR from that SHA
+and read the check. Otherwise, in Cloud Shell (has a JDK):
+
+```bash
+export REDTEAM_ALLOW_WRITES=1
+export REDTEAM_PROJECT_ID=<test project, NEVER prive-care-vip>
+export REDTEAM_STORAGE_BUCKET=<test bucket>
+export REDTEAM_WEB_API_KEY=<test project web api key>
+npm run test:redteam            # stateful, emulator
+npm run test:redteam:readonly   # bucket privacy, safe against prod bucket
+```
+
+## Coverage added for this gate
+
+The three go-live categories were only partly covered. Added in
+`[go-live] guardian uid case drift + D-068 subject gate`:
+
+1. mixed-case stored `guardianUid` still authorizes the lower-cased caller
+   (D-016 vs D-112 drift, folded by `guardians.normalizeUid`);
+2. case folding does **not** widen the match to a near-miss uid;
+3. D-068 `ELATION_READ_ALLOWLIST` enforced on the **child**, not the guardian
+   (guardian allowlisted + child not → 403 `NOT_IN_ALLOWLIST`);
+4. D-068 fails closed on an empty allowlist;
+5. email-only link (no `guardianUid`, no `guardianElationId`) denied on all
+   three wrappers;
+6. subject resolves identically across getLabs / getImaging / getMedicalRecords,
+   with no cross-subject serve.
+
+Already covered before this addendum: Path A (bound uid) and Path B
+(chart id) authorization, revoked entries, `pending_adult_consent`, guardian-of-A
+vs child B, shared-email independence, suppression parity, both-uid audit lines.
+
+**Harness caveat that must be checked in the real repo:** these new cases pin
+`ELATION_FULL_SYNC_ENABLED` / `ELATION_READ_ALLOWLIST` themselves, because if
+the harness sets `ELATION_FULL_SYNC_ENABLED=true` globally the D-068 gate is
+short-circuited and silently untested. Confirm the global value before trusting
+any earlier "subject gate covered" claim.
+
+## Config drift to fix in this runbook
+
+The body above still describes the pre-live world. Now true in production:
+`GUARDIAN_READS_ENABLED=true`, `GUARDIAN_READS_ALLOWLIST=*`,
+`dependentBirthdaySweep` deployed and draining clean (next age-out 19 Oct).
+Consequence for run 2b: the guardian mutation check is still required, and with
+the allowlist at `*` containment now rests **entirely** on the
+guardian→child link, so the mutation run is the only evidence that the link
+check works. Do not skip it.
