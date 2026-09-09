@@ -128,6 +128,18 @@ async function seedPatient({ id, suspended = false, bound = true, minor = false 
       const snap = await db().collection('patients').doc(patientId).get();
       return snap.get('guardians') || [];
     },
+    /**
+     * Overwrite one guardian entry's `guardianUid` VERBATIM — no normalization.
+     * D-016 stores the lower-cased Firestore-key form, D-112 Auth uids are
+     * case-sensitive, and admin/CSV paths wrote the raw mixed-case uid. This is
+     * the only way to seed that drift and prove the resolver folds case.
+     */
+    async setGuardianUidRaw(guardian, rawUid) {
+      const snap = await db().collection('patients').doc(patientId).get();
+      const guardians = (snap.get('guardians') || []).map((g) =>
+        g.guardianElationId === guardian.patientId ? { ...g, guardianUid: rawUid } : g);
+      await db().collection('patients').doc(patientId).set({ guardians }, { merge: true });
+    },
     /** Flip one guardian entry's status (revoked / pending_adult_consent). */
     async setGuardianStatus(guardian, status) {
       const snap = await db().collection('patients').doc(patientId).get();
