@@ -2,6 +2,12 @@
 
 Source: `functions/claimAccount.js` (read from GitHub, 2026-09-09).
 
+> **Superseded in part:** the additive success field is named **`customToken`**,
+> not `loginToken`, and it must be minted with the TRUE-CASE `userRecord.uid`.
+> See `ONE-STEP-ACTIVATION.md` in this folder for the authoritative change,
+> IAM precondition, contract entry, and issue body. The error table below is
+> still current and unchanged.
+
 ## Q1 — Does the success response carry the email?
 
 **No.** The only success write is:
