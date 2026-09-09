@@ -1,8 +1,21 @@
 # One-step activation — additive `customToken` on claimAccount success
 
+Tracking issue: **#505** — the backend PR must say `Closes #505`.
+
 Joint item: changes the `claimAccount` success contract. Ryan sign-off required
-before Lovable2 builds the hub side. Verify on care-preview before
-care.primecarevip.com.
+before merge and before Lovable2 builds the hub side. Verify on care-preview
+before care.primecarevip.com.
+
+## Merge checklist (backend PR, all in the same PR)
+
+- [ ] `Closes #505` in the PR body.
+- [ ] `plans/INTEGRATION-CONTRACT.md` v1.52 entry (text in §4) merged in the same PR.
+- [ ] `iamcredentials.googleapis.com` enabled in **prod** and **care-preview**.
+- [ ] `roles/iam.serviceAccountTokenCreator` self-binding on the `claimAccount`
+      runtime service account in **prod** and **care-preview** (§2).
+- [ ] Ryan sign-off recorded before merge.
+- [ ] care-preview verification run (§3) green.
+- [ ] No failure reason strings changed.
 
 Field name is **`customToken`** (supersedes the `loginToken` name used in the
 earlier draft of `CLAIM-RESPONSE-CONTRACT.md`).
@@ -155,7 +168,7 @@ change, no disclosure, most of the UX win.
 Ship this as a **separate PR** from the `customToken` change; it touches error
 mapping and the hub maps reasons as-is today.
 
-## 6. GitHub issue body
+## 6. GitHub issue body (filed as #505)
 
 Title: `claimAccount: return additive customToken for one-step activation`
 
