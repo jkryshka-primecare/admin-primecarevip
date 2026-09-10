@@ -218,3 +218,17 @@ Consequence for run 2b: the guardian mutation check is still required, and with
 the allowlist at `*` containment now rests **entirely** on the
 guardian→child link, so the mutation run is the only evidence that the link
 check works. Do not skip it.
+
+---
+
+# Close-out — 2026-09-09
+
+Guardian reads go-live is **CLOSED / GO**. The suite ran green in CI at the
+deployed SHA `432bc4f` (PR #509 merged, so the tested tree and the deployed tree
+are the same), covering guardian uid-case drift (D-016/D-112) and the D-068
+subject gate including fail-closed on an empty allowlist.
+
+Full evidence, the D-304 canary results, the line-6 composition argument, and
+the two fast-follows are recorded in
+`firebase-handoff/portal-dependents/GUARDIAN-READS-GO-LIVE-EVIDENCE.md`
+(decisions D-309 and D-309a). Read that file before re-running this runbook.
