@@ -50,13 +50,30 @@ export async function requireStaff(req: Request): Promise<AuthContext | Response
   );
 
   const token = authHeader.replace("Bearer ", "");
-  const { data: claimsData, error: claimsErr } = await supabase.auth.getClaims(token);
-  if (claimsErr || !claimsData?.claims?.sub) {
+
+  // `getClaims` does not always return its failure as `{ error }` — an expired
+  // or structurally invalid JWT makes it *throw*. An uncaught throw escapes the
+  // handler as a bare 500 with no CORS headers, so the browser reports the
+  // failure as a CORS / "Failed to fetch" error and the real cause is masked.
+  // Catch it here and answer with the same clean 401 as the `{ error }` path.
+  let claimsData: { claims?: Record<string, unknown> } | null = null;
+  try {
+    const result = await supabase.auth.getClaims(token);
+    if (result.error) {
+      return deny(401, "Invalid or expired session");
+    }
+    claimsData = result.data as { claims?: Record<string, unknown> } | null;
+  } catch (_err) {
+    return deny(401, "Invalid or expired session");
+  }
+
+  if (!claimsData?.claims?.sub) {
     return deny(401, "Invalid or expired session");
   }
 
   const userId = claimsData.claims.sub as string;
   const email = claimsData.claims.email as string | undefined;
+
 
   // Use a service-role client for the role check (bypasses RLS, read-only).
   const admin = createClient(
