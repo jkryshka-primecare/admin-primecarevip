@@ -1481,7 +1481,14 @@ Deno.serve(async (req) => {
         if (body.fromSelection === true) upstreamPayload.fromSelection = true;
         if (body.apply === true) upstreamPayload.apply = true;
       }
-      if (action === "hydrationReset" && body.force === true) upstreamPayload.force = true;
+      // D-317: `force` re-admits a member the driver's gate would otherwise
+      // reject as terminal (`failed` / `complete`). Operator-only and
+      // deliberate: the apply tier above already required super_admin + a
+      // written reason, and the driver re-applies its own gate per patient.
+      if (
+        (action === "hydrationReset" || action === "hydrationStart")
+        && body.force === true
+      ) upstreamPayload.force = true;
       if (action === "hydrationSelect" && Number(body.limit) > 0) {
         upstreamPayload.limit = Math.min(1000, Number(body.limit));
       }
