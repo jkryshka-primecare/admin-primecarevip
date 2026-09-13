@@ -42,7 +42,12 @@ type Action =
   | "driverStart"
   | "driverStatus"
   | "driverStop"
-  | "driverResume";
+  | "driverResume"
+  | "hydrationSelect"
+  | "hydrationStart"
+  | "hydrationStatus"
+  | "hydrationReset"
+  | "lettersBackfill";
 
 const FUNCTION_BY_ACTION: Record<Action, string> = {
   get: "adminGetPortalAccess",
@@ -75,6 +80,16 @@ const FUNCTION_BY_ACTION: Record<Action, string> = {
   driverStatus: "adminRunBackfillDriver",
   driverStop: "adminRunBackfillDriver",
   driverResume: "adminRunBackfillDriver",
+  // D-317 — slow-chart hydration recovery. `hydrationSelect` is read-only
+  // (which members are owed hydration); start/reset drive PHI fetches and
+  // write terminal hydration state, so they carry the apply tier.
+  hydrationSelect: "hydrationRecoveryDriver",
+  hydrationStart: "hydrationRecoveryDriver",
+  hydrationStatus: "hydrationRecoveryDriver",
+  hydrationReset: "hydrationRecoveryDriver",
+  // D-317 — the letters operator surface. Without it the report backfill can
+  // only half-hydrate a member.
+  lettersBackfill: "backfillElationLettersHttp",
 };
 
 const MUTATIONS: Action[] = ["invite", "revoke", "setAccess", "provision"];
@@ -121,6 +136,21 @@ const SWEEP_ACTIONS: Action[] = ["sweepStart", "sweepStatus", "sweepReset"];
  */
 const DRIVER_ACTIONS: Action[] = ["driverStart", "driverStatus", "driverStop", "driverResume"];
 
+/**
+ * D-317 hydration recovery. `hydrationSelect` / `hydrationStatus` are reads
+ * (admin, no reason, no audit row). `hydrationStart` with `apply:true`,
+ * `hydrationReset` and `lettersBackfill` with `apply:true` fetch PHI and write
+ * hydration/ingest state, so they carry the apply tier: super_admin resolved
+ * server-side, a written reason, and attribution BEFORE the upstream call.
+ */
+const HYDRATION_ACTIONS: Action[] = [
+  "hydrationSelect",
+  "hydrationStart",
+  "hydrationStatus",
+  "hydrationReset",
+  "lettersBackfill",
+];
+
 /** Actions that act on a set of members rather than a single patient. */
 const BATCH_ACTIONS: Action[] = [
   "provision",
@@ -130,6 +160,7 @@ const BATCH_ACTIONS: Action[] = [
   "unclaimedGuardians",
   ...SWEEP_ACTIONS,
   ...DRIVER_ACTIONS,
+  ...HYDRATION_ACTIONS,
   ...BULK_MIGRATIONS,
 ];
 
@@ -989,6 +1020,51 @@ Deno.serve(async (req) => {
 
 
 
+  /**
+   * D-317 hydration recovery control.
+   *   - `hydrationSelect` / `hydrationStatus` read only: admin, no reason.
+   *   - `hydrationStart` (apply), `hydrationReset` and `lettersBackfill`
+   *     (apply) fetch PHI and write hydration state: super_admin + reason +
+   *     attribution first. A dry run needs admin, like any other check.
+   */
+  const isHydration = HYDRATION_ACTIONS.includes(action);
+  const hydrationReadOnly = action === "hydrationSelect" || action === "hydrationStatus";
+  const hydrationApply =
+    (action === "hydrationStart" || action === "lettersBackfill") && body.apply === true;
+  let hydrationIds: string[] = [];
+  if (isHydration) {
+    if (!(await isAdmin(ctx))) {
+      return deny(403, "Only administrators can view or drive hydration recovery.");
+    }
+    if (!hydrationReadOnly) {
+      if (hydrationApply || action === "hydrationReset") {
+        if (!(await isSuperAdmin(ctx))) {
+          return deny(403, "Only a super administrator can run hydration recovery.");
+        }
+        if (!reason) {
+          return deny(400, "A written reason is required for this hydration action.");
+        }
+      }
+      if (action === "hydrationReset" && !RUN_ID_RE.test(runId)) {
+        return deny(400, "A valid runId is required to reset a hydration run.");
+      }
+      const raw = Array.isArray(body.patientIds) ? body.patientIds : [];
+      if (raw.length > 500) return deny(400, "That cohort is too large.");
+      const seen = new Set<string>();
+      for (const item of raw) {
+        const id = String(item ?? "").trim();
+        if (!/^\d{6,25}$/.test(id)) return deny(400, "One of those patient ids is not valid.");
+        if (!seen.has(id)) { seen.add(id); hydrationIds.push(id); }
+      }
+      if (action === "lettersBackfill" && hydrationIds.length === 0) {
+        return deny(400, "The letters backfill needs at least one patient id.");
+      }
+      if (action === "hydrationStart" && hydrationIds.length === 0 && body.fromSelection !== true) {
+        return deny(400, "Supply patient ids, or set fromSelection to use the proposed cohort.");
+      }
+    }
+  }
+
   const bulkApply = isBulk && !statusPoll && body.apply === true;
   let minorIds: string[] = [];
   // Report-ingest cohort switch. The Cloud Function wrapper is the authority
@@ -1377,6 +1453,44 @@ Deno.serve(async (req) => {
 
 
 
+  if (isHydration) {
+    // Hydration wire shape. The Cloud Function takes exactly one of
+    // select | start | status | reset (or the flat letters-backfill body).
+    for (const k of Object.keys(upstreamPayload)) delete upstreamPayload[k];
+    upstreamPayload.actor = actor;
+    if (action === "lettersBackfill") {
+      upstreamPayload.patientIds = hydrationIds;
+      upstreamPayload.cap = Math.max(1, Math.min(50, Number(body.cap) || hydrationIds.length));
+      if (body.apply === true) {
+        upstreamPayload.apply = true;
+        upstreamPayload.reason = reason;
+      }
+    } else {
+      upstreamPayload.action = action === "hydrationStart"
+        ? "start"
+        : action === "hydrationReset"
+          ? "reset"
+          : action === "hydrationSelect"
+            ? "select"
+            : "status";
+      if (runId) upstreamPayload.runId = runId;
+      if (!hydrationReadOnly) upstreamPayload.reason = reason;
+      if (action === "hydrationStart") {
+        upstreamPayload.cap = Math.max(1, Math.min(100, Number(body.cap) || 1));
+        if (hydrationIds.length) upstreamPayload.patientIds = hydrationIds;
+        if (body.fromSelection === true) upstreamPayload.fromSelection = true;
+        if (body.apply === true) upstreamPayload.apply = true;
+      }
+      if (action === "hydrationReset" && body.force === true) upstreamPayload.force = true;
+      if (action === "hydrationSelect" && Number(body.limit) > 0) {
+        upstreamPayload.limit = Math.min(1000, Number(body.limit));
+      }
+    }
+  }
+
+
+
+
   const fnName = FUNCTION_BY_ACTION[action];
   const url = `${FUNCTIONS_BASE}/${fnName}`;
   const started = Date.now();
@@ -1387,7 +1501,8 @@ Deno.serve(async (req) => {
   // poll does not.
   const sweepWrite = isSweep && !sweepStatusOnly;
   const driverWrite = isDriver && !driverStatusOnly;
-  if (bulkApply || isReset || sweepWrite || driverWrite) {
+  const hydrationWrite = hydrationApply || action === "hydrationReset";
+  if (bulkApply || isReset || sweepWrite || driverWrite || hydrationWrite) {
     const attributed = await recordActionStrict(ctx, {
       action: isReset
         ? "backfillRun:reset"
@@ -1395,7 +1510,9 @@ Deno.serve(async (req) => {
           ? `artifactSweep:${action === "sweepStart" ? "start" : "reset"}`
           : driverWrite
             ? `autoResumeDriver:${action.replace("driver", "").toLowerCase()}`
-            : `${action}:apply`,
+            : hydrationWrite
+              ? `hydrationRecovery:${action === "hydrationReset" ? "reset" : action === "lettersBackfill" ? "letters" : "start"}`
+              : `${action}:apply`,
       reason,
       after: {
         limit: upstreamPayload.limit ?? null,
@@ -1409,6 +1526,8 @@ Deno.serve(async (req) => {
         patientIds: action === "backfillMinorReports" ? minorIds : undefined,
         patientCount: action === "backfillMinorReports" ? minorIds.length : undefined,
         cohort: action === "backfillMinorReports" ? cohort : undefined,
+        hydrationPatientCount: hydrationWrite ? hydrationIds.length : undefined,
+        hydrationFromSelection: action === "hydrationStart" ? body.fromSelection === true : undefined,
       },
     });
     if (!attributed) {
