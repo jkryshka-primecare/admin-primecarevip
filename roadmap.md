@@ -15,3 +15,16 @@
 - Real-member activation recheck after a member re-clicks their old link (waiting on MK signal)
 
 - [ ] BLOCKED ON MK: file the D-317 issue, approve deploy, then dry-run + cap:1 for 1370412230508545
+
+## Guardian model — Phase A (non-patient guardian accounts + proxy reads) — in progress
+- [ ] Guardian account record + chartless activation path
+- [ ] Guardian link keyed on guardian account (not chart); explicit positive authorization check
+- [ ] Replace "caller must own a chart" fence; explicit empty/missing id rejection
+- [ ] Wire medications/allergies/problems/appointments through the shared subject resolver
+- [ ] Read-time age-18 gate (moved from Phase C)
+- [ ] Negative tests: no links; linked to X requesting Y; null/empty ids both sides
+- [ ] DECISION-LOG entry (legal approved model, 2026-09-21) + INTEGRATION-CONTRACT update
+- [ ] Arming gated on A + B together; master switch off, allowlist empty
+- [ ] Phase B policy filter (allow-all default, state/age/category)
+- [ ] Phase C approaching-18 operator report only
+- [ ] Phase D transition: DOB second factor + verified OTP contact before account/access
