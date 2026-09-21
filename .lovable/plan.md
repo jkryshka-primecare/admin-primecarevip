@@ -1,106 +1,63 @@
-# Sean Liesenberg hydration recovery — findings and recommended sequence (read-only)
+# Fix the silent "Activate account" button + find everyone stuck
 
-Nothing was run. All conclusions come from reading the deployed code.
+## What's actually wrong (confirmed from the live page)
 
-## 1. Is the operator backfill (the Willmore tool) the right recovery tool?
+I pulled the live activation page at care.primecarevip.com/claim and read its code. The button is not ignoring clicks — it is **disabled**, and nothing on screen says why.
 
-Mostly yes — with two gaps you need to know before you approve a run.
+The button only turns on when all of these are true: date of birth filled in, both password boxes filled, the two passwords match, **and the password passes the rules**. The first four have visible feedback ("Passwords match" in green). The fifth has none. So a member like Holly types a password that is too short, sees green "Passwords match", and gets a button that will not respond — with no explanation anywhere.
 
-What it does right:
-- It is `backfillElationReports` via its HTTP wrapper, reached through the authenticated
-  `portal-admin` bridge action `backfillMinorReports` with `patientIds: ["1370412230508545"]`.
-  Same path used for Willmore (`e2e403-willmore-01`).
-- It runs **outside** the 180s claim cap: 540s instance cap, a 500s soft budget that pauses
-  gracefully, a 420s per-patient budget and a 240s per-artifact budget.
-- It is **resumable**: the run doc keeps a durable `pending` cursor with a lease + 30s
-  heartbeat, so a slow chart (~28s/call) survives pause/resume without losing work.
-- It **writes his record subcollections** and is idempotent (skip-existing), so a partial
-  earlier attempt is safe.
+Two smaller findings from the same read:
 
-Gap A — it does **not** flip `hydrationStatus`. `hydrationStatus` is written in exactly one
-place in the codebase: the claim-time block in `claimAccount.js`. The backfill wrapper never
-touches it. So after a successful operator backfill Sean would have records but the portal
-would still show "still setting up your records". Completing him needs a second, explicit
-one-field write (`hydrationStatus: 'complete'`) after the backfill verifies.
+- The "not your email address" rule is printed in the grey helper text but is never actually checked on the page — it is only enforced when the form is submitted, so it can't be the thing blocking Holly.
+- The "not a common password" rule is likewise only enforced on submit.
 
-Gap B — **letters are not covered**. Claim-time hydration runs reports *and*
-`backfillElationLetters`. That letters job is an in-process module only; it is not exported in
-`index.js` and has no HTTP or bridge surface. The operator tool restores reports/medical
-records only; his letters baseline stays empty until either a letters surface exists or a
-claim-time hydration re-run happens.
+So the only silent blockers are: under 12 characters, over 64, no letter, or no number.
 
-His unconsumed token: the backfill touches no token state, so the token stays **stranded** —
-live, unused, expiring 2026-10-12, on an account that is already active. It is harmless
-(claim would be a no-op re-entry) but it will mis-count him as "not yet claimed" in any
-reconciliation that keys off unused tokens. Recommend revoking or marking it as part of the
-same operator action, or accepting it as known drift.
+## Important: this page is not in our repo
 
-## 2. Will he self-heal?
+The live activation page is served by the separate member app (the other front-end team's build), not by the activation page in our main repo — I compared the deployed code against ours and they are different pages with different wording. **We cannot change it from here.** What this plan produces is the exact specification for that team, plus everything we own on our side.
 
-No. Two mechanisms could plausibly pick him up; neither does.
+## What to do
 
-- **Auto-resume driver** (`backfillDriver.js`) ticks every 2 minutes via Cloud Scheduler, but
-  circuit breaker 6 is explicit opt-in: it only ever touches the runIds recorded on its own
-  `driver_state` doc. It has no notion of "scan for stuck `hydrationStatus: pending`". A run
-  must be armed by an operator with a runId, cohort ids and a written reason.
-- **Claim-time stale-pending recovery**: `claimAccount` will re-claim a `pending` older than
-  180s and re-run hydration — but only inside a claim call. Sean has already claimed; nothing
-  re-enters that path on login. And even if he re-opened his (still-unconsumed) link, the
-  re-run would hit the same 180s wall on the same slow chart.
+### 1. Spec for the member-app team (deliverable: a written spec + issue)
 
-So: **operator-triggered, and it needs the driver armed or a single direct run.**
+Under the "Create password" box, replace the static grey sentence with a **live checklist** that updates as the member types, each line showing a tick or a cross:
 
-Invocation (single patient, via the bridge — no Firebase super_admin token, so **no SA key
-regeneration**; the bridge authenticates with your app session and enforces `is_hr_admin` plus
-`super_admin` for `apply:true`):
+- At least 12 characters
+- No more than 64 characters
+- Contains a letter
+- Contains a number
+- Not your email address
+- Not a common password
 
-```
-action: "backfillMinorReports"
-patientIds: ["1370412230508545"]
-apply: false            // dry run first
-reason: "D-317 single-patient hydration recovery — Sean Liesenberg"
-runId: "d317-sean-01"   // same runId on every resume
-```
-Then the same body with `apply: true`, re-POSTed with the identical `runId` each time it
-returns `paused` / `SOFT_BUDGET_REACHED`, until `status: complete` and `pending: 0`. At ~28s
-per call he should fit inside one or two cycles.
+Plus two rules that close the trap for good:
 
-## 3. D-317 durable fix — scope only
+- If the button stays off, the reason must always be visible on screen. No disabled state without a stated cause.
+- Add the missing email-address check to the live validation, so the page's own helper text matches what it actually enforces. The wording of the rules must stay exactly as the server enforces them — 12 to 64 characters, at least one letter and one number, not the email address, not a common password. No extra rules, no fewer.
 
-Goal: claim-time hydration hands a slow chart to the async driver instead of dying at 180s, so
-the remaining ~585 unclaimed members get a self-resolving "records loading" state.
+### 2. Answer on the reset question (Phil, Kelly, Holly)
 
-Shape (smallest correct version):
-1. Claim-time hydration gets its own soft budget (~120s) well under the 180s cap. On expiry it
-   stops awaiting, writes `hydrationStatus: 'deferred'` plus a `hydrationRunId`, and enqueues
-   the patient on a standing recovery run doc instead of leaving `pending`.
-2. A **hydration recovery driver**: either a new opt-in cohort on the existing driver, or a
-   low-frequency scheduled sweep that claims `deferred` (and `pending` older than the cap)
-   patients, runs reports + letters through the existing bounded/resumable machinery, and — the
-   one genuinely new behaviour — **writes the terminal `hydrationStatus`** itself. That write
-   should move out of `claimAccount` into a shared helper both paths call.
-3. Letters need an operator/driver-reachable surface (export + wrapper), or the driver can only
-   ever half-hydrate.
-4. Member UI: `deferred` must render as self-resolving "records loading", not the terminal
-   concierge-call screen. `getMyPatientRecord` already returns `hydrationStatus`, so this is a
-   copy/state change, not a new field.
+Wiping the account and sending a fresh link is **not** the recommended first move, and in all three cases it made things worse rather than better.
 
-Size: medium — roughly a day of backend work (claim budget + shared status helper + driver
-cohort + letters wrapper + tests), plus a small member-app change.
+- If the member has **never finished activating** (which is true of everyone affected here), their link is still perfectly good. Deleting anything is unnecessary — and Holly's record now carries a wipe that removed her account while leaving her marked "active", a half-finished state that has caused its own confusion.
+- The correct first step is simply: **send a fresh link** (this revokes the old one and issues a new 30-day one). That fixes an expired or already-used link and touches nothing else.
+- The destructive wipe should be reserved for one case only: the member genuinely has an account but cannot get into it and cannot reset the password.
 
-Shared surface: **yes**. It adds a `hydrationStatus` value (`deferred`) that the member app
-branches on, and a new letters surface. Both need an INTEGRATION-CONTRACT entry in the same PR
-and a D-023 notification.
+Going forward, once the checklist above ships, most of these calls stop being "the link is broken" and become "your password was too short."
 
-## Recommended sequence
+### 3. The list you asked for
 
-1. Dry-run the single-patient backfill for Sean (`apply:false`) — confirms eligibility and that
-   the run doc claims cleanly.
-2. Live run, same runId, resume until `pending:0`. Verify his subcollections.
-3. Decide on the two gaps for him specifically: the explicit `hydrationStatus: 'complete'`
-   write (needed for the screen to clear), his missing letters, and whether to settle the
-   stranded token.
-4. Only then scope D-317 properly — it is the fix that stops the next slow-chart claimer from
-   landing in the same place.
+A one-off report, pulled read-only, of every member currently in one of these states:
 
-Nothing above has been executed; awaiting your approval on step 1.
+- **Half-reset** — a wipe was performed, the account was removed, but the record still reads active (Holly's, Phil's and Kelly's shape). These need cleaning up.
+- **Invited, link still live, never activated** — the large group who simply have not finished, and who are the ones hitting the silent button.
+- **Invited but no email on file** — they can never receive a link at all.
+
+For each: name, email, date of birth on file, current state, when their link was sent and when it expires, and whether a reset was performed on them and by whom. Delivered as a table here and as a CSV you can work from.
+
+## Technical notes
+
+- Root cause in the deployed bundle: the submit button's enabled condition includes a password-policy predicate, but that predicate's result is never rendered; the only rendered validation state is the password-match line.
+- Server policy (the contract, unchanged): 12–64 characters, at least one letter and one number, not in the common-password set, must not contain the email local part. The server deliberately returns one generic `WEAK_PASSWORD` reason for all five failures, which is exactly why the client has to state the rules up front.
+- The spec change is client-side presentation only. No change to the password policy, the claim endpoint, tokens, or anything on our side.
+- The stuck-member report is a read-only query against the member records through the existing read bridge. No writes, no emails, no links issued.
