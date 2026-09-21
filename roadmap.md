@@ -16,14 +16,15 @@
 
 - [ ] BLOCKED ON MK: file the D-317 issue, approve deploy, then dry-run + cap:1 for 1370412230508545
 
-## Guardian model — Phase A (non-patient guardian accounts + proxy reads) — in progress
-- [ ] Guardian account record + chartless activation path
-- [ ] Guardian link keyed on guardian account (not chart); explicit positive authorization check
-- [ ] Replace "caller must own a chart" fence; explicit empty/missing id rejection
-- [ ] Wire medications/allergies/problems/appointments through the shared subject resolver
-- [ ] Read-time age-18 gate (moved from Phase C)
-- [ ] Negative tests: no links; linked to X requesting Y; null/empty ids both sides
-- [ ] DECISION-LOG entry (legal approved model, 2026-09-21) + INTEGRATION-CONTRACT update
+## Guardian model — Phase A (non-patient guardian accounts + proxy reads) — BUILT, PR #560, parked
+- [x] Guardian account record + chartless activation path
+- [x] Guardian link keyed on guardian account (not chart); explicit positive authorization check
+- [x] Replace "caller must own a chart" fence; explicit empty/missing id rejection
+- [x] Wire medications/allergies/problems/appointments through the shared subject resolver
+- [x] Read-time age-18 gate (moved from Phase C)
+- [x] Negative tests: no links; linked to X requesting Y; null/empty ids both sides (26 tests green)
+- [x] DECISION-LOG D-409 (legal approved 2026-09-21) + INTEGRATION-CONTRACT v1.69
+- [ ] BLOCKED: named-test-account walkthrough needs a deploy (emulator/staging) — not authorized yet
 - [ ] Arming gated on A + B together; master switch off, allowlist empty
 - [ ] Phase B policy filter (allow-all default, state/age/category)
 - [ ] Phase C approaching-18 operator report only
