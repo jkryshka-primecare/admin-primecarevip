@@ -28,6 +28,7 @@ type Action =
   | "revoke"
   | "setAccess"
   | "provision"
+  | "syncEmail"
   | "runAudit"
   | "smoke"
   | "unclaimedGuardians"
@@ -55,6 +56,9 @@ const FUNCTION_BY_ACTION: Record<Action, string> = {
   revoke: "adminRevokeInvite",
   setAccess: "adminSetPortalAccess",
   provision: "adminProvisionPatients",
+  // Refresh a member's portal email (roster + login) from their Elation
+  // chart. The address is read from the chart upstream, never sent from here.
+  syncEmail: "adminSyncMemberEmail",
   runAudit: "adminRunArtifactAudit",
   smoke: "adminRunReadPathSmoke",
   unclaimedGuardians: "adminUnclaimedGuardiansReport",
@@ -92,7 +96,7 @@ const FUNCTION_BY_ACTION: Record<Action, string> = {
   lettersBackfill: "backfillElationLettersHttp",
 };
 
-const MUTATIONS: Action[] = ["invite", "revoke", "setAccess", "provision"];
+const MUTATIONS: Action[] = ["invite", "revoke", "setAccess", "provision", "syncEmail"];
 
 /**
  * Admin-only but not a member mutation: it changes no patient state, it only
@@ -1320,6 +1324,11 @@ Deno.serve(async (req) => {
     // user + claim marker upstream, then sends a fresh claim link. Same admin
     // tier and audit row as any other invite mutation.
     upstreamPayload.resetClaim = body.resetClaim === true;
+  }
+
+  if (action === "syncEmail") {
+    // Preview by default; only an explicit dryRun:false writes.
+    upstreamPayload.dryRun = body.dryRun !== false;
   }
 
   if (action === "setAccess") {
