@@ -280,7 +280,7 @@ export function usePortalMutations(elationPatientId: string | null) {
   });
 
 
-  return { issueInvite, revokeInvite, setAccess };
+  return { issueInvite, revokeInvite, setAccess, syncEmail };
 }
 
 /** A member selected for portal-record provisioning. */

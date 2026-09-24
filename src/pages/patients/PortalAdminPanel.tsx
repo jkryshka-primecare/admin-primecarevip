@@ -132,7 +132,35 @@ function fmt(value?: unknown) {
 export default function PortalAdminPanel({ elationId }: { elationId: string | null }) {
   const { isAdmin } = useAuth();
   const { snapshot, loading, error, refetch } = usePortalAccess(elationId);
-  const { issueInvite, revokeInvite, setAccess } = usePortalMutations(elationId);
+  const { issueInvite, revokeInvite, setAccess, syncEmail } = usePortalMutations(elationId);
+
+  // Preview the chart email first, then ask before writing anything.
+  const refreshEmail = async () => {
+    if (!guard()) return;
+    try {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const preview: any = await syncEmail.mutateAsync({ reason, dryRun: true });
+      const p = preview?.data ?? preview;
+      if (!p?.changed) {
+        toast({ title: "Email already matches the chart" });
+        return;
+      }
+      const msg =
+        `Portal email: ${p.before.rosterEmail || "(none)"} → ${p.after.rosterEmail}` +
+        (p.before.loginEmail !== null
+          ? `\nSign-in email: ${p.before.loginEmail} → ${p.after.loginEmail}`
+          : "") +
+        "\n\nApply this change?";
+      if (!window.confirm(msg)) return;
+      await run(syncEmail.mutateAsync({ reason, dryRun: false }), "Email refreshed from chart");
+    } catch (e) {
+      toast({
+        title: "Could not refresh email",
+        description: e instanceof Error ? e.message : String(e),
+        variant: "destructive",
+      });
+    }
+  };
   const [reason, setReason] = useState("");
   const [hideCollection, setHideCollection] = useState<PortalModule>("labs");
   const [hideId, setHideId] = useState("");
@@ -304,6 +332,20 @@ export default function PortalAdminPanel({ elationId }: { elationId: string | nu
                   }
                 >
                   <MailX className="h-3.5 w-3.5 mr-1" /> Revoke invite
+                </Button>
+
+                <Button
+                  size="sm"
+                  variant="outline"
+                  disabled={!isAdmin || busy || syncEmail.isPending}
+                  onClick={refreshEmail}
+                >
+                  {syncEmail.isPending ? (
+                    <Loader2 className="h-3.5 w-3.5 mr-1 animate-spin" />
+                  ) : (
+                    <Mail className="h-3.5 w-3.5 mr-1" />
+                  )}
+                  Refresh email from chart
                 </Button>
 
                 <Button
