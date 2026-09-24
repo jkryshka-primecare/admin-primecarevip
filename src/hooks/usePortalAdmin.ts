@@ -209,6 +209,20 @@ export function usePortalMutations(elationPatientId: string | null) {
     onSuccess: invalidate,
   });
 
+  /** Refresh portal email from the Elation chart. dryRun previews only. */
+  const syncEmail = useMutation({
+    mutationFn: (vars: { reason: string; dryRun: boolean }) =>
+      callPortalAdmin({
+        action: "syncEmail",
+        elationPatientId,
+        reason: vars.reason,
+        dryRun: vars.dryRun,
+      }),
+    onSuccess: (_d, vars) => {
+      if (!vars.dryRun) invalidate();
+    },
+  });
+
 
   const revokeInvite = useMutation({
     mutationFn: (vars: { reason: string }) =>
