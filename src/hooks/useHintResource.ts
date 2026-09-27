@@ -25,12 +25,28 @@ export function useHintResource<T = any>(
     let cancelled = false;
     setLoading(true);
     setError(null);
-    supabase.functions
-      .invoke("hint-live", { body: { resource, scope, query } })
-      .then(({ data: res, error: err }) => {
+    (async () => {
+      try {
+        // Don't call the staff-gated proxy without a live session — that is
+        // what produced "Invalid or expired session" 401s.
+        const { data: sess } = await supabase.auth.getSession();
+        if (!sess.session) {
+          if (!cancelled) setError("Please sign in again to load live Hint data.");
+          return;
+        }
+        const { data: res, error: err } = await supabase.functions.invoke("hint-live", {
+          body: { resource, scope, query },
+        });
         if (cancelled) return;
         if (err) {
-          setError(err.message);
+          const status = (err as any)?.context?.status;
+          setError(
+            status === 401
+              ? "Your session expired. Please sign in again."
+              : status === 403
+                ? "Your account isn't approved for patient data yet."
+                : err.message,
+          );
         } else {
           const r = res as HintResourceResponse<T>;
           if (r.ok === false || (r.status && r.status >= 400)) {
@@ -40,8 +56,12 @@ export function useHintResource<T = any>(
             setTotal(r.pagination?.total ?? null);
           }
         }
-        setLoading(false);
-      });
+      } catch (e) {
+        if (!cancelled) setError(e instanceof Error ? e.message : "Failed to load Hint data");
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    })();
     return () => {
       cancelled = true;
     };
