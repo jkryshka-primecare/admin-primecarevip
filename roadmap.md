@@ -30,4 +30,4 @@
 - [ ] Phase C approaching-18 operator report only
 - [ ] Phase D transition: DOB second factor + verified OTP contact before account/access
 
-- [ ] CRM: wire crm.firestore.rules + crm.firestore.indexes.json into firebase.json as a crmdb-targeted Firestore deploy, push via CI (blocked: waiting on files from Greg)
+- [ ] CRM: wire crm.firestore.rules + crm.firestore.indexes.json into firebase.json as a crmdb-targeted Firestore deploy (database id "crmdb", not "crm"); scope BOTH CI deploys explicitly — portal = firestore:(default) only, CRM = firestore:crmdb only, no unscoped --only firestore; verify both target strings resolve in emulator/CI dry run on pinned firebase-tools (blocked: waiting on files from Greg)
