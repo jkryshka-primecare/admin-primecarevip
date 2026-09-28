@@ -1,227 +1,188 @@
-# CRM separate-database migration — pre-read (spec only, nothing built)
+# CRM separate-database migration — pre-read (for Greg)
 
-Audience: Greg / CRM team. Goal: do the `crm` Firestore database migration **once**,
-with no second pass. Three answers below: the single accessor, the gen-2 trigger +
-version pins, and the deploy topology (including the source-dir question).
+Goal: do the `crmdb` migration once. Authority: INTEGRATION-CONTRACT §6 (D-320).
+Nothing here authorizes a merge or a deploy. Items marked **[Greg to confirm]**
+are inside CRM function code, which is not visible from the portal side.
 
-Authority: INTEGRATION-CONTRACT v1.62 §6 (D-320). Nothing here authorizes a merge or a deploy.
-
----
-
-## 0. Ground truth from the portal repo (today)
-
-| Fact | Value |
-| --- | --- |
-| `functions/package.json` | `firebase-admin ^12.0.0`, `firebase-functions ^5.0.0`, Node 22 |
-| `firebase.json` → `functions` | already an **array**, one entry: `source: "functions"`, `codebase: "portal-functions"` |
-| `firebase.json` → `firestore` | still a **single object** (default database only) |
-| Portal function generation | gen-1 `https.onRequest` throughout; no gen-2 functions exist yet |
-| App Check | not enabled anywhere — do not turn on project-level enforcement |
-
-The CRM migration changes exactly two shapes in `firebase.json` (§3) and adds zero
-portal runtime code.
+Checked against `primecarevip/prime-care-vip-app-v2` @ main on 2026-09-28.
 
 ---
 
-## 1. Single-accessor pattern
+## 0. Ground truth (portal repo, verified today)
 
-One module, one export, used by **every** CRM function. No `getFirestore()` call
-anywhere else in `crm-functions/`, no `admin.firestore()`, ever.
+| Fact | Value | Source |
+| --- | --- | --- |
+| Database id | **`crmdb`** (not `crm` — the earlier draft was wrong) | created DB + IAM condition |
+| `firebase-admin` | `^12.0.0`, **12.7.0 resolved** | `functions/package-lock.json` |
+| `firebase-functions` | `^5.0.0`, **5.1.1 resolved** | `functions/package-lock.json` |
+| `@google-cloud/firestore` | 7.11.6 (transitive) | lockfile |
+| Node | `22` | `functions/package.json` engines |
+| `firebase.json` → `functions` | array, one entry: `source: "functions"`, `codebase: "portal-functions"` | firebase.json |
+| `firebase.json` → `firestore` | single object (default DB only) | firebase.json |
+| `crm-functions/` directory | **does not exist in the portal repo** | repo root listing |
+| CI `firebase-tools` | **unpinned** (`pnpm add -g firebase-tools` = latest) | deploy-production.yml:111 |
+| CI functions deploy | **unscoped** `--only functions` (lines 187, 194) | deploy-production.yml |
+| CI rules/indexes deploy | `--only firestore:rules,storage` / `--only firestore:indexes` | deploy-production.yml:142,152 |
+| Runtime SA for CRM | `crm-runtime@prive-care-vip.iam.gserviceaccount.com` | IAM test 2026-09-28 |
+| IAM isolation | `roles/datastore.user` conditioned on `crmdb`: 200/200/200 on crmdb, 403/403 on (default) | validated |
+| App Check | not enforced project-wide; stays off | — |
+
+---
+
+## 1. Single-accessor pattern — accurate, one fix
+
+Accurate on the pinned SDK: `getFirestore(app, databaseId)` exists in firebase-admin
+since 11.x and is present in the resolved 12.7.0. Fix: the id is `crmdb`.
 
 ```js
-// crm-functions/core/db.js
+// [Greg to confirm path] e.g. crm-functions/core/db.js
 const { getApp, initializeApp, getApps } = require('firebase-admin/app');
 const { getFirestore } = require('firebase-admin/firestore');
 
-const CRM_DATABASE_ID = 'crm';
-
+const CRM_DATABASE_ID = 'crmdb';
 const app = getApps().length ? getApp() : initializeApp();
+const db = getFirestore(app, CRM_DATABASE_ID);   // memoized by the SDK
 
-// Bound once at module load. getFirestore(app, id) is memoized by the SDK,
-// so repeated requires return the same instance.
-const db = getFirestore(app, CRM_DATABASE_ID);
-
-/** The ONLY Firestore handle CRM code may use. */
-function crmDb() {
-  return db;
-}
-
+function crmDb() { return db; }
 module.exports = { crmDb, CRM_DATABASE_ID };
 ```
 
-Rules of use:
+Rules unchanged: no other `getFirestore(` / `admin.firestore(` in CRM code (CI grep);
+portal facts come via `portalGetAppointments` (Model B), never direct reads.
+The IAM condition is the real boundary (proven above); `crmDb()` is addressing only.
+A stray default-DB handle under `crm-runtime` now fails with 403 rather than leaking.
 
-- Callers do `const { crmDb } = require('./core/db'); await crmDb().collection('crm_leads')...`
-- `crmDb()` is an **addressing layer only** — it no longer carries the `crm_` prefix
-  convention as a safety property. Collection names inside the `crm` database do not
-  need the prefix, but keep it for one release so audit greps stay stable.
-- CRM functions must **never** construct a default-database handle. If a CRM function
-  legitimately needs a portal fact (patient identity, appointment fact), it calls the
-  portal's service-to-service endpoint (`portalGetAppointments`, Model B, contract §6.3) —
-  it does not read our data directly.
-- Enforce with one lint/CI grep in the CRM codebase:
-  `rg -n "getFirestore\(|admin\.firestore\(" crm-functions --glob '!core/db.js'` must return nothing.
+## 2. Gen-2 triggers — accurate, one fix
 
-Emulator note: `getFirestore(app, 'crm')` works against the emulator; declare the named
-database in `firebase.json` (§3) so `firebase emulators:start` provisions it.
-
----
-
-## 2. Gen-2 triggers against a named database
-
-Firestore triggers default to `(default)`. A trigger with no `database` option will
-**silently never fire** for `crm` documents — this is the single most likely way to
-have to redo the migration. Every CRM Firestore trigger declares the database explicitly.
+The `{ document, database }` object form on `firebase-functions/v2/firestore`
+`onDocument*` needs ≥ 4.3.0; resolved 5.1.1 supports it. Fix: `database: 'crmdb'`.
 
 ```js
-// crm-functions/triggers/onLeadWritten.js
-const { onDocumentWritten } = require('firebase-functions/v2/firestore');
-const { setGlobalOptions } = require('firebase-functions/v2');
-const { crmDb, CRM_DATABASE_ID } = require('../core/db');
-
-setGlobalOptions({ region: 'us-central1', maxInstances: 10 });
-
 exports.onLeadWritten = onDocumentWritten(
-  {
-    database: CRM_DATABASE_ID,     // REQUIRED — omitting it targets (default)
-    document: 'crm_leads/{leadId}',
-    region: 'us-central1',         // must match the database's location
-    retry: false,
-  },
-  async (event) => {
-    const after = event.data?.after?.data();
-    if (!after) return;            // delete
-    await crmDb().collection('crm_lead_audit').add({ /* ... */ });
-  }
+  { database: 'crmdb', document: 'crm_leads/{leadId}', region: 'us-central1', retry: false },
+  async (event) => { /* ... */ }
 );
 ```
 
-Constraints to design against now, not later:
+- Omitting `database` targets `(default)` and the trigger silently never fires.
+- Gen-1 `functions.firestore.document()` cannot target a named DB.
+- Region must match the `crmdb` location (`nam5` → `us-central1`).
+- `crmdb` id and location are immutable.
 
-- **Location is immutable.** Create the `crm` database in the same location as the
-  default database (`nam5` / us-central) and deploy triggers to the matching region.
-  Changing it later means creating a new database and re-migrating.
-- **Database id is immutable.** `crm` is final; it is written into IAM conditions.
-- Gen-1 `functions.firestore.document()` **cannot** target a named database. Any CRM
-  Firestore trigger must be gen-2. Their HTTP endpoints may stay gen-1 if they prefer,
-  but mixing is fine — codebases are per-source-dir, not per-generation.
-- `event.database` is on the payload; assert it equals `crm` in a defensive guard if
-  they want belt-and-braces.
+### Pins
 
-### Versions to pin (CRM `crm-functions/package.json`)
+| Package | Pin |
+| --- | --- |
+| `firebase-admin` | `^12.7.0` (match portal) |
+| `firebase-functions` | `^5.1.1` (match portal; no v6 unilaterally) |
+| `firebase-tools` | `>= 13`, exact patch pinned in CI — **portal CI must pin too** (currently latest) |
+| Node | `22` |
 
-| Package | Pin | Why this floor |
-| --- | --- | --- |
-| `firebase-admin` | `^12.0.0` (12.7+ preferred) | `getFirestore(app, databaseId)` lands in 12.0.0. Matches the portal codebase — keep the majors aligned so a shared Node 22 runtime behaves identically. |
-| `firebase-functions` | `^5.0.0` (5.1+ preferred) | `database` option on v2 Firestore triggers requires ≥ 4.3.0; v5 is what the portal is on. Do **not** go to v6 unilaterally — a major split across codebases in one repo is a future foot-gun. |
-| `firebase-tools` (CI + dev) | `>= 13.0.0` | Named-database deploy targets and per-database rules/index deploys need 13.x. Pin the exact patch in CI. |
-| Node engine | `22` | Must match the portal's `engines.node`. |
+## 3. Service account
 
-`@google-cloud/firestore` is transitive — do not add it directly.
+Not a `firebase.json` field. It goes in function code:
 
----
+```js
+// gen-2 (recommended, one place for all CRM functions)
+const { setGlobalOptions } = require('firebase-functions/v2');
+setGlobalOptions({
+  region: 'us-central1',
+  serviceAccount: 'crm-runtime@prive-care-vip.iam.gserviceaccount.com',
+});
 
-## 3. Deploy topology — answering the source-dir question
-
-**Answer: single-source deploy. The ~35 CRM functions live in the portal repo, in a
-sibling top-level directory `crm-functions/`, with their own `package.json` and their
-own `node_modules`. The `firebase.json` codebase entry references that local path.**
-
-A codebase entry's `source` is a path resolved relative to `firebase.json`, inside the
-same repo and the same deploy. It cannot point at another repository, a git URL, or a
-path outside the project root. There is no cross-repo codebase mechanism in the Firebase
-CLI. So the choice is not "our repo vs theirs" — it is "one repo" or "two Firebase
-projects", and we already ruled out the latter.
-
-```
-prime-care-vip-app-v2/
-├── firebase.json
-├── firestore.rules            # portal-owned, default DB
-├── firestore.indexes.json     # portal-owned, default DB
-├── firestore.crm.rules        # CRM-authored, portal-reviewed
-├── firestore.crm.indexes.json
-├── functions/                 # codebase: portal-functions  (unchanged)
-│   ├── package.json
-│   └── index.js
-└── crm-functions/             # codebase: crm-functions      (NEW, CRM-owned)
-    ├── package.json           # own deps, own node_modules
-    ├── index.js               # exports all ~35
-    ├── core/db.js             # the single accessor (§1)
-    └── test/
+// gen-1 HTTP functions, if any remain
+functions.runWith({ serviceAccount: 'crm-runtime@prive-care-vip.iam.gserviceaccount.com' })
 ```
 
-`firebase.json` after the migration — the two shape changes:
+**[Greg to confirm]** every one of the ~35 functions picks this up (gen-1 functions do
+not read `setGlobalOptions`). The deploying identity needs `iam.serviceAccountUser`
+on `crm-runtime`.
+
+## 4. Source-dir topology and deploy invocation
+
+**Today the CRM source is not in the portal repo.** Where it lives is **[Greg to confirm]**.
+Two workable shapes; both need a codebase name that never collides with `portal-functions`.
+
+**Codebase declaration** (whichever repo holds the CRM `firebase.json`):
 
 ```jsonc
-{
-  "firestore": [
-    {
-      "rules": "firestore.rules",
-      "indexes": "firestore.indexes.json"
-    },
-    {
-      "database": "crm",
-      "rules": "firestore.crm.rules",
-      "indexes": "firestore.crm.indexes.json"
-    }
-  ],
-  "functions": [
-    {
-      "source": "functions",
-      "codebase": "portal-functions",
-      "ignore": ["node_modules", ".git", "test", "**/*.test.js"]
-    },
-    {
-      "source": "crm-functions",
-      "codebase": "crm-functions",
-      "ignore": ["node_modules", ".git", "test", "**/*.test.js"]
-    }
-  ]
+"functions": [
+  { "source": "crm-functions", "codebase": "crm-functions",
+    "ignore": ["node_modules", ".git", "test", "**/*.test.js"] }
+]
+```
+
+- Firebase deletes only functions **within the codebase being deployed**. As long as CRM
+  functions are deployed under codebase `crm-functions`, portal deploys (`portal-functions`)
+  cannot delete them, and vice versa.
+- If CRM functions were ever deployed with no codebase (implicit `default`), they must be
+  redeployed under `crm-functions` once; **[Greg to confirm]** the current codebase label.
+
+**The only deploy commands CRM should run** (never bare `firebase deploy`):
+
+```bash
+firebase deploy --only functions:crm-functions --project prive-care-vip
+# single function:
+firebase deploy --only functions:crm-functions:onLeadWritten --project prive-care-vip
+```
+
+`--only functions:<codebase>` scopes create/update/delete to that codebase. A bare
+`firebase deploy` or `--only functions` from a directory whose `firebase.json` also holds
+hosting/firestore config is what caused the accidental full deploy. Recommend a
+`package.json` script (`"deploy": "firebase deploy --only functions:crm-functions"`) and no
+other deploy path.
+
+**Portal side (our PR):** CI changes `--only functions` → `--only functions:portal-functions`,
+so the portal can never touch another codebase either.
+
+Items inside CRM code: `CRM_DATABASE_ID` / accessor location, `index.js` export mapping,
+gen split per function — **[Greg to confirm]**.
+
+## 5. Rules and indexes for `crmdb` (portal PR — staged)
+
+`crmdb` is backend-only; client access denied. `crm.firestore.rules` (committed):
+
+```
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    match /{document=**} { allow read, write: if false; }
+  }
 }
 ```
 
-Why this shape matters operationally:
+`firebase.json` after the PR:
 
-- **The codebase entry is what stops mutual deletion.** Without the second `functions`
-  entry, a routine portal deploy sees 35 unrecognized functions in the project and
-  deletes them. This entry must land in the **same PR** as the CRM's first function code —
-  never after. (Same point as §5 of the handoff review.)
-- Targeted deploys: `firebase deploy --only functions:crm-functions` and
-  `--only functions:portal-functions` become independent. CI should use the targeted
-  form on both sides so neither team can blast the other.
-- Rules/indexes deploy per database: `firebase deploy --only firestore:crm`. The portal's
-  default-DB rules stay on `firebase deploy --only firestore` semantics with the array form
-  — verify this in staging on the pinned CLI version before the first production run.
-- `crm-functions/` is CRM-owned by CODEOWNERS; `functions/`, `firestore.rules`,
-  `storage.rules` and `firebase.json` itself stay portal-owned (portal review required).
+```jsonc
+"firestore": [
+  { "database": "(default)", "rules": "firestore.rules", "indexes": "firestore.indexes.json" },
+  { "database": "crmdb", "rules": "crm.firestore.rules", "indexes": "crm.firestore.indexes.json" }
+]
+```
 
-### Database + IAM provisioning (one-time, before the first deploy)
+CI, both directions scoped (quote the parentheses):
 
-1. Create the database: `gcloud firestore databases create --database=crm --location=nam5 --type=firestore-native`
-2. Grant the CRM function service account `roles/datastore.user` **conditioned** on
-   `resource.name.startsWith('projects/<project>/databases/crm')`.
-3. Do **not** grant that service account access to `(default)`. The IAM condition is the
-   real containment boundary; `crmDb()` is only addressing.
-4. Portal function service accounts get no grant on `crm` at all.
+```bash
+firebase deploy --only 'firestore:(default)',storage ...   # portal rules+indexes, default only
+firebase deploy --only firestore:crmdb ...                  # CRM rules+indexes
+```
 
----
+Why: with the array form, today's `firestore:rules` / `firestore:indexes` would push to
+**both** databases. The exact target spelling is verified against the pinned CLI in the
+emulator and a CI dry run before merge; if the CLI wants another form, it's shown first.
 
-## 4. Order of operations (so it's done once)
+Waiting on: `crm.firestore.indexes.json` from Greg — wired in the same PR.
 
-1. Create the `crm` database + IAM conditions (§3) — infra only, no code.
-2. One PR into the portal repo: `crm-functions/` source dir with `core/db.js`, the
-   `firebase.json` array shapes, `firestore.crm.rules`, `firestore.crm.indexes.json`,
-   CODEOWNERS, and CI targeted-deploy commands. This PR must also carry the §0 blocker
-   fix (`crmSetUserRole` hard allowlist `['crm_admin','crm_super_admin']` + role-change audit)
-   from the handoff review.
-3. Deploy `--only firestore:crm` then `--only functions:crm-functions`, in that order.
-4. Verify one gen-2 trigger actually fires on a `crm` write before porting the rest —
-   this is the check that catches a missing `database` option while it costs an hour.
+## 6. Order of operations
 
-## 5. Still open (not answered here)
+1. Done: `crmdb` created, `crm-runtime` conditioned grant, isolation proven.
+2. Greg: `db.js` accessor, `database: 'crmdb'` on every trigger, `serviceAccount` on every
+   function, codebase `crm-functions`, deploy script scoped to `functions:crm-functions`.
+3. Greg: redeploy the ~35 functions under `crm-runtime` (admin SDK bypasses rules — not
+   blocked on step 4).
+4. Portal PR: rules + indexes wiring, both CI targets scoped, firebase-tools pinned,
+   functions deploy scoped to `portal-functions`.
+5. Verify one gen-2 trigger fires on a `crmdb` write before porting the rest.
 
-- §4 of the handoff review: the four public PHI writers — source or a `crmDb()` fence.
-- Appointment sync scope (~5.5 days) remains unauthorized; Model B contract shape is
-  written but no build is approved.
-- App Check: in-function only. Project-level enforcement stays off until both portal
-  web apps attest.
+Still open: the four public PHI writers (source or `crmDb()` fence); appointment sync
+build unauthorized; `crmSetUserRole` hard allowlist + audit blocker.
