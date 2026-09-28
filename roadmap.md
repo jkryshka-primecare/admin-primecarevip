@@ -29,3 +29,5 @@
 - [ ] Phase B policy filter (allow-all default, state/age/category)
 - [ ] Phase C approaching-18 operator report only
 - [ ] Phase D transition: DOB second factor + verified OTP contact before account/access
+
+- [ ] CRM: wire crm.firestore.rules + crm.firestore.indexes.json into firebase.json as a crmdb-targeted Firestore deploy, push via CI (blocked: waiting on files from Greg)
