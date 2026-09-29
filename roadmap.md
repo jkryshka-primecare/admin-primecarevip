@@ -30,4 +30,4 @@
 - [ ] Phase C approaching-18 operator report only
 - [ ] Phase D transition: DOB second factor + verified OTP contact before account/access
 
-- [ ] CRM: wire crm.firestore.rules + crm.firestore.indexes.json into firebase.json as a crmdb-targeted Firestore deploy (database id "crmdb", not "crm"); scope BOTH CI deploys explicitly — portal = firestore:(default) only, CRM = firestore:crmdb only, no unscoped --only firestore; verify both target strings resolve in emulator/CI dry run on pinned firebase-tools (rules file committed to handoff; also scope CI functions deploy to functions:portal-functions and pin firebase-tools; blocked: waiting on crm.firestore.indexes.json from Greg)
+- [ ] CRM crmdb Firestore target — draft PR #565 built + verified. HOLDS: (1) Greg confirms CRM frontend is callable-only, else scoped rules; (2) move ci-staged/*.yml into .github/workflows (token lacks workflow scope); (3) Greg: 26 vs 27 indexes
