@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import { supabase } from "@/integrations/supabase/client";
+import { invokeAuthed } from "@/lib/invokeAuthed";
 import { Button } from "@/components/ui/button";
 import { CheckCircle2, Loader2, RefreshCw, XCircle } from "lucide-react";
 
@@ -86,7 +87,7 @@ export default function ConnectionHealth() {
   const runProbe = useCallback(async (probe: Probe) => {
     setRunning((r) => ({ ...r, [probe.key]: true }));
     try {
-      const { data, error } = await supabase.functions.invoke(probe.fn, { body: probe.body });
+      const { data, error } = await invokeAuthed(probe.fn, probe.body);
       if (error) throw error;
       const payload = data as {
         ok?: boolean;

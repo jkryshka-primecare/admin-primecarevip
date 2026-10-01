@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { supabase } from "@/integrations/supabase/client";
+import { invokeAuthed } from "@/lib/invokeAuthed";
 
 export type ElationScope = "rest" | "fhir";
 
@@ -23,14 +24,12 @@ export async function callElation<T = unknown>(
   query?: Record<string, string | number | boolean>,
   opts?: { id?: string; scope?: ElationScope },
 ): Promise<ElationResponse<T>> {
-  const { data, error } = await supabase.functions.invoke(FUNCTION_NAME, {
-    body: {
-      resource,
-      id: opts?.id,
-      scope: opts?.scope ?? "rest",
-      method: "GET",
-      query,
-    },
+  const { data, error } = await invokeAuthed(FUNCTION_NAME, {
+    resource,
+    id: opts?.id,
+    scope: opts?.scope ?? "rest",
+    method: "GET",
+    query,
   });
   if (error) {
     return { ok: false, error: error.message };
