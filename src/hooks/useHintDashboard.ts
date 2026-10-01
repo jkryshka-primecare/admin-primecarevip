@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { supabase } from "@/integrations/supabase/client";
+import { invokeAuthed } from "@/lib/invokeAuthed";
 
 type HintResponse = {
   status: number;
@@ -12,9 +12,7 @@ type HintResponse = {
 type HintResult = HintResponse | { status: 0; data: null; pagination: { total: null }; error: string };
 
 async function callHint(resource: string, query: Record<string, any> = {}, scope: "practice" | "partner" = "practice") {
-  const { data, error } = await supabase.functions.invoke("hint-live", {
-    body: { resource, scope, query },
-  });
+  const { data, error } = await invokeAuthed("hint-live", { resource, scope, query });
   if (error) throw new Error(error.message);
   return data as HintResponse;
 }
