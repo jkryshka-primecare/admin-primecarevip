@@ -28,7 +28,6 @@ export function useHintResource<T = any>(
     (async () => {
       try {
         const { data: res, error: err } = await invokeAuthed("hint-live", {
-          body: undefined,
           resource,
           scope,
           query,
