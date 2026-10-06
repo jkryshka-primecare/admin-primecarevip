@@ -63,11 +63,52 @@ Deno.serve(async (req) => {
   if (!isAdmin) return deny(403, "Only admins can invite users.");
 
   // 2. Parse + validate body
-  let body: InviteBody;
+  let body: InviteBody & { resend_invitation_id?: string };
   try {
     body = await req.json();
   } catch {
     return deny(400, "Invalid JSON body");
+  }
+
+  const origin = (req.headers.get("origin")
+    ?? Deno.env.get("PUBLIC_APP_URL")
+    ?? "https://admin.primecarevip.com").replace(/\/+$/, "");
+
+  const { data: callerProfile } = await admin.from("profiles")
+    .select("display_name").eq("user_id", callerId).maybeSingle();
+  const invitedBy = callerProfile?.display_name && !callerProfile.display_name.includes("@")
+    ? callerProfile.display_name : undefined;
+
+  async function sendInviteEmail(inv: { token: string; email: string; first_name: string; role: string }) {
+    try {
+      const { error } = await admin.functions.invoke("send-transactional-email", {
+        body: {
+          templateName: "team-invite",
+          recipientEmail: inv.email,
+          idempotencyKey: `team-invite-${inv.token}-${Date.now()}`,
+          templateData: {
+            firstName: inv.first_name,
+            inviteUrl: `${origin}/auth?invite=${inv.token}`,
+            roleLabel: inv.role.replace("_", " "),
+            invitedBy,
+          },
+        },
+      });
+      return !error;
+    } catch {
+      return false;
+    }
+  }
+
+  // Resend an existing pending invitation's email.
+  if (body.resend_invitation_id) {
+    const { data: inv } = await admin.from("invitations")
+      .select("token, email, first_name, role, status")
+      .eq("id", body.resend_invitation_id).maybeSingle();
+    if (!inv) return deny(404, "Invitation not found.");
+    if (inv.status !== "pending") return deny(409, "This invitation is no longer pending.");
+    const emailSent = await sendInviteEmail(inv);
+    return json({ ok: true, email: inv.email, email_sent: emailSent, invite_url: `${origin}/auth?invite=${inv.token}` });
   }
 
   const email = (body.email ?? "").trim().toLowerCase();
@@ -76,9 +117,11 @@ Deno.serve(async (req) => {
   const lastName = (body.last_name ?? "").trim();
 
   const emailRe = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-  if (!emailRe.test(email)) return deny(400, "Please enter a valid email address.");
+  if (!emailRe.test(email) || email.length > 255) return deny(400, "Please enter a valid email address.");
   if (!ROLES.has(role)) return deny(400, "Invalid role.");
-  if (!firstName || !lastName) return deny(400, "First and last name are required.");
+  if (!firstName || !lastName || firstName.length > 100 || lastName.length > 100) {
+    return deny(400, "First and last name are required.");
+  }
 
   // 3. Revoke any prior pending invitations for this email so only the
   //    newest link is valid.
@@ -105,11 +148,10 @@ Deno.serve(async (req) => {
     return json({ error: invErr?.message ?? "Could not create invitation." }, 500);
   }
 
-  // 5. Build the share link. Prefer the request origin; fall back to env.
-  const origin = req.headers.get("origin")
-    ?? Deno.env.get("PUBLIC_APP_URL")
-    ?? "https://admin.primecarevip.com";
-  const inviteUrl = `${origin.replace(/\/+$/, "")}/auth?invite=${inv.token}`;
+  const inviteUrl = `${origin}/auth?invite=${inv.token}`;
+
+  // 5. Email the link (best-effort — the link is always returned as a backup).
+  const emailSent = await sendInviteEmail({ token: inv.token, email, first_name: firstName, role });
 
   // 6. Audit
   await admin.from("phi_access_log").insert({
@@ -125,5 +167,5 @@ Deno.serve(async (req) => {
     user_agent: req.headers.get("user-agent") ?? null,
   });
 
-  return json({ ok: true, email, role, invite_url: inviteUrl });
+  return json({ ok: true, email, role, invite_url: inviteUrl, email_sent: emailSent });
 });

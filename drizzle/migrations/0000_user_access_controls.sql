@@ -1,0 +1,3 @@
+ALTER TABLE public.profiles ADD COLUMN IF NOT EXISTS access_removed_at timestamptz, ADD COLUMN IF NOT EXISTS access_removed_reason text;
+ALTER TABLE public.user_roles DROP CONSTRAINT user_roles_granted_by_fkey, ADD CONSTRAINT user_roles_granted_by_fkey FOREIGN KEY (granted_by) REFERENCES auth.users(id) ON DELETE SET NULL;
+ALTER TABLE public.portal_admin_actions DROP CONSTRAINT portal_admin_actions_actor_user_id_fkey, ADD CONSTRAINT portal_admin_actions_actor_user_id_fkey FOREIGN KEY (actor_user_id) REFERENCES auth.users(id) ON DELETE SET NULL;

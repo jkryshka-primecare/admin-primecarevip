@@ -12,10 +12,12 @@ export interface TemplateEntry {
 import { template as licenseExpirationAlert } from './license-expiration-alert.tsx'
 import { template as performanceReviewStatus } from './performance-review-status.tsx'
 import { template as integrationHealthAlert } from './integration-health-alert.tsx'
+import { template as teamInvite } from './team-invite.tsx'
 
 export const TEMPLATES: Record<string, TemplateEntry> = {
   'license-expiration-alert': licenseExpirationAlert,
   'performance-review-status': performanceReviewStatus,
   'integration-health-alert': integrationHealthAlert,
+  'team-invite': teamInvite,
 }
 

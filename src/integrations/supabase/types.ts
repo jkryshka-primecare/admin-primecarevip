@@ -1663,6 +1663,8 @@ export type Database = {
       }
       profiles: {
         Row: {
+          access_removed_at: string | null
+          access_removed_reason: string | null
           created_at: string
           display_name: string | null
           email: string | null
@@ -1672,6 +1674,8 @@ export type Database = {
           user_id: string
         }
         Insert: {
+          access_removed_at?: string | null
+          access_removed_reason?: string | null
           created_at?: string
           display_name?: string | null
           email?: string | null
@@ -1681,6 +1685,8 @@ export type Database = {
           user_id: string
         }
         Update: {
+          access_removed_at?: string | null
+          access_removed_reason?: string | null
           created_at?: string
           display_name?: string | null
           email?: string | null
