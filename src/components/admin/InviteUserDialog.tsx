@@ -63,12 +63,19 @@ export default function InviteUserDialog({ onInvited }: Props) {
     }
 
     const url = (data as { invite_url?: string } | null)?.invite_url ?? null;
+    const emailSent = (data as { email_sent?: boolean } | null)?.email_sent === true;
     if (url) {
       try { await navigator.clipboard.writeText(url); } catch { /* ignore */ }
     }
-    toast.success(`Invitation sent to ${email}`, {
-      description: url ? "Invite link copied to clipboard." : undefined,
-    });
+    if (emailSent) {
+      toast.success(`Invitation emailed to ${email}`, {
+        description: url ? "A backup copy of the link is on your clipboard." : undefined,
+      });
+    } else {
+      toast.warning(`Invitation created, but the email didn't go out`, {
+        description: url ? "The link is copied to your clipboard. Send it to them yourself." : undefined,
+      });
+    }
     onInvited();
     reset();
     setOpen(false);
@@ -88,7 +95,7 @@ export default function InviteUserDialog({ onInvited }: Props) {
         <DialogHeader>
           <DialogTitle className="font-serif">Invite a new user</DialogTitle>
           <DialogDescription>
-            Creates an invitation. Share the link or, once email is configured, it will be emailed automatically.
+            We'll email them a sign-up link. A copy of the link is also put on your clipboard as a backup.
           </DialogDescription>
         </DialogHeader>
 

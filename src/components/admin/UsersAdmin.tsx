@@ -15,7 +15,10 @@ import {
   Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle,
 } from "@/components/ui/dialog";
 import { toast } from "sonner";
-import { Loader2, ShieldAlert, RefreshCw, Search, Copy, X } from "lucide-react";
+import { Loader2, ShieldAlert, RefreshCw, Search, Copy, X, Mail, UserX, UserCheck, Trash2 } from "lucide-react";
+import { invokeAuthed } from "@/lib/invokeAuthed";
+
+const BRIDGE_USER_ID = "c85a8977-1fa6-40c5-a819-decdf43e7177";
 import InviteUserDialog from "./InviteUserDialog";
 
 type ProfileRow = {
@@ -24,6 +27,8 @@ type ProfileRow = {
   display_name: string | null;
   created_at: string;
   phi_acknowledged_at: string | null;
+  access_removed_at: string | null;
+  access_removed_reason: string | null;
 };
 type UserRoleRow = { user_id: string; role: AppRole };
 type UserRow = ProfileRow & { roles: AppRole[] };
@@ -64,7 +69,7 @@ function effectiveRole(roles: AppRole[]): AppRole {
 }
 
 export default function UsersAdmin() {
-  const { user: me, isAdmin } = useAuth();
+  const { user: me, isAdmin, isSuperAdmin } = useAuth();
   const [users, setUsers] = useState<UserRow[]>([]);
   const [invites, setInvites] = useState<InvitationRow[]>([]);
   const [loading, setLoading] = useState(true);
@@ -72,13 +77,44 @@ export default function UsersAdmin() {
   const [search, setSearch] = useState("");
   const [pendingGrant, setPendingGrant] = useState<{ userId: string; role: AppRole } | null>(null);
   const [reason, setReason] = useState("");
+  const [manage, setManage] = useState<{ action: "disable" | "delete"; user: UserRow } | null>(null);
+  const [manageReason, setManageReason] = useState("");
+  const [confirmEmail, setConfirmEmail] = useState("");
+  const [managing, setManaging] = useState(false);
+  const [resending, setResending] = useState<string | null>(null);
+
+  async function runManage(action: "disable" | "enable" | "delete", u: UserRow, why?: string) {
+    setManaging(true);
+    const { error } = await invokeAuthed("admin-manage-user", { action, user_id: u.user_id, reason: why });
+    setManaging(false);
+    if (error) {
+      toast.error("Could not update this user", { description: error.message });
+      return false;
+    }
+    toast.success(
+      action === "disable" ? `Access removed for ${u.email}`
+        : action === "enable" ? `Access restored for ${u.email}. Choose their role below.`
+        : `${u.email} was deleted`,
+    );
+    await load();
+    return true;
+  }
+
+  async function resendInvite(i: InvitationRow) {
+    setResending(i.id);
+    const { data, error } = await invokeAuthed<{ email_sent?: boolean }>("admin-invite-user", { resend_invitation_id: i.id });
+    setResending(null);
+    if (error) { toast.error("Could not resend", { description: error.message }); return; }
+    if (data?.email_sent) toast.success(`Invitation emailed again to ${i.email}`);
+    else toast.error("The email didn't go out", { description: "Use Copy link and send it yourself." });
+  }
 
 
   async function load() {
     setLoading(true);
     const [{ data: profiles, error: pErr }, { data: roles, error: rErr }, { data: inv, error: iErr }] =
       await Promise.all([
-        supabase.from("profiles").select("user_id, email, display_name, created_at, phi_acknowledged_at").order("created_at", { ascending: false }),
+        supabase.from("profiles").select("user_id, email, display_name, created_at, phi_acknowledged_at, access_removed_at, access_removed_reason").order("created_at", { ascending: false }),
         supabase.from("user_roles").select("user_id, role"),
         supabase.from("invitations").select("id, token, email, first_name, last_name, role, status, created_at").order("created_at", { ascending: false }),
       ]);
@@ -96,7 +132,7 @@ export default function UsersAdmin() {
       rolesByUser.set(r.user_id, arr);
     });
 
-    setUsers(((profiles as ProfileRow[] | null) ?? []).map((p) => ({
+    setUsers(((profiles as ProfileRow[] | null) ?? []).filter((p) => p.user_id !== BRIDGE_USER_ID).map((p) => ({
       ...p, roles: rolesByUser.get(p.user_id) ?? [],
     })));
     setInvites((inv as InvitationRow[] | null) ?? []);
@@ -151,11 +187,13 @@ export default function UsersAdmin() {
 
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase();
-    if (!q) return users;
-    return users.filter((u) => u.email?.toLowerCase().includes(q) || u.display_name?.toLowerCase().includes(q));
+    const active = users.filter((u) => !u.access_removed_at);
+    if (!q) return active;
+    return active.filter((u) => u.email?.toLowerCase().includes(q) || u.display_name?.toLowerCase().includes(q));
   }, [users, search]);
 
   const pendingInvites = invites.filter((i) => i.status === "pending");
+  const removedUsers = users.filter((u) => u.access_removed_at);
 
   if (!isAdmin) {
     return (
@@ -174,7 +212,7 @@ export default function UsersAdmin() {
           <div>
             <h2 className="font-serif text-xl text-foreground">User access</h2>
             <p className="text-xs text-muted-foreground mt-1 font-mono uppercase tracking-wider">
-              {users.length} {users.length === 1 ? "account" : "accounts"} · invite-only signups
+              {filtered.length} active {filtered.length === 1 ? "account" : "accounts"} · invite-only signups
             </p>
           </div>
           <div className="flex items-center gap-2">
@@ -204,6 +242,7 @@ export default function UsersAdmin() {
                   <TableHead>PHI ack</TableHead>
                   <TableHead>Joined</TableHead>
                   <TableHead className="text-right">Set role</TableHead>
+                  <TableHead className="text-right">Access</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
@@ -249,6 +288,22 @@ export default function UsersAdmin() {
                           </SelectContent>
                         </Select>
                       </TableCell>
+                      <TableCell className="text-right whitespace-nowrap">
+                        {!isMe && (
+                          <>
+                            <Button size="sm" variant="ghost" className="h-8 text-xs"
+                              onClick={() => { setManage({ action: "disable", user: u }); setManageReason(""); }}>
+                              <UserX className="size-3.5" /> Remove access
+                            </Button>
+                            {isSuperAdmin && (
+                              <Button size="sm" variant="ghost" className="h-8 text-xs text-destructive hover:text-destructive"
+                                onClick={() => { setManage({ action: "delete", user: u }); setManageReason(""); setConfirmEmail(""); }}>
+                                <Trash2 className="size-3.5" /> Delete
+                              </Button>
+                            )}
+                          </>
+                        )}
+                      </TableCell>
                     </TableRow>
                   );
                 })}
@@ -288,6 +343,9 @@ export default function UsersAdmin() {
                       {new Date(i.created_at).toLocaleDateString()}
                     </TableCell>
                     <TableCell className="text-right">
+                      <Button size="sm" variant="outline" onClick={() => resendInvite(i)} disabled={resending === i.id} className="mr-2">
+                        {resending === i.id ? <Loader2 className="size-3 animate-spin" /> : <Mail className="size-3" />} Resend email
+                      </Button>
                       <Button size="sm" variant="outline" onClick={() => copyInviteLink(i.token)} className="mr-2">
                         <Copy className="size-3" /> Copy link
                       </Button>
@@ -302,6 +360,91 @@ export default function UsersAdmin() {
           </div>
         </div>
       )}
+
+      {removedUsers.length > 0 && (
+        <div className="bg-card border border-border rounded-2xl p-6 shadow-card">
+          <h3 className="font-serif text-lg text-foreground mb-4">Access removed ({removedUsers.length})</h3>
+          <div className="rounded-lg border border-border overflow-hidden">
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>User</TableHead>
+                  <TableHead>Removed</TableHead>
+                  <TableHead>Reason</TableHead>
+                  <TableHead className="text-right">Actions</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {removedUsers.map((u) => (
+                  <TableRow key={u.user_id}>
+                    <TableCell>
+                      <div className="flex flex-col">
+                        <span className="text-sm text-foreground">{u.display_name ?? "—"}</span>
+                        <span className="text-xs font-mono text-muted-foreground">{u.email}</span>
+                      </div>
+                    </TableCell>
+                    <TableCell className="text-xs font-mono text-muted-foreground">
+                      {u.access_removed_at && new Date(u.access_removed_at).toLocaleDateString()}
+                    </TableCell>
+                    <TableCell className="text-xs text-muted-foreground max-w-xs truncate">{u.access_removed_reason}</TableCell>
+                    <TableCell className="text-right whitespace-nowrap">
+                      <Button size="sm" variant="outline" className="mr-2" disabled={managing}
+                        onClick={() => runManage("enable", u)}>
+                        <UserCheck className="size-3" /> Restore access
+                      </Button>
+                      {isSuperAdmin && (
+                        <Button size="sm" variant="outline" className="text-destructive hover:text-destructive"
+                          onClick={() => { setManage({ action: "delete", user: u }); setManageReason(""); setConfirmEmail(""); }}>
+                          <Trash2 className="size-3" /> Delete
+                        </Button>
+                      )}
+                    </TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          </div>
+        </div>
+      )}
+
+      <Dialog open={!!manage} onOpenChange={(o) => !o && setManage(null)}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle className="font-serif">
+              {manage?.action === "delete" ? "Delete user permanently" : "Remove access"}
+            </DialogTitle>
+            <DialogDescription>
+              {manage?.action === "delete"
+                ? `This deletes ${manage?.user.email}'s login for good. Their past activity stays in the audit logs. This can't be undone.`
+                : `${manage?.user.email} will be signed out everywhere and won't be able to sign in. You can restore access later.`}
+            </DialogDescription>
+          </DialogHeader>
+          <Textarea value={manageReason} onChange={(e) => setManageReason(e.target.value)}
+            placeholder="Reason (e.g. left the practice on Oct 3)" rows={3} maxLength={500} />
+          {manage?.action === "delete" && (
+            <div className="space-y-1.5">
+              <p className="text-xs text-muted-foreground">Type <span className="font-mono">{manage.user.email}</span> to confirm.</p>
+              <Input value={confirmEmail} onChange={(e) => setConfirmEmail(e.target.value)} className="font-mono text-xs" />
+            </div>
+          )}
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setManage(null)}>Cancel</Button>
+            <Button
+              variant={manage?.action === "delete" ? "destructive" : "default"}
+              disabled={managing || manageReason.trim().length < 3 ||
+                (manage?.action === "delete" && confirmEmail.trim().toLowerCase() !== (manage.user.email ?? "").toLowerCase())}
+              onClick={async () => {
+                if (!manage) return;
+                const ok = await runManage(manage.action, manage.user, manageReason.trim());
+                if (ok) setManage(null);
+              }}
+            >
+              {managing && <Loader2 className="size-3.5 animate-spin" />}
+              {manage?.action === "delete" ? "Delete user" : "Remove access"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       <Dialog open={!!pendingGrant} onOpenChange={(o) => !o && setPendingGrant(null)}>
         <DialogContent>
