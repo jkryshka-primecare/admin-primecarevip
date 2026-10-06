@@ -1,10 +1,14 @@
+import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { format } from "date-fns";
-import { CheckCircle2, CircleAlert, History, LifeBuoy, Loader2 } from "lucide-react";
+import { CheckCircle2, CircleAlert, History, LifeBuoy, Loader2, UserPlus } from "lucide-react";
 
 import { supabase } from "@/integrations/supabase/client";
 import type { PortalAccessSnapshot } from "@/hooks/usePortalAdmin";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { toast } from "@/hooks/use-toast";
 
 type Check = { ok: boolean; label: string; hint?: string };
 
@@ -97,6 +101,7 @@ type HistoryRow = {
 const ACTION_LABEL: Record<string, string> = {
   invite: "Invite sent",
   syncEmail: "Email refreshed from chart",
+  careProvision: "Portal account set up",
   revoke: "Invite revoked",
   setAccess: "Portal access changed",
 };
@@ -155,5 +160,116 @@ export function PortalHelpHistory({ elationId }: { elationId: string }) {
         )}
       </CardContent>
     </Card>
+  );
+}
+
+type CareProvisionResp = {
+  ok: boolean;
+  error?: string;
+  code?: string;
+  needsTieBreak?: boolean;
+  data?: { preview?: { name: string; dob: string; email: string; candidates: number; tieBreakUsed: boolean } };
+};
+
+async function callCareProvision(body: Record<string, unknown>): Promise<CareProvisionResp> {
+  const { data, error } = await supabase.functions.invoke<CareProvisionResp>("portal-admin", {
+    body: { action: "careProvision", ...body },
+  });
+  if (data) return data;
+  throw new Error(error?.message ?? "No response");
+}
+
+/** Care-team setup for a member with no portal account: match → confirm → create + invite. */
+export function CareProvisionPanel({
+  elationId,
+  onDone,
+}: {
+  elationId: string;
+  onDone: () => void;
+}) {
+  const [step, setStep] = useState<"idle" | "checking" | "confirm" | "tiebreak" | "sending" | "done">("idle");
+  const [message, setMessage] = useState<string | null>(null);
+  const [preview, setPreview] = useState<NonNullable<CareProvisionResp["data"]>["preview"] | null>(null);
+  const [tieBreak, setTieBreak] = useState("");
+  const [reason, setReason] = useState("Member asked for help signing in");
+
+  async function check(tb?: string) {
+    setStep("checking");
+    setMessage(null);
+    try {
+      const r = await callCareProvision({ elationPatientId: elationId, dryRun: true, tieBreakEmail: tb ?? "" });
+      if (r.ok && r.data?.preview) {
+        setPreview(r.data.preview);
+        setStep("confirm");
+      } else if (r.needsTieBreak) {
+        setMessage(r.error ?? null);
+        setStep("tiebreak");
+      } else {
+        setMessage(r.error ?? "Couldn't check this member.");
+        setStep(tb ? "tiebreak" : "idle");
+      }
+    } catch (e) {
+      setMessage(e instanceof Error ? e.message : String(e));
+      setStep("idle");
+    }
+  }
+
+  async function send() {
+    setStep("sending");
+    try {
+      const r = await callCareProvision({
+        elationPatientId: elationId, dryRun: false, reason, tieBreakEmail: preview?.tieBreakUsed ? tieBreak : "",
+      });
+      if (r.ok) {
+        setStep("done");
+        toast({ title: "Portal account set up", description: `Invite sent to ${preview?.email}.` });
+        onDone();
+      } else {
+        setMessage(r.error ?? "Setup failed.");
+        setStep("confirm");
+      }
+    } catch (e) {
+      setMessage(e instanceof Error ? e.message : String(e));
+      setStep("confirm");
+    }
+  }
+
+  return (
+    <div className="space-y-3 border-t pt-3">
+      {message && <p className="text-xs text-destructive">{message}</p>}
+
+      {(step === "idle" || step === "checking") && (
+        <Button size="sm" onClick={() => check()} disabled={step === "checking"}>
+          {step === "checking" ? <Loader2 className="h-3.5 w-3.5 mr-1 animate-spin" /> : <UserPlus className="h-3.5 w-3.5 mr-1" />}
+          Set up portal access &amp; send invite
+        </Button>
+      )}
+
+      {step === "tiebreak" && (
+        <div className="space-y-2">
+          <Input type="email" value={tieBreak} onChange={(e) => setTieBreak(e.target.value)} placeholder="Member's email" />
+          <div className="flex gap-2">
+            <Button size="sm" onClick={() => check(tieBreak)} disabled={!tieBreak.trim()}>Confirm member</Button>
+            <Button size="sm" variant="ghost" onClick={() => { setStep("idle"); setMessage(null); }}>Cancel</Button>
+          </div>
+        </div>
+      )}
+
+      {(step === "confirm" || step === "sending") && preview && (
+        <div className="space-y-2 rounded-md border p-3 text-sm">
+          <div><span className="text-muted-foreground">Member:</span> {preview.name}</div>
+          <div><span className="text-muted-foreground">Date of birth:</span> {preview.dob}</div>
+          <div><span className="text-muted-foreground">Invite goes to:</span> {preview.email}</div>
+          <Input value={reason} onChange={(e) => setReason(e.target.value)} placeholder="Reason (required)" />
+          <div className="flex gap-2">
+            <Button size="sm" onClick={send} disabled={step === "sending" || reason.trim().length < 3}>
+              {step === "sending" && <Loader2 className="h-3.5 w-3.5 mr-1 animate-spin" />}
+              Create account &amp; send invite
+            </Button>
+            <Button size="sm" variant="ghost" onClick={() => { setStep("idle"); setPreview(null); setMessage(null); }}>Cancel</Button>
+          </div>
+        </div>
+      )}
+    </div>
   );
 }

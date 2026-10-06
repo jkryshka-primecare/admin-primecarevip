@@ -33,7 +33,7 @@ import {
 import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
 import { toast } from "@/hooks/use-toast";
-import { LoginChecklist, PortalHelpHistory } from "./PortalHelp";
+import { CareProvisionPanel, LoginChecklist, PortalHelpHistory } from "./PortalHelp";
 
 
 const QUICK_REASONS = [
@@ -238,10 +238,10 @@ export default function PortalAdminPanel({ elationId }: { elationId: string | nu
       <div className="rounded-md border p-4 text-sm space-y-1">
         <div className="font-medium">This member doesn't have a portal account yet</div>
         <p className="text-xs text-muted-foreground">
-          Invites can only be sent once a portal account exists. An administrator can create one from
-          Administration → Portal access triage. If this looks like a duplicate chart, check for another
+          The care team can set one up below. The member is matched by the name and date of birth on this chart. If this looks like a duplicate chart, check for another
           chart with the same name and date of birth.
         </p>
+        {canHelp && <CareProvisionPanel elationId={elationId} onDone={() => refetch()} />}
       </div>
     );
   }
