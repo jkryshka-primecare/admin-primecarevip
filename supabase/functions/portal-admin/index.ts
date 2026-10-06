@@ -1831,7 +1831,9 @@ Deno.serve(async (req) => {
       data: ok ? payload : null,
     }),
     {
-      status: ok ? 200 : status || 502,
+      // A member with no portal record is an expected state for a read, not a
+      // transport failure — answer 200 with the envelope so the UI can show it.
+      status: ok || (action === "get" && String(errorMessage ?? "").includes("NO_ROSTER_DOC")) ? 200 : status || 502,
       headers: { ...corsHeaders, "Content-Type": "application/json" },
     },
   );
