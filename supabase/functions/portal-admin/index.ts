@@ -682,6 +682,43 @@ async function isAdmin(ctx: AuthContext): Promise<boolean> {
   return Boolean(data);
 }
 
+
+/**
+ * Care-team gate: true only when the member has NEVER had working portal
+ * access (no claim, never signed in). Reads the live portal record upstream.
+ * Fails closed: any error means "not safe", so only an admin may proceed.
+ */
+async function memberNeverHadAccess(elationPatientId: string, actor: string): Promise<boolean> {
+  try {
+    const url = `${FUNCTIONS_BASE}/${FUNCTION_BY_ACTION.get}`;
+    const now = Math.floor(Date.now() / 1000);
+    const cached = tokenCache.get(url);
+    let idToken: string;
+    if (cached && cached.expiresAt - 60 > now) idToken = cached.token;
+    else if (wifConfigured()) {
+      idToken = await getIdentityTokenViaWif(url);
+      tokenCache.set(url, { token: idToken, expiresAt: now + 3000 });
+    } else idToken = await getIdentityToken(loadServiceAccount(), url);
+    const res = await fetch(url, {
+      method: "POST",
+      headers: { Authorization: `Bearer ${idToken}`, "Content-Type": "application/json" },
+      body: JSON.stringify({ elationPatientId, actor, reason: "care-team invite eligibility check" }),
+    });
+    const text = await res.text();
+    if (!res.ok) return false;
+    const p = JSON.parse(text) as Record<string, unknown>;
+    const d = ((p.data ?? p.result ?? p) as Record<string, unknown>) ?? {};
+    const claim = (d.claim ?? null) as Record<string, unknown> | null;
+    if (!claim) return false;
+    if (claim.state === "claimed") return false;
+    if (claim.claimedAt) return false;
+    if (claim.webAccessVerifiedAt) return false;
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 const CARE_TEAM_ROLES = ["super_admin", "admin", "clinical", "pharmacy"];
 
 /** Care-team tier: may send standard invites and refresh email from chart. */
@@ -978,6 +1015,17 @@ Deno.serve(async (req) => {
     }
     if (!reason) {
       return deny(400, "A reason is required for this change.");
+    }
+  }
+
+  // Care team (non-admin) may only invite members who have never had access.
+  if (action === "invite" && !(await isAdmin(ctx))) {
+    const eligible = await memberNeverHadAccess(elationPatientId, ctx.user.email ?? ctx.user.id);
+    if (!eligible) {
+      return new Response(JSON.stringify({
+        ok: false, status: 403,
+        error: "This member already has (or has had) portal access, or their record couldn't be confirmed. Please ask an administrator.",
+      }), { headers: { ...corsHeaders, "Content-Type": "application/json" } });
     }
   }
 
