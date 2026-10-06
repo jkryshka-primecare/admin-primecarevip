@@ -77,13 +77,32 @@ export function useElationPatients(opts: { search?: string; limit?: number } = {
   const fetchPatients = useCallback(async () => {
     setLoading(true);
     setError(null);
-    const query: Record<string, string | number> = { limit };
-    const trimmed = search.trim();
-    if (trimmed) {
-      // Elation supports last_name / first_name filters.
-      query.last_name = trimmed;
+    const words = search.trim().toLowerCase().split(/\s+/).filter(Boolean).slice(0, 3);
+    let res: Awaited<ReturnType<typeof callElation<{ results?: ElationPatient[] }>>>;
+    if (words.length === 0) {
+      res = await callElation<{ results?: ElationPatient[] }>("patients", { limit });
+    } else {
+      // Elation only filters on exact first_name / last_name (no middle name,
+      // no partials), so query each word as both and merge.
+      const calls = words.flatMap((w) => [
+        callElation<{ results?: ElationPatient[] }>("patients", { limit, first_name: w }),
+        callElation<{ results?: ElationPatient[] }>("patients", { limit, last_name: w }),
+      ]);
+      const all = await Promise.all(calls);
+      const good = all.filter((r) => !(r.ok === false || (r.status && r.status >= 400)));
+      const byId = new Map<string, ElationPatient>();
+      for (const r of good) {
+        for (const p of (r.data as { results?: ElationPatient[] })?.results ?? []) {
+          byId.set(String(p.id), p);
+        }
+      }
+      // Every typed word must appear somewhere in the full name.
+      const list = [...byId.values()].filter((p) => {
+        const full = [p.first_name, p.middle_name, p.last_name].filter(Boolean).join(" ").toLowerCase();
+        return words.every((w) => full.includes(w));
+      });
+      res = good.length === 0 ? all[0] : { ...good[0], data: { results: list }, pagination: { total: list.length } as never };
     }
-    const res = await callElation<{ results?: ElationPatient[] }>("patients", query);
     if (res.ok === false || (res.status && res.status >= 400)) {
       setError(res.error ?? `Elation returned ${res.status ?? "error"}`);
       setPatients([]);
