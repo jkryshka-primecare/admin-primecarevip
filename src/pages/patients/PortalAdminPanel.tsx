@@ -148,7 +148,7 @@ function fmt(value?: unknown) {
 export default function PortalAdminPanel({ elationId }: { elationId: string | null }) {
   const { isAdmin, hasAnyRole } = useAuth();
   const canHelp = hasAnyRole(["super_admin", "admin", "clinical", "pharmacy"]);
-  const { snapshot, loading, error, refetch } = usePortalAccess(elationId);
+  const { snapshot, noRecord, loading, error, refetch } = usePortalAccess(elationId);
   const { issueInvite, revokeInvite, setAccess, syncEmail } = usePortalMutations(elationId);
 
   // Preview the chart email first, then ask before writing anything.
@@ -229,6 +229,19 @@ export default function PortalAdminPanel({ elationId }: { elationId: string | nu
 
   if (!elationId) {
     return <p className="text-xs text-muted-foreground">Select a patient first.</p>;
+  }
+
+  if (noRecord && !loading) {
+    return (
+      <div className="rounded-md border p-4 text-sm space-y-1">
+        <div className="font-medium">This member doesn't have a portal account yet</div>
+        <p className="text-xs text-muted-foreground">
+          Invites can only be sent once a portal account exists. An administrator can create one from
+          Administration → Portal access triage. If this looks like a duplicate chart, check for another
+          chart with the same name and date of birth.
+        </p>
+      </div>
+    );
   }
 
   return (
