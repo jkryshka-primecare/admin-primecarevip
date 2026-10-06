@@ -75,10 +75,18 @@ async function callPortalAdmin<T>(body: Record<string, unknown>): Promise<Envelo
   const { data: { session } } = await supabase.auth.getSession();
   if (!session) throw new Error("Your session has expired. Sign in again to continue.");
   const { data, error } = await supabase.functions.invoke<Envelope<T>>("portal-admin", { body });
-  if (error && !data) throw new Error(error.message);
-  if (!data) throw new Error("Empty response from the portal control plane");
-  if (!data.ok) throw new Error(data.error ?? `Portal function returned ${data.status}`);
-  return data;
+  let env = data;
+  if (error && !env) {
+    // Non-2xx: the real envelope is in the response body.
+    try {
+      const ctxRes = (error as { context?: Response }).context;
+      if (ctxRes && typeof ctxRes.json === "function") env = (await ctxRes.json()) as Envelope<T>;
+    } catch { /* fall through */ }
+    if (!env) throw new Error(error.message);
+  }
+  if (!env) throw new Error("Empty response from the portal control plane");
+  if (!env.ok) throw new Error(env.error ?? `Portal function returned ${env.status}`);
+  return env;
 }
 
 
@@ -176,8 +184,17 @@ export function usePortalAccess(elationPatientId: string | null, enabled = true)
 
   const result = useQuery({
     queryKey: ["portal-admin", "access", elationPatientId],
-    queryFn: () =>
-      callPortalAdmin<RawAccessResponse>({ action: "get", elationPatientId }),
+    queryFn: async () => {
+      try {
+        return await callPortalAdmin<RawAccessResponse>({ action: "get", elationPatientId });
+      } catch (e) {
+        // A member with no portal record yet is a normal state, not an error.
+        if (e instanceof Error && e.message.includes("NO_ROSTER_DOC")) {
+          return { ok: true, status: 404, data: null, noRecord: true } as Envelope<RawAccessResponse> & { noRecord: true };
+        }
+        throw e;
+      }
+    },
     enabled: enabled && !!elationPatientId,
     staleTime: 60 * 1000,
     retry: false,
@@ -185,6 +202,7 @@ export function usePortalAccess(elationPatientId: string | null, enabled = true)
 
   return {
     snapshot: normalizeSnapshot(result.data?.data),
+    noRecord: Boolean((result.data as { noRecord?: boolean } | undefined)?.noRecord),
     loading: result.isLoading,
     error: result.error instanceof Error ? result.error.message : null,
     refetch: result.refetch,
