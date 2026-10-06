@@ -188,6 +188,8 @@ export default function PortalAdminPanel({ elationId }: { elationId: string | nu
     issueInvite.isPending || revokeInvite.isPending || setAccess.isPending;
 
   const access = snapshot?.access ?? {};
+  // Care team may only invite members who have never had working access.
+  const hadAccess = Boolean(snapshot?.claimed || snapshot?.claimedAt || snapshot?.webAccessVerifiedAt);
   const suspended = access.status === "suspended";
   const modules = access.modules ?? {};
   const hidden = normalizeHidden(access.hiddenItems);
@@ -339,7 +341,9 @@ export default function PortalAdminPanel({ elationId }: { elationId: string | nu
                   </p>
                 ) : !isAdmin ? (
                   <p className="text-xs text-muted-foreground">
-                    You can send invites and refresh the email from the chart. Other changes need an administrator.
+                    {hadAccess
+                      ? "This member already has portal access — ask an administrator for any changes."
+                      : "You can send invites and refresh the email from the chart. Other changes need an administrator."}
                   </p>
                 ) : null}
               </div>
@@ -347,7 +351,8 @@ export default function PortalAdminPanel({ elationId }: { elationId: string | nu
               <div className="flex flex-wrap gap-2">
                 <Button
                   size="sm"
-                  disabled={!canHelp || busy}
+                  disabled={!canHelp || busy || (!isAdmin && hadAccess)}
+                  title={!isAdmin && hadAccess ? "This member already has portal access — ask an administrator." : undefined}
                   onClick={() => {
                     if (!guard("care")) return;
                     const to = snapshot?.email || "(no email on file)";
