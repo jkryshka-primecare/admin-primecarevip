@@ -682,6 +682,46 @@ async function isAdmin(ctx: AuthContext): Promise<boolean> {
   return Boolean(data);
 }
 
+const CARE_TEAM_ROLES = ["super_admin", "admin", "clinical", "pharmacy"];
+
+/** Care-team tier: may send standard invites and refresh email from chart. */
+async function isCareTeam(ctx: AuthContext): Promise<boolean> {
+  const { data, error } = await ctx.supabase
+    .from("user_roles")
+    .select("role")
+    .eq("user_id", ctx.user.id)
+    .in("role", CARE_TEAM_ROLES)
+    .limit(1);
+  if (error) return false;
+  return (data ?? []).length > 0;
+}
+
+const INVITE_MEMBER_WINDOW_MIN = 10;
+const INVITE_ACTOR_WINDOW_MIN = 60;
+const INVITE_ACTOR_MAX = 5;
+
+/** Returns a friendly message when an invite must be refused, else null. Fails closed. */
+async function inviteRateLimit(ctx: AuthContext, elationPatientId: string): Promise<string | null> {
+  const memberSince = new Date(Date.now() - INVITE_MEMBER_WINDOW_MIN * 60_000).toISOString();
+  const actorSince = new Date(Date.now() - INVITE_ACTOR_WINDOW_MIN * 60_000).toISOString();
+  const [member, actor] = await Promise.all([
+    ctx.supabase.from("portal_admin_actions").select("id", { count: "exact", head: true })
+      .eq("action", "invite").eq("elation_patient_id", elationPatientId).gte("created_at", memberSince),
+    ctx.supabase.from("portal_admin_actions").select("id", { count: "exact", head: true })
+      .eq("action", "invite").eq("actor_user_id", ctx.user.id).gte("created_at", actorSince),
+  ]);
+  if (member.error || actor.error) {
+    return "Couldn't confirm it's safe to send right now. Please try again in a minute.";
+  }
+  if ((member.count ?? 0) > 0) {
+    return `An invite was sent to this member in the last ${INVITE_MEMBER_WINDOW_MIN} minutes. Each new invite cancels the previous link, so please wait before sending another.`;
+  }
+  if ((actor.count ?? 0) >= INVITE_ACTOR_MAX) {
+    return `You've sent ${INVITE_ACTOR_MAX} invites in the last hour. Please wait a bit or ask an administrator.`;
+  }
+  return null;
+}
+
 /**
  * The narrowest tier, resolved from the DATABASE against the uid in the
  * verified session. Nothing in the request body can influence it — the client
@@ -884,7 +924,38 @@ Deno.serve(async (req) => {
     return deny(400, "Invalid JSON body");
   }
 
-  const action = String(body.action ?? "") as Action;
+  const rawAction = String(body.action ?? "");
+
+  /**
+   * Care-team help history for one member: who sent invites / changed the
+   * portal email, when, and why. Local read of our own audit table only —
+   * never forwarded upstream. Care-team tier.
+   */
+  if (rawAction === "history") {
+    const pid = String(body.elationPatientId ?? "").trim();
+    if (!pid) return deny(400, "elationPatientId is required");
+    if (!(await isCareTeam(ctx))) {
+      return deny(403, "Only the care team can view portal help history.");
+    }
+    const { data, error } = await ctx.supabase
+      .from("portal_admin_actions")
+      .select("id, created_at, action, reason, ok, error_message, actor_email, after_state")
+      .eq("elation_patient_id", pid)
+      .in("action", ["invite", "syncEmail", "revoke", "setAccess"])
+      .order("created_at", { ascending: false })
+      .limit(25);
+    if (error) return deny(500, "Could not load portal history.");
+    // syncEmail previews are not changes; hide them from the timeline.
+    const rows = (data ?? []).filter((r) => {
+      const a = r.after_state as Record<string, unknown> | null;
+      return !(r.action === "syncEmail" && a && a.dryRun === true);
+    }).map(({ after_state: _a, ...r }) => r);
+    return new Response(JSON.stringify({ ok: true, status: 200, data: rows }), {
+      headers: { ...corsHeaders, "Content-Type": "application/json" },
+    });
+  }
+
+  const action = rawAction as Action;
   if (!FUNCTION_BY_ACTION[action]) {
     return deny(400, `Unknown action "${action}"`);
   }
@@ -896,11 +967,28 @@ Deno.serve(async (req) => {
   const reason = typeof body.reason === "string" ? body.reason.trim().slice(0, 500) : "";
 
   if (MUTATIONS.includes(action)) {
-    if (!(await isAdmin(ctx))) {
+    // Care team (clinical/pharmacy) may send a normal invite and refresh the
+    // portal email from the chart. A claim reset and everything else stays
+    // admin-only.
+    const careTeamAllowed =
+      (action === "invite" && body.resetClaim !== true) || action === "syncEmail";
+    const allowed = careTeamAllowed ? await isCareTeam(ctx) : await isAdmin(ctx);
+    if (!allowed) {
       return deny(403, "Only administrators can change a member's portal access.");
     }
     if (!reason) {
       return deny(400, "A reason is required for this change.");
+    }
+  }
+
+  // Invite pacing — protects members from repeated sends that each void the
+  // previous link. Counted on attempts (a failed send still mints).
+  if (action === "invite") {
+    const limited = await inviteRateLimit(ctx, elationPatientId);
+    if (limited) {
+      return new Response(JSON.stringify({ ok: false, status: 429, error: limited }), {
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
     }
   }
 
