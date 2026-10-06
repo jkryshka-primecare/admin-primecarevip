@@ -683,6 +683,135 @@ async function isAdmin(ctx: AuthContext): Promise<boolean> {
 }
 
 
+/** Call one upstream portal Cloud Function with the service identity. */
+async function callUpstream(
+  fn: string,
+  payload: Record<string, unknown>,
+): Promise<{ status: number; body: Record<string, unknown> | null }> {
+  const url = `${FUNCTIONS_BASE}/${fn}`;
+  const now = Math.floor(Date.now() / 1000);
+  const cached = tokenCache.get(url);
+  let idToken: string;
+  if (cached && cached.expiresAt - 60 > now) idToken = cached.token;
+  else if (wifConfigured()) {
+    idToken = await getIdentityTokenViaWif(url);
+    tokenCache.set(url, { token: idToken, expiresAt: now + 3000 });
+  } else idToken = await getIdentityToken(loadServiceAccount(), url);
+  const res = await fetch(url, {
+    method: "POST",
+    headers: { Authorization: `Bearer ${idToken}`, "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+  const text = await res.text();
+  let body: Record<string, unknown> | null = null;
+  try { body = text ? JSON.parse(text) : null; } catch { body = { raw: text.slice(0, 500) }; }
+  return { status: res.status, body };
+}
+
+function upstreamError(body: Record<string, unknown> | null): string {
+  const e = body?.error as { message?: string; details?: { reason?: string } } | string | undefined;
+  if (typeof e === "string") return e;
+  return e?.message ?? e?.details?.reason ?? "";
+}
+
+const ELATION_REST = "https://app.elationemr.com/api/2.0";
+let elationTokenCache: { token: string; expiresAt: number } | null = null;
+
+async function elationGetPatient(id: string): Promise<Record<string, unknown> | null> {
+  if (!elationTokenCache || elationTokenCache.expiresAt < Date.now() + 60_000) {
+    const form = new URLSearchParams({
+      grant_type: "client_credentials",
+      client_id: Deno.env.get("ELATION_CLIENT_ID") ?? "",
+      client_secret: Deno.env.get("ELATION_CLIENT_SECRET") ?? "",
+    });
+    const t = await fetch(`${ELATION_REST}/oauth2/token/`, {
+      method: "POST",
+      headers: { "Content-Type": "application/x-www-form-urlencoded", Accept: "application/json" },
+      body: form.toString(),
+    });
+    if (!t.ok) throw new Error("Elation sign-in failed");
+    const j = await t.json() as { access_token: string; expires_in?: number };
+    elationTokenCache = { token: j.access_token, expiresAt: Date.now() + (j.expires_in ?? 3600) * 1000 };
+  }
+  const r = await fetch(`${ELATION_REST}/patients/${encodeURIComponent(id)}/`, {
+    headers: { Authorization: `Bearer ${elationTokenCache.token}`, Accept: "application/json" },
+  });
+  if (r.status === 404) return null;
+  if (!r.ok) throw new Error(`Elation returned ${r.status}`);
+  return await r.json() as Record<string, unknown>;
+}
+
+async function hintPatientsByLastName(lastName: string): Promise<Record<string, unknown>[]> {
+  const key = Deno.env.get("HINT_PRACTICE_API_KEY")?.trim();
+  if (!key) throw new Error("Hint key missing");
+  const out: Record<string, unknown>[] = [];
+  for (let offset = 0; offset < 500; offset += 100) {
+    const u = new URL("https://api.hint.com/api/provider/patients");
+    u.searchParams.set("last_name", lastName);
+    u.searchParams.set("limit", "100");
+    u.searchParams.set("offset", String(offset));
+    const r = await fetch(u, { headers: { Authorization: `Bearer ${key}`, Accept: "application/json" } });
+    if (!r.ok) throw new Error(`Hint returned ${r.status}`);
+    const page = await r.json() as Record<string, unknown>[];
+    if (!Array.isArray(page)) break;
+    out.push(...page);
+    if (page.length < 100) break;
+  }
+  return out;
+}
+
+const norm = (v: unknown) => String(v ?? "").trim().toLowerCase();
+
+function elationEmail(p: Record<string, unknown>): string {
+  if (p.email) return norm(p.email);
+  const list = Array.isArray(p.emails) ? p.emails as { email?: string; deleted_date?: string | null }[] : [];
+  const live = list.filter((e) => e?.email && !e.deleted_date);
+  return live.length ? norm(live[live.length - 1].email) : "";
+}
+
+type CareMatch =
+  | { ok: true; hint: Record<string, unknown>; chart: Record<string, unknown>; email: string; candidates: number; tieBreakUsed: boolean }
+  | { ok: false; code: string; message: string; needsTieBreak?: boolean; candidates?: number };
+
+/**
+ * Chart → membership match for the care team. Name + DOB only; email is used
+ * solely as a tie-breaker among name+DOB matches and must equal the chart email.
+ */
+async function careMatch(elationPatientId: string, tieBreakEmail: string): Promise<CareMatch> {
+  const chart = await elationGetPatient(elationPatientId);
+  if (!chart) return { ok: false, code: "NO_CHART", message: "We couldn't find this chart in Elation." };
+  const first = norm(chart.first_name), last = norm(chart.last_name), dob = String(chart.dob ?? "");
+  if (!first || !last || !/^\d{4}-\d{2}-\d{2}$/.test(dob)) {
+    return { ok: false, code: "CHART_INCOMPLETE", message: "This chart is missing a name or date of birth. Please update the chart or ask an administrator." };
+  }
+  const chartEmail = elationEmail(chart);
+  if (!chartEmail) {
+    return { ok: false, code: "NO_CHART_EMAIL", message: "There's no email on this chart. Add the member's email to the chart first, then try again." };
+  }
+  const all = await hintPatientsByLastName(String(chart.last_name));
+  const nameDob = all.filter((h) => norm(h.first_name) === first && norm(h.last_name) === last && String(h.dob ?? "") === dob);
+  const active = nameDob.filter((h) => norm(h.membership_status) === "active");
+  if (active.length === 0) {
+    return { ok: false, code: nameDob.length ? "NOT_ACTIVE" : "NO_MEMBER", message: nameDob.length
+      ? "This member's membership isn't active, so portal access can't be set up. Please ask an administrator."
+      : "We couldn't find a membership with this name and date of birth. Please ask an administrator." };
+  }
+  if (active.length === 1) {
+    return { ok: true, hint: active[0], chart, email: chartEmail, candidates: 1, tieBreakUsed: false };
+  }
+  const tb = norm(tieBreakEmail);
+  if (!tb) {
+    return { ok: false, code: "NEEDS_TIE_BREAK", needsTieBreak: true, candidates: active.length,
+      message: "More than one member has this name and date of birth. Enter the member's email to confirm which one." };
+  }
+  const hits = active.filter((h) => norm(h.email) === tb);
+  if (tb !== chartEmail || hits.length !== 1) {
+    return { ok: false, code: "TIE_BREAK_FAILED", candidates: active.length,
+      message: "We couldn't confirm which member this is — please ask an administrator." };
+  }
+  return { ok: true, hint: hits[0], chart, email: chartEmail, candidates: active.length, tieBreakUsed: true };
+}
+
 /**
  * Care-team gate: true only when the member has NEVER had working portal
  * access (no claim, never signed in). Reads the live portal record upstream.
@@ -968,6 +1097,98 @@ Deno.serve(async (req) => {
    * portal email, when, and why. Local read of our own audit table only —
    * never forwarded upstream. Care-team tier.
    */
+  if (rawAction === "careProvision") {
+    const json = (b: unknown) => new Response(JSON.stringify(b), {
+      headers: { ...corsHeaders, "Content-Type": "application/json" },
+    });
+    const pid = String(body.elationPatientId ?? "").trim();
+    if (!/^\d{6,25}$/.test(pid)) return deny(400, "A valid patient id is required.");
+    if (!(await isCareTeam(ctx))) return deny(403, "Only the care team can set up portal access.");
+    const dryRun = body.dryRun !== false;
+    const reasonText = typeof body.reason === "string" ? body.reason.trim().slice(0, 500) : "";
+    if (!dryRun && !reasonText) return deny(400, "A reason is required.");
+    const actorId = ctx.user.email ?? ctx.user.id;
+    const tieBreak = typeof body.tieBreakEmail === "string" ? body.tieBreakEmail.slice(0, 320) : "";
+
+    try {
+      // 1. Must have NO portal record at all.
+      const existing = await callUpstream(FUNCTION_BY_ACTION.get, {
+        elationPatientId: pid, actor: actorId, reason: "care-team setup eligibility check",
+      });
+      const existingErr = upstreamError(existing.body);
+      if (!(existing.status === 404 && existingErr.includes("NO_ROSTER_DOC"))) {
+        return json({ ok: false, status: 409, code: "HAS_RECORD",
+          error: existing.status >= 200 && existing.status < 300
+            ? "This member already has a portal account. Use the invite button instead."
+            : "We couldn't confirm this member's portal status. Please try again or ask an administrator." });
+      }
+
+      // 2–4. Chart → membership match.
+      const m = await careMatch(pid, tieBreak);
+      if (!m.ok) {
+        if (!dryRun) {
+          await recordAction(ctx, { elationPatientId: pid, action: "careProvision", reason: reasonText || null,
+            after: { code: m.code, candidates: m.candidates ?? null, tieBreakAttempted: Boolean(tieBreak) }, ok: false,
+            errorMessage: m.code });
+        }
+        return json({ ok: false, status: 422, code: m.code, needsTieBreak: m.needsTieBreak ?? false, error: m.message });
+      }
+
+      const preview = {
+        name: `${m.chart.first_name} ${m.chart.last_name}`,
+        dob: m.chart.dob,
+        email: m.email,
+        candidates: m.candidates,
+        tieBreakUsed: m.tieBreakUsed,
+      };
+      if (dryRun) return json({ ok: true, status: 200, data: { preview } });
+
+      // 6. Invite pacing before any write.
+      const limited = await inviteRateLimit(ctx, pid);
+      if (limited) return json({ ok: false, status: 429, error: limited });
+
+      // 5. Provision (no invite) keyed to this chart id, then invite.
+      const member = {
+        hintId: String(m.hint.id),
+        firstName: String(m.chart.first_name),
+        lastName: String(m.chart.last_name),
+        email: m.email,
+        dob: String(m.chart.dob),
+        phone: null,
+        elationPatientId: pid,
+      };
+      const prov = await callUpstream(FUNCTION_BY_ACTION.provision, {
+        elationPatientId: null, actor: actorId, reason: reasonText, members: [member], sendInvite: false,
+      });
+      const provBody = (prov.body?.data ?? prov.body?.result ?? prov.body) as Record<string, unknown> | null;
+      const created = Array.isArray(provBody?.created) && (provBody!.created as unknown[]).length === 1;
+      await recordAction(ctx, { elationPatientId: pid, action: "careProvision", reason: reasonText,
+        after: { hintId: member.hintId, candidates: m.candidates, tieBreakUsed: m.tieBreakUsed, created }, ok: created,
+        httpStatus: prov.status, errorMessage: created ? null : (upstreamError(prov.body) || "NOT_CREATED") });
+      if (!created) {
+        return json({ ok: false, status: 502, error: "The portal account couldn't be created. Please ask an administrator." });
+      }
+
+      const inv = await callUpstream(FUNCTION_BY_ACTION.invite, {
+        elationPatientId: pid, actor: actorId, reason: reasonText, reissue: false, resetClaim: false,
+      });
+      const invOk = inv.status >= 200 && inv.status < 300;
+      await recordAction(ctx, { elationPatientId: pid, action: "invite", reason: reasonText,
+        after: { source: "careProvision" }, ok: invOk, httpStatus: inv.status,
+        errorMessage: invOk ? null : upstreamError(inv.body) || `HTTP ${inv.status}` });
+      await logPhiAccess(ctx, req, { source: "portal.admin", resource: "careProvision", scope: "careProvision",
+        resource_id: pid, http_status: invOk ? 200 : inv.status, row_count: 1 });
+      if (!invOk) {
+        return json({ ok: false, status: 502,
+          error: "The portal account was created, but the invite email didn't go out. Please ask an administrator." });
+      }
+      return json({ ok: true, status: 200, data: { preview, created: true, invited: true } });
+    } catch (e) {
+      return json({ ok: false, status: 502, error: "Something went wrong looking up this member. Please try again or ask an administrator.",
+        detail: e instanceof Error ? e.message.slice(0, 200) : undefined });
+    }
+  }
+
   if (rawAction === "history") {
     const pid = String(body.elationPatientId ?? "").trim();
     if (!pid) return deny(400, "elationPatientId is required");
@@ -978,7 +1199,7 @@ Deno.serve(async (req) => {
       .from("portal_admin_actions")
       .select("id, created_at, action, reason, ok, error_message, actor_email, after_state")
       .eq("elation_patient_id", pid)
-      .in("action", ["invite", "syncEmail", "revoke", "setAccess"])
+      .in("action", ["invite", "syncEmail", "revoke", "setAccess", "careProvision"])
       .order("created_at", { ascending: false })
       .limit(25);
     if (error) return deny(500, "Could not load portal history.");
