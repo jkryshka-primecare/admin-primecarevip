@@ -44,12 +44,12 @@ type ModuleItem = {
 
 const MODULES: ModuleItem[] = [
   { title: "Dashboard", url: "/", icon: LayoutDashboard, roles: [] },
+  { title: "Patients", url: "/patients", icon: UserSquare2, roles: ["super_admin", "admin", "pharmacy", "clinical"] },
   { title: "Primecare VIP RX", url: "/pharmacy", icon: Pill, roles: ["super_admin", "admin", "pharmacy"] },
   { title: "Care Connect", url: "/care", icon: HeartPulse, roles: ["super_admin", "admin", "clinical", "billing"] },
-  { title: "HR", url: "/hr", icon: Users2, roles: ["super_admin", "admin", "hr", "billing"] },
   { title: "Insights", url: "/insights", icon: BarChart3, roles: ["super_admin", "admin", "clinical"] },
-  { title: "Patients", url: "/patients", icon: UserSquare2, roles: ["super_admin", "admin", "pharmacy", "clinical"] },
   { title: "Cost Estimator", url: "/estimator", icon: Calculator, roles: ["super_admin", "admin", "pharmacy", "clinical", "billing"] },
+  { title: "HR", url: "/hr", icon: Users2, roles: ["super_admin", "admin", "hr", "billing"] },
   { title: "Admin", url: "/admin", icon: Settings, roles: ["super_admin", "admin"] },
 ];
 
