@@ -33,7 +33,23 @@ import {
 import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
 import { toast } from "@/hooks/use-toast";
+import { LoginChecklist, PortalHelpHistory } from "./PortalHelp";
 
+
+const QUICK_REASONS = [
+  "Member never received the invite",
+  "Invite link expired",
+  "Member changed their email",
+  "Member asked for help signing in",
+];
+
+function friendlyError(e: unknown, isInvite: boolean): string {
+  const msg = e instanceof Error ? e.message : String(e);
+  if (isInvite && /EMAIL_SEND_FAILED|502|send/i.test(msg)) {
+    return "The email didn't go out, and the member's previous link no longer works. Please let an administrator know.";
+  }
+  return msg;
+}
 
 type HiddenEntry = { collection: string; id: string; label?: string; hiddenAt?: unknown };
 
@@ -130,13 +146,14 @@ function fmt(value?: unknown) {
  * source of truth and nothing on this screen writes to it.
  */
 export default function PortalAdminPanel({ elationId }: { elationId: string | null }) {
-  const { isAdmin } = useAuth();
+  const { isAdmin, hasAnyRole } = useAuth();
+  const canHelp = hasAnyRole(["super_admin", "admin", "clinical", "pharmacy"]);
   const { snapshot, loading, error, refetch } = usePortalAccess(elationId);
   const { issueInvite, revokeInvite, setAccess, syncEmail } = usePortalMutations(elationId);
 
   // Preview the chart email first, then ask before writing anything.
   const refreshEmail = async () => {
-    if (!guard()) return;
+    if (!guard("care")) return;
     try {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const preview: any = await syncEmail.mutateAsync({ reason, dryRun: true });
@@ -175,8 +192,8 @@ export default function PortalAdminPanel({ elationId }: { elationId: string | nu
   const modules = access.modules ?? {};
   const hidden = normalizeHidden(access.hiddenItems);
 
-  function guard(): boolean {
-    if (!isAdmin) {
+  function guard(tier: "admin" | "care" = "admin"): boolean {
+    if (!(tier === "care" ? canHelp : isAdmin)) {
       toast({
         title: "Administrator access required",
         description: "Only admins can change a member's portal access.",
@@ -195,7 +212,7 @@ export default function PortalAdminPanel({ elationId }: { elationId: string | nu
     return true;
   }
 
-  function run(promise: Promise<unknown>, success: string) {
+  function run(promise: Promise<unknown>, success: string, failTitle = "Change not applied") {
     promise
       .then(() => {
         toast({ title: success });
@@ -203,8 +220,8 @@ export default function PortalAdminPanel({ elationId }: { elationId: string | nu
       })
       .catch((e: unknown) => {
         toast({
-          title: "Change not applied",
-          description: e instanceof Error ? e.message : String(e),
+          title: failTitle,
+          description: friendlyError(e, failTitle === "Invite not sent"),
           variant: "destructive",
         });
       });
@@ -222,6 +239,8 @@ export default function PortalAdminPanel({ elationId }: { elationId: string | nu
           <span>{error}</span>
         </div>
       )}
+
+      {!loading && snapshot && <LoginChecklist snapshot={snapshot} />}
 
       <Card>
         <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-3">
@@ -287,23 +306,42 @@ export default function PortalAdminPanel({ elationId }: { elationId: string | nu
                 <Textarea
                   value={reason}
                   onChange={(e) => setReason(e.target.value)}
-                  placeholder="e.g. Member requested portal access be paused"
+                  placeholder="e.g. Member never received the invite"
                   rows={2}
-                  disabled={!isAdmin}
+                  disabled={!canHelp}
                 />
-                {!isAdmin && (
-                  <p className="text-xs text-muted-foreground">
-                    View only — an administrator must make portal changes.
-                  </p>
+                {canHelp && (
+                  <div className="flex flex-wrap gap-1.5">
+                    {QUICK_REASONS.map((r) => (
+                      <Button key={r} type="button" size="sm" variant="outline"
+                        className="h-7 text-xs" onClick={() => setReason(r)}>
+                        {r}
+                      </Button>
+                    ))}
+                  </div>
                 )}
+                {!canHelp ? (
+                  <p className="text-xs text-muted-foreground">
+                    View only — ask a clinical, pharmacy or admin team member for help.
+                  </p>
+                ) : !isAdmin ? (
+                  <p className="text-xs text-muted-foreground">
+                    You can send invites and refresh the email from the chart. Other changes need an administrator.
+                  </p>
+                ) : null}
               </div>
 
               <div className="flex flex-wrap gap-2">
                 <Button
                   size="sm"
-                  disabled={!isAdmin || busy}
-                  onClick={() =>
-                    guard() &&
+                  disabled={!canHelp || busy}
+                  onClick={() => {
+                    if (!guard("care")) return;
+                    const to = snapshot?.email || "(no email on file)";
+                    const warn = snapshot?.inviteStatus === "pending"
+                      ? "\n\nThe member's current invite link will stop working."
+                      : "";
+                    if (!window.confirm(`Send a portal invite to ${to}?${warn}`)) return;
                     run(
                       issueInvite.mutateAsync({
                         reason,
@@ -312,8 +350,9 @@ export default function PortalAdminPanel({ elationId }: { elationId: string | nu
                       snapshot?.inviteStatus === "pending"
                         ? "Invite re-sent"
                         : "Invite sent",
-                    )
-                  }
+                      "Invite not sent",
+                    );
+                  }}
                 >
                   {issueInvite.isPending ? (
                     <Loader2 className="h-3.5 w-3.5 mr-1 animate-spin" />
@@ -337,7 +376,7 @@ export default function PortalAdminPanel({ elationId }: { elationId: string | nu
                 <Button
                   size="sm"
                   variant="outline"
-                  disabled={!isAdmin || busy || syncEmail.isPending}
+                  disabled={!canHelp || busy || syncEmail.isPending}
                   onClick={refreshEmail}
                 >
                   {syncEmail.isPending ? (
@@ -371,6 +410,8 @@ export default function PortalAdminPanel({ elationId }: { elationId: string | nu
           )}
         </CardContent>
       </Card>
+
+      {canHelp && <PortalHelpHistory elationId={elationId} />}
 
       <Card>
         <CardHeader className="pb-3">
