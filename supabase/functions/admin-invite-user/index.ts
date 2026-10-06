@@ -70,9 +70,10 @@ Deno.serve(async (req) => {
     return deny(400, "Invalid JSON body");
   }
 
-  const origin = (req.headers.get("origin")
-    ?? Deno.env.get("PUBLIC_APP_URL")
-    ?? "https://admin.primecarevip.com").replace(/\/+$/, "");
+  // Always link to the real app, never the sender's browser origin (which may
+  // be the private editor preview and would ask invitees for Lovable access).
+  const origin = (Deno.env.get("PUBLIC_APP_URL")
+    || "https://admin.primecarevip.com").replace(/\/+$/, "");
 
   const { data: callerProfile } = await admin.from("profiles")
     .select("display_name").eq("user_id", callerId).maybeSingle();
