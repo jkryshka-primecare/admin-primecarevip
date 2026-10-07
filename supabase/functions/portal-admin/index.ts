@@ -2100,9 +2100,11 @@ Deno.serve(async (req) => {
       data: ok ? payload : null,
     }),
     {
-      // A member with no portal record is an expected state for a read, not a
-      // transport failure — answer 200 with the envelope so the UI can show it.
-      status: ok || (action === "get" && String(errorMessage ?? "").includes("NO_ROSTER_DOC")) ? 200 : status || 502,
+      // Expected refusals (4xx: no record, already activated, rate limited…)
+      // are answered 200 with ok:false so the UI shows a message instead of
+      // treating them as a crash. The client throws on ok:false. Real failures
+      // (401 session, 5xx) keep their status.
+      status: ok || (status >= 400 && status < 500 && status !== 401) ? 200 : status || 502,
       headers: { ...corsHeaders, "Content-Type": "application/json" },
     },
   );
