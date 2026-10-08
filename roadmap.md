@@ -31,3 +31,8 @@
 - [ ] Phase D transition: DOB second factor + verified OTP contact before account/access
 
 - [ ] CRM crmdb Firestore target — draft PR #565 built + verified. HOLDS: (1) Greg confirms CRM frontend is callable-only, else scoped rules; (2) move ci-staged/*.yml into .github/workflows (token lacks workflow scope); (3) Greg: 26 vs 27 indexes
+
+## Refresh-email-from-chart (PR #574) — code approved 2026-10-08
+- [ ] BLOCKED ON RYAN: review + confirm main is deploy-safe, then merge/deploy
+- [ ] At go-live: confirm the Portal tab "Refresh email from chart" button works end to end (re-enable if greyed out)
+- [ ] Future ticket: store true-case authUid on claimed records (removes email fallback; firebaseUid-only partial failures currently need manual reconcile after 409)
