@@ -96,9 +96,14 @@ exports.adminSyncMemberEmail = functions
         if (e.code !== 'auth/user-not-found') throw e;
       }
     }
-    if (!authUser && rosterEmail) {
+    // Email fallback ONLY for a claimed record, and only when the account found
+    // is this patient's own login (firebaseUid is its lower-cased uid). Shared
+    // family emails: a never-claimed child whose roster email is the parent's
+    // address must never resolve to — and rewrite — the parent's login.
+    if (!authUser && rosterEmail && patient.firebaseUid) {
       try {
-        authUser = await admin.auth().getUserByEmail(rosterEmail);
+        const u = await admin.auth().getUserByEmail(rosterEmail);
+        if (lower(u.uid) === lower(patient.firebaseUid)) authUser = u;
       } catch (e) {
         if (e.code !== 'auth/user-not-found') throw e;
       }
@@ -132,12 +137,24 @@ exports.adminSyncMemberEmail = functions
       }
       await admin.auth().updateUser(uid, { email: next, emailVerified: false });
     }
-    await ref.update({
-      email: next,
-      emailSyncedAt: admin.firestore.Timestamp.now(),
-      emailSyncedBy: actor,
-      updatedAt: admin.firestore.Timestamp.now(),
-    });
+    try {
+      await ref.update({
+        email: next,
+        emailSyncedAt: admin.firestore.Timestamp.now(),
+        emailSyncedBy: actor,
+        updatedAt: admin.firestore.Timestamp.now(),
+      });
+    } catch (e) {
+      // Partial failure: if the login email was already changed, the member now
+      // signs in with `next` while the roster still says `rosterEmail`. Log it
+      // loudly so it can be reconciled (re-running sync is safe and finishes it).
+      const loginUpdated = loginEmail !== null && loginEmail !== next;
+      logError('adminSyncMemberEmail', 'roster-write-failed', {
+        elationPatientId, loginUpdated, reason: e.code || e.message,
+      });
+      return jsonError(res, 500, 'INTERNAL',
+        loginUpdated ? 'ROSTER_WRITE_FAILED_AFTER_LOGIN_UPDATE' : 'ROSTER_WRITE_FAILED');
+    }
 
     await admin.firestore().collection('portalAdminAudit').add({
       at: admin.firestore.Timestamp.now(),
