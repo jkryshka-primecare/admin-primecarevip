@@ -123,8 +123,7 @@ exports.adminSyncMemberEmail = functions
 
     if (loginEmail !== null && loginEmail !== next) {
       try {
-        const other = await admin.auth().getUserByEmail(next);
-        if (other.uid === uid) throw Object.assign(new Error('self'), { code: 'auth/user-not-found' });
+        await admin.auth().getUserByEmail(next);
         // Someone else already signs in with this address (shared family
         // email). Never merge or steal — a human decides.
         return jsonError(res, 409, 'ALREADY_EXISTS', 'EMAIL_IN_USE_BY_OTHER_LOGIN');
