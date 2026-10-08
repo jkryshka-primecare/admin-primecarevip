@@ -27,6 +27,7 @@ const admin = require('firebase-admin');
 const { log, logError } = require('./middleware/logger');
 const { requireAdminCaller, selfAudience } = require('./middleware/requireAdminCaller');
 const { elationGet } = require('./core/services/elation/client');
+const { elationEmail } = require('./core/services/patient/rosterProvision');
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const lower = (v) => String(v == null ? '' : v).trim().toLowerCase();
@@ -37,12 +38,10 @@ function jsonError(res, status, code, reason, message) {
   });
 }
 
+// Same chart-email rule provisioning uses (first non-deleted entry), so the
+// address we sync to is exactly the one a fresh roster doc would get.
 function chartEmail(chart) {
-  // Elation v2: `emails: [{ email, ... }]`; tolerate a flat `email`.
-  if (chart && Array.isArray(chart.emails) && chart.emails.length) {
-    return lower(chart.emails[0] && chart.emails[0].email);
-  }
-  return lower(chart && chart.email);
+  return lower(elationEmail(chart));
 }
 
 exports.adminSyncMemberEmail = functions
@@ -82,15 +81,35 @@ exports.adminSyncMemberEmail = functions
     if (!EMAIL_RE.test(next)) return jsonError(res, 422, 'FAILED_PRECONDITION', 'NO_EMAIL_ON_CHART');
 
     const rosterEmail = lower(patient.email);
-    const uid = String(patient.firebaseUid || patient.authUid || '');
-    let loginEmail = null;
-    if (uid) {
+    // Resolve the member's Firebase Auth account. NEVER getUser(firebaseUid):
+    // firebaseUid is the lower-cased Firestore key (D-016/D-125) and Auth uids
+    // are case-sensitive (D-112), so it misses for most claimed members — the
+    // login email would then silently not be updated (the exact lock-out this
+    // function fixes) and the dry-run would wrongly show loginEmail: null.
+    // Order: true-case authUid, then the roster email the login was created with.
+    let authUser = null;
+    const trueUid = String(patient.authUid || '');
+    if (trueUid) {
       try {
-        loginEmail = lower((await admin.auth().getUser(uid)).email);
+        authUser = await admin.auth().getUser(trueUid);
       } catch (e) {
         if (e.code !== 'auth/user-not-found') throw e;
       }
     }
+    if (!authUser && rosterEmail) {
+      try {
+        authUser = await admin.auth().getUserByEmail(rosterEmail);
+      } catch (e) {
+        if (e.code !== 'auth/user-not-found') throw e;
+      }
+    }
+    // A claimed record whose login we cannot find must not be "fixed" on the
+    // roster alone — that would only move the mismatch. A human decides.
+    if (!authUser && patient.firebaseUid) {
+      return jsonError(res, 409, 'FAILED_PRECONDITION', 'LOGIN_NOT_RESOLVABLE');
+    }
+    const uid = authUser ? authUser.uid : '';
+    const loginEmail = authUser ? lower(authUser.email) : null;
 
     const result = {
       ok: true,
