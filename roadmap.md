@@ -42,7 +42,9 @@
 - [x] Safeguard gaps closed, shared email helper, emulator tests + CI (#557 8/8, #558 9/9)
 - [x] #557 conflicts resolved; #558 rebased on #557
 - [x] Backlog backfill PR #575 (stacked on #558, 5/5 tests)
-- [ ] BLOCKED ON TEAM: pull/review #557 → #558 → #575; Greg confirms main deploy-safe; Michael approves merge
-- [ ] BLOCKED: #559 merge + deploy (endpoint 404 today); #558 refuses live sends until the bounce feed is populating
+- [x] #557 fails closed on missing/empty Hint key (13/13); #559 merged with main + renumbered v1.76; all CI green
+- [x] #576 status fix (invites persist "invited") + reconcile script; #577 lockfile issue filed for Greg
+- [ ] BLOCKED ON TEAM: review #576, #557 → #558 → #575; Greg confirms main deploy-safe; Michael merges in order
+- [ ] BLOCKED: #559 needs a named owner for merge → deploy → confirmed events; #558 can't send until then
 - [ ] Before arming #557: create `HINT_PRACTICE_API_KEY` secret + grant runtime access; 1 week report-only, then creation-only
-- [ ] Dale Hershman: portal record reads "not invited" after the manual send — reconcile
+- [ ] Dale: after #576 deploys, run reconcile for his chart, then confirm record reads "invited"
