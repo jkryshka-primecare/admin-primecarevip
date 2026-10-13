@@ -36,3 +36,10 @@
 - [ ] BLOCKED ON RYAN: review + confirm main is deploy-safe, then merge/deploy
 - [ ] At go-live: confirm the Portal tab "Refresh email from chart" button works end to end (re-enable if greyed out)
 - [ ] Future ticket: store true-case authUid on claimed records (removes email fallback; firebaseUid-only partial failures currently need manual reconcile after 409)
+
+## Member auto-provisioning rollout (#557 discovery, #558 auto-invite)
+- [x] Dale Hershman set up + invited manually (2026-10-13)
+- [ ] Close safeguard gaps before Ryan review: Hint active-membership gate in discovery; email format/typo flag; shared-email + Auth-ownership guard at provision; per-person report output; consecutive-send-failure auto-stop; dedupe elationEmail into one shared helper
+- [ ] Resolve #557 merge conflicts; un-stack/rebase #558
+- [ ] BLOCKED ON RYAN: review + main-is-deploy-safe, then deploy report-only; 1-week report review
+- [ ] Separate one-time backlog backfill (report → create → throttled invites, batches)
