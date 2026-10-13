@@ -39,7 +39,10 @@
 
 ## Member auto-provisioning rollout (#557 discovery, #558 auto-invite)
 - [x] Dale Hershman set up + invited manually (2026-10-13)
-- [ ] Close safeguard gaps before Ryan review: Hint active-membership gate in discovery; email format/typo flag; shared-email + Auth-ownership guard at provision; per-person report output; consecutive-send-failure auto-stop; dedupe elationEmail into one shared helper
-- [ ] Resolve #557 merge conflicts; un-stack/rebase #558
-- [ ] BLOCKED ON RYAN: review + main-is-deploy-safe, then deploy report-only; 1-week report review
-- [ ] Separate one-time backlog backfill (report → create → throttled invites, batches)
+- [x] Safeguard gaps closed, shared email helper, emulator tests + CI (#557 8/8, #558 9/9)
+- [x] #557 conflicts resolved; #558 rebased on #557
+- [x] Backlog backfill PR #575 (stacked on #558, 5/5 tests)
+- [ ] BLOCKED ON TEAM: pull/review #557 → #558 → #575; Greg confirms main deploy-safe; Michael approves merge
+- [ ] BLOCKED: #559 merge + deploy (endpoint 404 today); #558 refuses live sends until the bounce feed is populating
+- [ ] Before arming #557: create `HINT_PRACTICE_API_KEY` secret + grant runtime access; 1 week report-only, then creation-only
+- [ ] Dale Hershman: portal record reads "not invited" after the manual send — reconcile
