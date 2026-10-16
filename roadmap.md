@@ -48,3 +48,5 @@
 - [ ] BLOCKED: #559 needs a named owner for merge → deploy → confirmed events; #558 can't send until then
 - [ ] Before arming #557: create `HINT_PRACTICE_API_KEY` secret + grant runtime access; 1 week report-only, then creation-only
 - [ ] Dale: after #576 deploys, run reconcile for his chart, then confirm record reads "invited"
+
+- [ ] Scope portal functions deploy to `functions:portal-functions` (draft PR + issue) — blocked: GitHub token rejected (401), user checking via Chrome agent
