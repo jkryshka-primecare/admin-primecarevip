@@ -69,7 +69,7 @@ Deno.serve(async (req) => {
     const { first_name, last_name, email, query } = body ?? {};
 
     const hintApiUrl = Deno.env.get("HINT_API_URL") || DEFAULT_HINT_API_URL;
-    const hintApiToken = Deno.env.get("HINT_API_TOKEN");
+    const hintApiToken = (Deno.env.get("HINT_API_TOKEN")?.trim() || Deno.env.get("HINT_PRACTICE_API_KEY")?.trim());
     if (!hintApiToken) {
       return jsonResponse({ error: "Hint API token not configured" }, 500);
     }
