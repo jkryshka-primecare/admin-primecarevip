@@ -78,7 +78,7 @@ Deno.serve(async (req) => {
     let hintVoidResult: unknown = null;
     if (record.hint_charge_id) {
       const hintApiUrl = Deno.env.get("HINT_API_URL") || "https://api.hint.com/api";
-      const hintApiToken = Deno.env.get("HINT_API_TOKEN");
+      const hintApiToken = (Deno.env.get("HINT_API_TOKEN")?.trim() || Deno.env.get("HINT_PRACTICE_API_KEY")?.trim());
       if (!hintApiToken) {
         return jsonResponse({ error: "Hint API token not configured" }, 500);
       }
