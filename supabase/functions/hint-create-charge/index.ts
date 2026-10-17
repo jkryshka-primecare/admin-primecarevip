@@ -1,4 +1,5 @@
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.49.4";
+import { selectExactHintPatient } from "../_shared/hintMatch.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -9,7 +10,7 @@ const ALLOWED_ROLES = ["admin", "super_admin", "pharmacy"] as const;
 const DEFAULT_HINT_API_URL = "https://api.hint.com/api";
 
 type HintPatient = Record<string, unknown>;
-type BillingFailureCode = "already_billed" | "patient_not_found" | "reversed";
+type BillingFailureCode = "already_billed" | "patient_not_found" | "ambiguous_match" | "reversed";
 
 function jsonResponse(body: unknown, status: number) {
   return new Response(JSON.stringify(body), {
@@ -18,21 +19,10 @@ function jsonResponse(body: unknown, status: number) {
   });
 }
 
-function normalizeNamePart(value: unknown) {
-  return String(value ?? "")
-    .trim()
-    .toLowerCase()
-    .replace(/\s+/g, " ");
-}
-
 function splitPatientName(fullName: unknown) {
   const name = String(fullName ?? "").trim();
   const parts = name.split(/\s+/).filter(Boolean);
-  return {
-    fullName: name,
-    firstName: parts[0] || "",
-    lastName: parts.slice(1).join(" ") || "",
-  };
+  return { fullName: name, firstName: parts[0] || "", lastName: parts.slice(1).join(" ") || "" };
 }
 
 function extractPatientList(payload: unknown): HintPatient[] {
@@ -44,40 +34,6 @@ function extractPatientList(payload: unknown): HintPatient[] {
     if (Array.isArray(maybeData)) return maybeData as HintPatient[];
   }
   return [];
-}
-
-function selectHintPatient(patientList: HintPatient[], patientName: string, patientDob: unknown) {
-  if (!patientList.length) return null;
-  if (patientList.length === 1) return patientList[0];
-
-  const { firstName, lastName } = splitPatientName(patientName);
-  const normalizedFirst = normalizeNamePart(firstName);
-  const normalizedLast = normalizeNamePart(lastName);
-  const normalizedDob = String(patientDob ?? "");
-
-  const exactNameAndDob = patientList.find((patient) => {
-    const patientFirst = normalizeNamePart(patient.first_name);
-    const patientLast = normalizeNamePart(patient.last_name);
-    const dobMatch = normalizedDob ? String(patient.date_of_birth ?? "") === normalizedDob : true;
-    return patientFirst === normalizedFirst && patientLast === normalizedLast && dobMatch;
-  });
-  if (exactNameAndDob) return exactNameAndDob;
-
-  const exactNameOnly = patientList.find((patient) => {
-    const patientFirst = normalizeNamePart(patient.first_name);
-    const patientLast = normalizeNamePart(patient.last_name);
-    return patientFirst === normalizedFirst && patientLast === normalizedLast;
-  });
-  if (exactNameOnly) return exactNameOnly;
-
-  if (normalizedDob) {
-    const dobOnly = patientList.find(
-      (patient) => String(patient.date_of_birth ?? "") === normalizedDob,
-    );
-    if (dobOnly) return dobOnly;
-  }
-
-  return patientList[0];
 }
 
 async function markBillingFailed(
@@ -204,10 +160,15 @@ Deno.serve(async (req) => {
       }
 
       const patientList = extractPatientList(patientsPayload);
-      const hintPatient = selectHintPatient(patientList, fullName, record.patient_dob);
+      const match = selectExactHintPatient(patientList, fullName, record.patient_dob);
 
-      if (!hintPatient) {
-        const msg = `Patient not found in Hint (searched ${fullName})`;
+      if (match.kind === "ambiguous") {
+        const msg = `${match.count} Hint patients share this name and date of birth — choose the right one manually`;
+        await markBillingFailed(admin, dispense_record_id, msg);
+        return handledFailure("ambiguous_match", msg, { searched_name: fullName });
+      }
+      if (match.kind === "none") {
+        const msg = `No exact Hint match for ${fullName} with this date of birth`;
         await markBillingFailed(admin, dispense_record_id, msg);
         return handledFailure("patient_not_found", msg, {
           searched_name: fullName,
@@ -215,6 +176,7 @@ Deno.serve(async (req) => {
           searched_last_name: lastName,
         });
       }
+      const hintPatient = match.patient;
 
       billingPatientId = hintPatient.head_member_id || hintPatient.id;
     }

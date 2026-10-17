@@ -474,8 +474,8 @@ export default function History() {
       const result = res.data as { success?: boolean; charge_id?: string; error?: string; code?: string };
       if (result?.success === false) {
         toast.error(
-          result.code === "patient_not_found"
-            ? `${result.error}. Add this patient to the Hint sandbox, then retry.`
+          (result.code === "patient_not_found" || result.code === "ambiguous_match")
+            ? `${result.error}. Use "Match patient" on the billing dashboard to pick the right Hint patient.`
             : result.error ?? "Billing failed",
         );
         fetchRecords();

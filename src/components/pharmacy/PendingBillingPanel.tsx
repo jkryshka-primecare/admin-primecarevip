@@ -137,7 +137,7 @@ export default function PendingBillingPanel() {
         refresh();
         if (!opts?.silent) {
           toast.error(
-            result.code === "patient_not_found"
+            (result.code === "patient_not_found" || result.code === "ambiguous_match")
               ? `${result.error}. Use "Match patient" to link a Hint patient manually.`
               : result.error ?? "Failed to bill to Hint",
           );
