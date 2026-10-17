@@ -184,8 +184,8 @@ export default function Dispense() {
             const result = data as { success?: boolean; error?: string; code?: string } | null;
             if (result?.success === false) {
               toast.warning(
-                result.code === "patient_not_found"
-                  ? `${result.error}. Add this patient to the Hint sandbox, then retry.`
+                (result.code === "patient_not_found" || result.code === "ambiguous_match")
+                  ? `${result.error}. Use "Match patient" on the billing dashboard to pick the right Hint patient.`
                   : "Dispensed, but Hint billing failed — retry from the dashboard",
               );
             }

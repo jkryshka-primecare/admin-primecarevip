@@ -56,7 +56,10 @@ Deno.serve(async (req) => {
     const body: RequestBody = req.method === "POST" ? await req.json() : {};
     const resource = (body.resource ?? "patients").toLowerCase();
     const scope = body.scope ?? "practice";
-    const method = body.method ?? "GET";
+    const method = "GET";
+    if (body.method && body.method !== "GET") {
+      return json({ error: "Live Hint connection is read-only." }, 405);
+    }
 
     if (!ALLOWED_RESOURCES.has(resource)) {
       return json({ error: `Unsupported resource "${resource}".` }, 400);
