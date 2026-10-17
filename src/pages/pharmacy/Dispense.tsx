@@ -65,6 +65,7 @@ export default function Dispense() {
 
   const [filledFromEmr, setFilledFromEmr] = useState(false);
   const [emrQueueId, setEmrQueueId] = useState<string | null>(null);
+  const [rxProgram, setRxProgram] = useState<"pcvip" | "hero" | null>(null);
   const [prescribedMedName, setPrescribedMedName] = useState("");
   const [labelData, setLabelData] = useState<LabelData | null>(null);
   const [showLabel, setShowLabel] = useState(false);
@@ -108,8 +109,9 @@ export default function Dispense() {
     const rxMedStrength = rx.medication_strength || "";
     setPrescribedMedName(rxMedName + (rxMedStrength ? ` (${rxMedStrength})` : ""));
 
-    // Try to match medication by name in inventory
-    const matchedMed = medications.find(
+    setRxProgram(rx.program);
+    // Prefer the inventory match found when the script was imported
+    const matchedMed = medications.find((m) => m.id === rx.matched_medication_id) ?? medications.find(
       (m) =>
         m.name.toLowerCase() === rxMedName.toLowerCase() ||
         m.genericName.toLowerCase() === rxMedName.toLowerCase()
@@ -135,6 +137,11 @@ export default function Dispense() {
       // Decrement stock atomically in the database
       await decrementStock(selectedMedId, quantity);
       queryClient.invalidateQueries({ queryKey: MEDICATIONS_QUERY_KEY });
+
+      // HERO: $0 and never billed in Hint. PCVIP / walk-in: inventory price, billed.
+      const isHero = rxProgram === "hero";
+      const unitPrice = isHero ? 0 : (selectedMed?.dispensePricePerUnit ?? null);
+      const totalCost = isHero ? 0 : (selectedMed ? selectedMed.dispensePricePerUnit * quantity : null);
 
       // Save to database for long-term history
       const { data: insertedRecord, error: insertErr } = await supabase
@@ -164,8 +171,10 @@ export default function Dispense() {
           notes,
           diagnosis_code: diagnosisCode,
           prescription_queue_id: emrQueueId || undefined,
-          unit_price: selectedMed?.dispensePricePerUnit ?? null,
-          total_cost: selectedMed ? selectedMed.dispensePricePerUnit * quantity : null,
+          unit_price: unitPrice,
+          total_cost: totalCost,
+          program: rxProgram,
+          ...(isHero ? { hint_billing_status: "not_billable" } : {}),
         })
         .select("id")
         .single();
@@ -173,7 +182,7 @@ export default function Dispense() {
 
       // Auto-bill (pended) to Hint. Failures are non-blocking — the dashboard
       // panel will surface a Retry button for failed billings.
-      if (insertedRecord?.id) {
+      if (insertedRecord?.id && !isHero) {
         supabase.functions
           .invoke("hint-create-charge", { body: { dispense_record_id: insertedRecord.id } })
           .then(({ data, error }) => {
@@ -211,7 +220,7 @@ export default function Dispense() {
         manufacturer: selectedMed?.manufacturer,
         lotNumber: lotNumber || undefined,
         expiryDate: selectedMed?.expiryDate,
-        totalCost: selectedMed ? selectedMed.dispensePricePerUnit * quantity : undefined,
+        totalCost: totalCost ?? undefined,
       });
       setShowLabel(true);
 
@@ -255,6 +264,7 @@ export default function Dispense() {
       setDiagnosisCode("");
       setFilledFromEmr(false);
       setEmrQueueId(null);
+      setRxProgram(null);
       setPrescribedMedName("");
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "Failed to dispense");
@@ -285,6 +295,8 @@ export default function Dispense() {
         <div className="rounded-lg border border-primary/30 bg-primary/5 p-3 text-sm text-primary flex items-center gap-2">
           <Bell className="h-4 w-4" />
           This prescription was auto-populated from your EMR. Review all fields before dispensing.
+          {rxProgram === "hero" && <strong className="ml-1">HERO: recorded at $0 and not billed in Hint.</strong>}
+          {rxProgram === "pcvip" && <strong className="ml-1">PCVIP: billed in Hint at the inventory price.</strong>}
         </div>
       )}
 

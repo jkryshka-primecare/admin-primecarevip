@@ -109,6 +109,7 @@ export type Database = {
           prescriber_npi: string | null
           prescriber_phone: string | null
           prescription_queue_id: string | null
+          program: string | null
           quantity: number
           refill_number: number | null
           refills_authorized: number | null
@@ -151,6 +152,7 @@ export type Database = {
           prescriber_npi?: string | null
           prescriber_phone?: string | null
           prescription_queue_id?: string | null
+          program?: string | null
           quantity: number
           refill_number?: number | null
           refills_authorized?: number | null
@@ -193,6 +195,7 @@ export type Database = {
           prescriber_npi?: string | null
           prescriber_phone?: string | null
           prescription_queue_id?: string | null
+          program?: string | null
           quantity?: number
           refill_number?: number | null
           refills_authorized?: number | null
@@ -213,6 +216,36 @@ export type Database = {
             referencedColumns: ["id"]
           },
         ]
+      }
+      elation_rx_sync_state: {
+        Row: {
+          id: boolean
+          last_error: string | null
+          last_imported: number
+          last_medication_id: number | null
+          last_run_at: string | null
+          last_success_at: string | null
+          updated_at: string
+        }
+        Insert: {
+          id?: boolean
+          last_error?: string | null
+          last_imported?: number
+          last_medication_id?: number | null
+          last_run_at?: string | null
+          last_success_at?: string | null
+          updated_at?: string
+        }
+        Update: {
+          id?: boolean
+          last_error?: string | null
+          last_imported?: number
+          last_medication_id?: number | null
+          last_run_at?: string | null
+          last_success_at?: string | null
+          updated_at?: string
+        }
+        Relationships: []
       }
       email_send_log: {
         Row: {
@@ -1537,13 +1570,16 @@ export type Database = {
           dea_schedule: string | null
           diagnosis_code: string | null
           directions: string | null
+          elation_patient_id: string | null
           elation_prescription_id: string | null
           id: string
           lot_number: string | null
+          matched_medication_id: string | null
           medication_manufacturer: string | null
           medication_name: string | null
           medication_ndc: string | null
           medication_strength: string | null
+          not_in_inventory: boolean
           note_to_pharmacy: string | null
           patient_address: string | null
           patient_dob: string | null
@@ -1553,6 +1589,7 @@ export type Database = {
           prescriber_name: string | null
           prescriber_npi: string | null
           prescriber_phone: string | null
+          program: string | null
           quantity: number | null
           raw_payload: Json | null
           refills_authorized: number | null
@@ -1567,13 +1604,16 @@ export type Database = {
           dea_schedule?: string | null
           diagnosis_code?: string | null
           directions?: string | null
+          elation_patient_id?: string | null
           elation_prescription_id?: string | null
           id?: string
           lot_number?: string | null
+          matched_medication_id?: string | null
           medication_manufacturer?: string | null
           medication_name?: string | null
           medication_ndc?: string | null
           medication_strength?: string | null
+          not_in_inventory?: boolean
           note_to_pharmacy?: string | null
           patient_address?: string | null
           patient_dob?: string | null
@@ -1583,6 +1623,7 @@ export type Database = {
           prescriber_name?: string | null
           prescriber_npi?: string | null
           prescriber_phone?: string | null
+          program?: string | null
           quantity?: number | null
           raw_payload?: Json | null
           refills_authorized?: number | null
@@ -1597,13 +1638,16 @@ export type Database = {
           dea_schedule?: string | null
           diagnosis_code?: string | null
           directions?: string | null
+          elation_patient_id?: string | null
           elation_prescription_id?: string | null
           id?: string
           lot_number?: string | null
+          matched_medication_id?: string | null
           medication_manufacturer?: string | null
           medication_name?: string | null
           medication_ndc?: string | null
           medication_strength?: string | null
+          not_in_inventory?: boolean
           note_to_pharmacy?: string | null
           patient_address?: string | null
           patient_dob?: string | null
@@ -1613,6 +1657,7 @@ export type Database = {
           prescriber_name?: string | null
           prescriber_npi?: string | null
           prescriber_phone?: string | null
+          program?: string | null
           quantity?: number | null
           raw_payload?: Json | null
           refills_authorized?: number | null

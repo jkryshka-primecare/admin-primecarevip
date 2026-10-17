@@ -13,7 +13,7 @@ import {
 } from "@/components/ui/dialog";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
-import { Bell, Check, X, Loader2, Ban, Archive } from "lucide-react";
+import { Bell, Check, X, Loader2, Ban, Archive, RefreshCw, AlertTriangle } from "lucide-react";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { toast } from "sonner";
 import { z } from "zod";
@@ -43,6 +43,10 @@ export interface QueuedPrescription {
   lot_number: string | null;
   date_written: string | null;
   note_to_pharmacy: string | null;
+  program: "pcvip" | "hero" | null;
+  not_in_inventory: boolean;
+  matched_medication_id: string | null;
+  status_reason: string | null;
   created_at: string;
 }
 
@@ -62,6 +66,35 @@ export default function PrescriptionQueue({ onFillPrescription }: PrescriptionQu
   const [dnfTarget, setDnfTarget] = useState<QueuedPrescription | null>(null);
   const [dnfReason, setDnfReason] = useState("");
   const [submitting, setSubmitting] = useState(false);
+  const [syncing, setSyncing] = useState(false);
+  const [lastSync, setLastSync] = useState<string | null>(null);
+
+  const syncFromElation = async (manual: boolean) => {
+    setSyncing(true);
+    const { data, error } = await supabase.functions.invoke("elation-rx-sync", { body: {} });
+    setSyncing(false);
+    const res = data as { ok?: boolean; imported?: number; error?: string } | null;
+    if (error || !res?.ok) {
+      if (manual) toast.error("Couldn't check Elation right now. Try again in a minute.");
+      return;
+    }
+    setLastSync(new Date().toLocaleTimeString([], { hour: "numeric", minute: "2-digit" }));
+    if (manual || (res.imported ?? 0) > 0) {
+      toast.success(
+        res.imported ? `${res.imported} new prescription${res.imported === 1 ? "" : "s"} from Elation` : "No new prescriptions in Elation",
+      );
+    }
+    fetchQueue();
+  };
+
+  const setProgram = async (rx: QueuedPrescription, program: "pcvip" | "hero") => {
+    const { error } = await supabase
+      .from("prescription_queue")
+      .update({ program, status_reason: null })
+      .eq("id", rx.id);
+    if (error) toast.error("Couldn't save the program");
+    else fetchQueue();
+  };
 
   const fetchQueue = async () => {
     const { data, error } = await supabase
@@ -77,6 +110,13 @@ export default function PrescriptionQueue({ onFillPrescription }: PrescriptionQu
     }
     setLoading(false);
   };
+
+  useEffect(() => {
+    syncFromElation(false);
+    const timer = window.setInterval(() => syncFromElation(false), 5 * 60 * 1000);
+    return () => window.clearInterval(timer);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   useEffect(() => {
     fetchQueue();
@@ -170,8 +210,27 @@ export default function PrescriptionQueue({ onFillPrescription }: PrescriptionQu
     );
   }
 
+  const syncBar = (
+    <div className="flex items-center justify-end gap-2 text-xs text-muted-foreground">
+      {lastSync && <span>Last checked {lastSync}</span>}
+      <Button size="sm" variant="outline" onClick={() => syncFromElation(true)} disabled={syncing}>
+        <RefreshCw className={`h-3 w-3 mr-1 ${syncing ? "animate-spin" : ""}`} />
+        Check Elation now
+      </Button>
+    </div>
+  );
+
   if (queue.length === 0) {
-    return null;
+    return (
+      <Card className="border-dashed">
+        <CardContent className="flex items-center justify-between gap-4 py-3">
+          <p className="text-sm text-muted-foreground">
+            No pending prescriptions. Scripts marked PCVIP or HERO in Elation appear here.
+          </p>
+          {syncBar}
+        </CardContent>
+      </Card>
+    );
   }
 
   return (
@@ -187,12 +246,25 @@ export default function PrescriptionQueue({ onFillPrescription }: PrescriptionQu
           </CardTitle>
         </CardHeader>
         <CardContent className="space-y-3">
+          {syncBar}
           {queue.map((rx) => (
             <div
               key={rx.id}
               className="flex items-start justify-between gap-4 rounded-lg border bg-background p-3"
             >
               <div className="flex-1 min-w-0 space-y-1">
+                <div className="flex flex-wrap items-center gap-1.5">
+                  {rx.program === "pcvip" && <Badge>PCVIP · billed in Hint</Badge>}
+                  {rx.program === "hero" && <Badge variant="secondary">HERO · $0, not billed</Badge>}
+                  {!rx.program && (
+                    <Badge variant="destructive" className="gap-1">
+                      <AlertTriangle className="h-3 w-3" /> Needs review
+                    </Badge>
+                  )}
+                  {rx.not_in_inventory && (
+                    <Badge variant="outline" className="text-destructive border-destructive/40">Not in stock</Badge>
+                  )}
+                </div>
                 <p className="font-medium text-sm truncate">
                   {rx.patient_name || "Unknown Patient"} —{" "}
                   {rx.medication_name || "Unknown Medication"}{" "}
@@ -206,6 +278,13 @@ export default function PrescriptionQueue({ onFillPrescription }: PrescriptionQu
                   <p className="text-xs text-muted-foreground italic truncate">
                     Sig: {rx.directions}
                   </p>
+                )}
+                {!rx.program && (
+                  <div className="flex items-center gap-2 pt-1 text-xs">
+                    <span className="text-muted-foreground">{rx.status_reason || "Choose a program:"}</span>
+                    <Button size="sm" variant="outline" className="h-6 px-2" onClick={() => setProgram(rx, "pcvip")}>PCVIP</Button>
+                    <Button size="sm" variant="outline" className="h-6 px-2" onClick={() => setProgram(rx, "hero")}>HERO</Button>
+                  </div>
                 )}
               </div>
               <TooltipProvider delayDuration={200}>
@@ -255,7 +334,7 @@ export default function PrescriptionQueue({ onFillPrescription }: PrescriptionQu
                   </Tooltip>
                   <Tooltip>
                     <TooltipTrigger asChild>
-                      <Button size="sm" onClick={() => onFillPrescription(rx)}>
+                      <Button size="sm" disabled={!rx.program} onClick={() => onFillPrescription(rx)}>
                         <Check className="h-3 w-3 mr-1" />
                         Fill
                       </Button>
