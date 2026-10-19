@@ -16,6 +16,8 @@ import {
   PORTAL_MODULES,
   usePortalAccess,
   usePortalMutations,
+  useEmailChartCheck,
+  checkEmailAgainstChart,
   type PortalModule,
 } from "@/hooks/usePortalAdmin";
 
@@ -150,6 +152,7 @@ export default function PortalAdminPanel({ elationId }: { elationId: string | nu
   const canHelp = hasAnyRole(["super_admin", "admin", "clinical", "pharmacy"]);
   const { snapshot, noRecord, loading, error, refetch } = usePortalAccess(elationId);
   const { issueInvite, revokeInvite, setAccess, syncEmail } = usePortalMutations(elationId);
+  const emailCheck = useEmailChartCheck(elationId, canHelp && !!snapshot);
 
   // Preview the chart email first, then ask before writing anything.
   const refreshEmail = async () => {
@@ -255,7 +258,18 @@ export default function PortalAdminPanel({ elationId }: { elationId: string | nu
         </div>
       )}
 
-      {!loading && snapshot && <LoginChecklist snapshot={snapshot} />}
+      {!loading && snapshot && <LoginChecklist
+          snapshot={snapshot}
+          emailCheck={
+            canHelp
+              ? {
+                  loading: emailCheck.isLoading,
+                  error: emailCheck.error instanceof Error ? emailCheck.error.message : null,
+                  result: emailCheck.data ?? null,
+                }
+              : undefined
+          }
+        />}
 
       <Card>
         <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-3">
@@ -353,8 +367,22 @@ export default function PortalAdminPanel({ elationId }: { elationId: string | nu
                   size="sm"
                   disabled={!canHelp || busy || (!isAdmin && hadAccess)}
                   title={!isAdmin && hadAccess ? "This member already has portal access — ask an administrator." : undefined}
-                  onClick={() => {
+                  onClick={async () => {
                     if (!guard("care")) return;
+                    // Never send an invite to an address that no longer matches the chart.
+                    try {
+                      const chk = await checkEmailAgainstChart(elationId);
+                      if (chk.changed) {
+                        toast({
+                          title: "Email doesn't match the chart",
+                          description: `Portal has ${chk.rosterEmail ?? "(none)"}, chart has ${chk.chartEmail ?? "(none)"}. Click “Refresh email from chart” first, then send the invite.`,
+                          variant: "destructive",
+                        });
+                        return;
+                      }
+                    } catch (e) {
+                      if (!window.confirm(`Couldn't compare the email with the chart (${e instanceof Error ? e.message : String(e)}). Send anyway?`)) return;
+                    }
                     const to = snapshot?.email || "(no email on file)";
                     const warn = snapshot?.inviteStatus === "pending"
                       ? "\n\nThe member's current invite link will stop working."
