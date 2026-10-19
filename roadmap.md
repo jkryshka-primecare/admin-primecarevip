@@ -53,7 +53,9 @@
 
 ## Move 1 — Google + Apple portal sign-in (#585, draft PR #586)
 - [x] Issue #585 + draft PR #586: callables, linking core, blocking functions (unexported), 24 unit tests, Firestore flag
-- [ ] BLOCKED (Firebase owner): confirm Identity Platform (GCIP) on prive-care-vip — our key got 403
-- [ ] BLOCKED (owner + Twilio compliance): SMS code sender; email-code template
-- [ ] Auth-emulator tests; provider setup + client IDs; hub UI
+- [x] Identity Platform enabled (IDENTITY_PLATFORM), confirmed by owner
+- [ ] Keep SMS send stubbed until owner confirms sender; email fallback configuration remains required
+- [ ] Full path A/B flow, export blocking handlers, Auth-emulator tests required before merge
+- [ ] BLOCKED: provider/domain setup — Identity Toolkit config and provider reads both return 403 with the available Firebase credential; owner-authorized settings access needed
+- [ ] Hub UI remains unfinished; do not expose social buttons before reviewed linking flow is ready
 - [ ] GATE: read-only dry-run A/B/C counts → owner approval before canary
