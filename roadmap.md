@@ -57,6 +57,6 @@
 - [ ] Keep SMS send stubbed until owner confirms Twilio BAA covers Verify and A2P 10DLC registration; replace hand-rolled codes with Twilio Verify
 - [ ] Full path A/B flow, export blocking handlers, Auth-emulator tests required before merge
 - [ ] Provider/domain setup belongs to owner only; supply precise Firebase/Apple setup checklist, never attempt config writes
-- [ ] Review PR #586 against updated owner requirements (2026-10-19); report needed changes without modifying sign-in code
+- [x] Review PR #586 against updated owner requirements (2026-10-19); report and owner checklist delivered, sign-in code unchanged
 - [ ] Hub UI remains unfinished; do not expose social buttons before reviewed linking flow is ready
 - [ ] GATE: read-only dry-run A/B/C counts → owner approval before canary
