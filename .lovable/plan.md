@@ -37,20 +37,24 @@ Member taps Google/Apple
 **Path B (DOB fallback, incl. Apple Hide My Email):** callable `confirmSocialIdentity` takes the verified provider token + date of birth + a second factor (see open decision). It finds the candidate roster doc, checks DOB against the **live Elation chart**, reuses the existing DOB throttle/lock (`DOB_THROTTLED`, `DOB_LOCKED`), then links the provider to the bound UID exactly like path A. One-time: once linked, the provider sign-in goes straight through next time. Apple relay addresses (`@privaterelay.appleid.com`) are stored only as the provider's email, never written over the portal email or chart email.
 - Unclaimed members (no Auth UID yet): path B creates the Auth user via the existing `claimAccount` bind logic (same binding code, same audit), with the social provider attached instead of a password. No second binding code path.
 
-## Open decision (needs your call before code)
-DOB plus name alone lets anyone who knows those facts attach their Google account to someone's records. Recommend path B also require one of:
-- a 6-digit code sent to the **existing portal account email**, or
-- a code by SMS to the chart phone, or
-- the member's still-valid invite link (covers most of the ~508).
+## Second factor (decided)
+Path B = DOB + one-time SMS code to the **chart phone** (read from Elation by patient ID). Email code to the existing portal account email only when no chart phone exists. Invite link is not used (506 of ~508 expired). Codes: 6 digits, 10-minute expiry, single use, hashed at rest, throttled per patient and per provider identity.
+
+## Hydration
+Path B for unclaimed members calls the existing on-claim hydration (same code `claimAccount` runs) and records `hydrationStatus` so new members get a populated portal.
+
+## Preconditions (checked first in the build, flagged immediately if not met)
+- Firebase Auth with Identity Platform (GCIP) enabled on prive-care-vip. Blocking functions require it; if it is off, stop and report before writing blocking code.
 
 ## Audit and safety
 - Every link/refusal writes an audit row (uid, elationPatientId, provider, path A/B/C, reason). No PHI or tokens in logs.
-- Feature flag `SOCIAL_SIGNIN_ENABLED` (default false, plain env like the other flags) plus per-practice kill switch; buttons hidden when off.
+- Feature flag read from **Firestore** (practice config doc, `socialSignInEnabled`, default false/absent = off) plus per-practice kill switch. Chosen so `deploy-production.yml` is not touched and no Greg plumbing sign-off is needed. Blocking functions and callables reread the flag on every call; buttons hidden when off.
+- Everything lives in the `portal-functions` codebase. CRM untouched; scoped deploy (PR #583) kept.
 - Admin console (this app) Portal tab later shows which sign-in methods a member has (read-only).
 
 ## Test and dry-run plan (before any real member is affected)
 1. **Unit/emulator tests (CI):** path A links to existing UID; shared family email resolves only the UID owner; unverified-email account keeps password; 0/2+ bindings refused; suspended refused; Apple relay goes to path B; DOB mismatch/throttle/lock; no Auth user is ever created outside claim bind; custom token uses true-case uid.
-2. **Dry-run report (read-only):** for all active members, predict which path each would hit (A / B / C) and count likely conflicts. No writes. Counts only in chat, list in a file.
+2. **Dry-run report (read-only) — a gate:** for all active members, predict which path each would hit (A / B / C, plus "no chart phone") and count conflicts. No writes. Counts shared with you and approved before any production canary; per-member list in a file, not chat.
 3. **care-preview** with test fixtures (password member, unclaimed member, family-shared email, Apple relay).
 4. **Production canary:** flag on for named staff test accounts only, then 10 members, then all.
 5. Rollback = flag off. Linked providers stay harmless; password sign-in never touched.
