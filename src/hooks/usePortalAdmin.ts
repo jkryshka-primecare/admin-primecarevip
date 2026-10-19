@@ -216,20 +216,31 @@ export type EmailChartCheck = {
   loginEmail: string | null;
 };
 
-/** Look-only: compare the portal email with the Elation chart. Writes nothing. */
+/**
+ * Look-only: compare the portal email with the Elation chart. Writes nothing.
+ * Reads the portal record and the live chart separately (by patient ID), so it
+ * works even when the portal's own sync function can't reach Elation.
+ * Chart email rule matches provisioning: first non-deleted entry.
+ */
 export async function checkEmailAgainstChart(elationPatientId: string): Promise<EmailChartCheck> {
-  const env = await callPortalAdmin<{
-    changed?: boolean;
-    before?: { rosterEmail?: string | null; loginEmail?: string | null };
-    after?: { rosterEmail?: string | null };
-  }>({ action: "syncEmail", elationPatientId, dryRun: true });
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const p: any = (env as any)?.data ?? env;
+  const [portal, chart] = await Promise.all([
+    callPortalAdmin<RawAccessResponse>({ action: "get", elationPatientId }),
+    supabase.functions.invoke<{ ok: boolean; error?: string; data?: { emails?: { email?: string; deleted_date?: string | null }[] } }>(
+      "elation-live",
+      { body: { scope: "rest", resource: "patients", id: elationPatientId } },
+    ),
+  ]);
+  if (chart.error || !chart.data?.ok) {
+    throw new Error(chart.data?.error ?? chart.error?.message ?? "Couldn't read the Elation chart");
+  }
+  const norm = (v: unknown) => (typeof v === "string" && v.trim() ? v.trim().toLowerCase() : null);
+  const chartEmail = norm(chart.data.data?.emails?.find((e) => !e.deleted_date)?.email);
+  const rosterEmail = norm((portal.data?.roster as { email?: string } | null | undefined)?.email);
   return {
-    changed: Boolean(p?.changed),
-    rosterEmail: p?.before?.rosterEmail || null,
-    chartEmail: p?.after?.rosterEmail || null,
-    loginEmail: p?.before?.loginEmail ?? null,
+    changed: !!chartEmail && rosterEmail !== chartEmail,
+    rosterEmail,
+    chartEmail,
+    loginEmail: null,
   };
 }
 
