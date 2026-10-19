@@ -50,3 +50,10 @@
 - [ ] Dale: after #576 deploys, run reconcile for his chart, then confirm record reads "invited"
 
 - [ ] Scope portal functions deploy to `functions:portal-functions` (draft PR + issue) — blocked: GitHub token rejected (401), user checking via Chrome agent
+
+## Move 1 — Google + Apple portal sign-in (#585, draft PR #586)
+- [x] Issue #585 + draft PR #586: callables, linking core, blocking functions (unexported), 24 unit tests, Firestore flag
+- [ ] BLOCKED (Firebase owner): confirm Identity Platform (GCIP) on prive-care-vip — our key got 403
+- [ ] BLOCKED (owner + Twilio compliance): SMS code sender; email-code template
+- [ ] Auth-emulator tests; provider setup + client IDs; hub UI
+- [ ] GATE: read-only dry-run A/B/C counts → owner approval before canary
