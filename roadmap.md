@@ -56,5 +56,6 @@
 - [x] Identity Platform enabled (IDENTITY_PLATFORM), confirmed by owner
 - [ ] Keep SMS send stubbed until owner confirms sender; email fallback configuration remains required
 - [ ] Full path A/B flow, export blocking handlers, Auth-emulator tests required before merge
-- [ ] Provider setup: authorized care-preview domain, Google/Apple callback URLs + client IDs; hub UI
+- [ ] BLOCKED: provider/domain setup — Identity Toolkit config and provider reads both return 403 with the available Firebase credential; owner-authorized settings access needed
+- [ ] Hub UI remains unfinished; do not expose social buttons before reviewed linking flow is ready
 - [ ] GATE: read-only dry-run A/B/C counts → owner approval before canary
