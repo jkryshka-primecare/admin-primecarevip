@@ -233,6 +233,11 @@ export async function checkEmailAgainstChart(elationPatientId: string): Promise<
   };
 }
 
+/** Apply the chart email to the portal record (audited, reason required). */
+export async function applyEmailFromChart(elationPatientId: string, reason: string) {
+  return callPortalAdmin({ action: "syncEmail", elationPatientId, reason, dryRun: false });
+}
+
 export function useEmailChartCheck(elationPatientId: string | null, enabled = true) {
   return useQuery({
     queryKey: ["portal-admin", "email-check", elationPatientId],
