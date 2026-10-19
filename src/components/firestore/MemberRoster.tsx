@@ -11,6 +11,7 @@ import StaleClaimScreening from "@/components/firestore/StaleClaimScreening";
 import ProvisionMissingDialog from "@/components/firestore/ProvisionMissingDialog";
 import RosterExceptions from "@/components/firestore/RosterExceptions";
 import DependentMatches from "@/components/firestore/DependentMatches";
+import EmailMismatchReport from "@/components/firestore/EmailMismatchReport";
 import SendInviteButton from "@/components/firestore/SendInviteButton";
 import { buildExceptionLists } from "@/lib/portal/exceptions";
 
@@ -188,6 +189,8 @@ export default function MemberRoster() {
       )}
 
       {!loading && !error && <DependentMatches rows={rows} />}
+
+      {!loading && !error && isAdmin && <EmailMismatchReport rows={rows} />}
 
 
       <div className="flex flex-wrap items-center gap-3">
