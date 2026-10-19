@@ -209,11 +209,47 @@ export function usePortalAccess(elationPatientId: string | null, enabled = true)
   };
 }
 
+export type EmailChartCheck = {
+  changed: boolean;
+  rosterEmail: string | null;
+  chartEmail: string | null;
+  loginEmail: string | null;
+};
+
+/** Look-only: compare the portal email with the Elation chart. Writes nothing. */
+export async function checkEmailAgainstChart(elationPatientId: string): Promise<EmailChartCheck> {
+  const env = await callPortalAdmin<{
+    changed?: boolean;
+    before?: { rosterEmail?: string | null; loginEmail?: string | null };
+    after?: { rosterEmail?: string | null };
+  }>({ action: "syncEmail", elationPatientId, dryRun: true });
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const p: any = (env as any)?.data ?? env;
+  return {
+    changed: Boolean(p?.changed),
+    rosterEmail: p?.before?.rosterEmail || null,
+    chartEmail: p?.after?.rosterEmail || null,
+    loginEmail: p?.before?.loginEmail ?? null,
+  };
+}
+
+export function useEmailChartCheck(elationPatientId: string | null, enabled = true) {
+  return useQuery({
+    queryKey: ["portal-admin", "email-check", elationPatientId],
+    queryFn: () => checkEmailAgainstChart(elationPatientId as string),
+    enabled: enabled && !!elationPatientId,
+    staleTime: 60 * 1000,
+    retry: false,
+  });
+}
+
 
 export function usePortalMutations(elationPatientId: string | null) {
   const qc = useQueryClient();
-  const invalidate = () =>
+  const invalidate = () => {
     qc.invalidateQueries({ queryKey: ["portal-admin", "access", elationPatientId] });
+    qc.invalidateQueries({ queryKey: ["portal-admin", "email-check", elationPatientId] });
+  };
 
   const issueInvite = useMutation({
     mutationFn: (vars: { reason: string; reissue?: boolean; resetClaim?: boolean }) =>
