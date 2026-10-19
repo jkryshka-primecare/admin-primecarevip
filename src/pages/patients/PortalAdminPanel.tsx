@@ -176,7 +176,10 @@ export default function PortalAdminPanel({ elationId }: { elationId: string | nu
     } catch (e) {
       toast({
         title: "Could not refresh email",
-        description: e instanceof Error ? e.message : String(e),
+        description:
+          e instanceof Error && e.message.includes("ELATION_CONFIG_MISSING")
+            ? "The member portal can't reach Elation right now (its Elation connection isn't set up). Ask the portal team to fix it; nothing was changed."
+            : e instanceof Error ? e.message : String(e),
         variant: "destructive",
       });
     }
