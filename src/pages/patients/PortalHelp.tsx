@@ -100,7 +100,9 @@ export function LoginChecklist({
       <CardContent className="space-y-2">
         {checks.map((c) => (
           <div key={c.label} className="flex items-start gap-2 text-sm">
-            {c.ok ? (
+            {c.pending ? (
+              <Loader2 className="h-4 w-4 shrink-0 text-muted-foreground mt-0.5 animate-spin" />
+            ) : c.ok ? (
               <CheckCircle2 className="h-4 w-4 shrink-0 text-success mt-0.5" />
             ) : (
               <CircleAlert className="h-4 w-4 shrink-0 text-destructive mt-0.5" />
