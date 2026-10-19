@@ -4,13 +4,13 @@ import { format } from "date-fns";
 import { CheckCircle2, CircleAlert, History, LifeBuoy, Loader2, UserPlus } from "lucide-react";
 
 import { supabase } from "@/integrations/supabase/client";
-import type { PortalAccessSnapshot } from "@/hooks/usePortalAdmin";
+import type { EmailChartCheck, PortalAccessSnapshot } from "@/hooks/usePortalAdmin";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { toast } from "@/hooks/use-toast";
 
-type Check = { ok: boolean; label: string; hint?: string };
+type Check = { ok: boolean; label: string; hint?: string; pending?: boolean };
 
 function toDate(v: unknown): Date | null {
   if (!v) return null;
@@ -18,8 +18,20 @@ function toDate(v: unknown): Date | null {
   return isNaN(d.getTime()) ? null : d;
 }
 
+export type EmailCheckState = {
+  loading: boolean;
+  error: string | null;
+  result: EmailChartCheck | null;
+};
+
 /** Plain-language "why can't they log in?" checklist built from the portal record. */
-export function LoginChecklist({ snapshot }: { snapshot: PortalAccessSnapshot }) {
+export function LoginChecklist({
+  snapshot,
+  emailCheck,
+}: {
+  snapshot: PortalAccessSnapshot;
+  emailCheck?: EmailCheckState;
+}) {
   const suspended = snapshot.access?.status === "suspended";
   const expires = toDate(snapshot.inviteExpiresAt);
   const sent = toDate(snapshot.inviteSentAt);
@@ -55,11 +67,27 @@ export function LoginChecklist({ snapshot }: { snapshot: PortalAccessSnapshot })
             label: expired ? "Invite link has expired" : "No active invite",
             hint: "Send a new invite below.",
           },
-    {
-      ok: true,
-      label: "Email matches the chart?",
-      hint: "Tap “Refresh email from chart” to compare — nothing changes without your OK.",
-    },
+    emailCheck?.loading
+      ? { ok: true, pending: true, label: "Checking the email against the Elation chart…" }
+      : emailCheck?.error
+        ? {
+            ok: false,
+            label: "Couldn't compare the email with the chart",
+            hint: emailCheck.error,
+          }
+        : emailCheck?.result?.changed
+          ? {
+              ok: false,
+              label: `Email does NOT match the chart — chart has ${emailCheck.result.chartEmail ?? "(none)"}`,
+              hint: "Invites go to the portal email. Use “Refresh email from chart”, then resend the invite.",
+            }
+          : emailCheck?.result
+            ? { ok: true, label: "Email matches the Elation chart" }
+            : {
+                ok: true,
+                pending: true,
+                label: "Email not yet compared with the chart",
+              },
   ];
 
   return (
@@ -72,7 +100,9 @@ export function LoginChecklist({ snapshot }: { snapshot: PortalAccessSnapshot })
       <CardContent className="space-y-2">
         {checks.map((c) => (
           <div key={c.label} className="flex items-start gap-2 text-sm">
-            {c.ok ? (
+            {c.pending ? (
+              <Loader2 className="h-4 w-4 shrink-0 text-muted-foreground mt-0.5 animate-spin" />
+            ) : c.ok ? (
               <CheckCircle2 className="h-4 w-4 shrink-0 text-success mt-0.5" />
             ) : (
               <CircleAlert className="h-4 w-4 shrink-0 text-destructive mt-0.5" />

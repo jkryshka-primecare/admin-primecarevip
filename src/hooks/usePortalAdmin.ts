@@ -209,11 +209,63 @@ export function usePortalAccess(elationPatientId: string | null, enabled = true)
   };
 }
 
+export type EmailChartCheck = {
+  changed: boolean;
+  rosterEmail: string | null;
+  chartEmail: string | null;
+  loginEmail: string | null;
+};
+
+/**
+ * Look-only: compare the portal email with the Elation chart. Writes nothing.
+ * Reads the portal record and the live chart separately (by patient ID), so it
+ * works even when the portal's own sync function can't reach Elation.
+ * Chart email rule matches provisioning: first non-deleted entry.
+ */
+export async function checkEmailAgainstChart(elationPatientId: string): Promise<EmailChartCheck> {
+  const [portal, chart] = await Promise.all([
+    callPortalAdmin<RawAccessResponse>({ action: "get", elationPatientId }),
+    supabase.functions.invoke<{ ok: boolean; error?: string; data?: { emails?: { email?: string; deleted_date?: string | null }[] } }>(
+      "elation-live",
+      { body: { scope: "rest", resource: "patients", id: elationPatientId } },
+    ),
+  ]);
+  if (chart.error || !chart.data?.ok) {
+    throw new Error(chart.data?.error ?? chart.error?.message ?? "Couldn't read the Elation chart");
+  }
+  const norm = (v: unknown) => (typeof v === "string" && v.trim() ? v.trim().toLowerCase() : null);
+  const chartEmail = norm(chart.data.data?.emails?.find((e) => !e.deleted_date)?.email);
+  const rosterEmail = norm((portal.data?.roster as { email?: string } | null | undefined)?.email);
+  return {
+    changed: !!chartEmail && rosterEmail !== chartEmail,
+    rosterEmail,
+    chartEmail,
+    loginEmail: null,
+  };
+}
+
+/** Apply the chart email to the portal record (audited, reason required). */
+export async function applyEmailFromChart(elationPatientId: string, reason: string) {
+  return callPortalAdmin({ action: "syncEmail", elationPatientId, reason, dryRun: false });
+}
+
+export function useEmailChartCheck(elationPatientId: string | null, enabled = true) {
+  return useQuery({
+    queryKey: ["portal-admin", "email-check", elationPatientId],
+    queryFn: () => checkEmailAgainstChart(elationPatientId as string),
+    enabled: enabled && !!elationPatientId,
+    staleTime: 60 * 1000,
+    retry: false,
+  });
+}
+
 
 export function usePortalMutations(elationPatientId: string | null) {
   const qc = useQueryClient();
-  const invalidate = () =>
+  const invalidate = () => {
     qc.invalidateQueries({ queryKey: ["portal-admin", "access", elationPatientId] });
+    qc.invalidateQueries({ queryKey: ["portal-admin", "email-check", elationPatientId] });
+  };
 
   const issueInvite = useMutation({
     mutationFn: (vars: { reason: string; reissue?: boolean; resetClaim?: boolean }) =>

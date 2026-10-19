@@ -1234,7 +1234,9 @@ Deno.serve(async (req) => {
     if (!allowed) {
       return deny(403, "Only administrators can change a member's portal access.");
     }
-    if (!reason) {
+    // An email-sync preview (dryRun) changes nothing, so it needs no reason.
+    const isSyncPreview = action === "syncEmail" && body.dryRun !== false;
+    if (!reason && !isSyncPreview) {
       return deny(400, "A reason is required for this change.");
     }
   }
@@ -2005,7 +2007,7 @@ Deno.serve(async (req) => {
         errorMessage: ok && !created ? "Not created — no confident Elation match" : errorMessage,
       });
     }
-  } else if (MUTATIONS.includes(action)) {
+  } else if (MUTATIONS.includes(action) && !(action === "syncEmail" && body.dryRun !== false)) {
     const result = payload as { before?: unknown; after?: unknown } | null;
     await recordAction(ctx, {
       elationPatientId,
