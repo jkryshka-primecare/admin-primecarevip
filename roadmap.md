@@ -58,10 +58,12 @@
 - [ ] BLOCKED ON OWNER: lift COMPLIANCE_HOLD + bind Twilio secrets only after BAA (Verify) + A2P 10DLC confirmed
 - [x] Full path A/B flow, blocking handlers exported default-off, governed claim, exclusions, phone rules (b8351cf)
 - [x] Emulator merge gate: 17/17 real Auth+Firestore+Functions tests; unit 29/29
-- [ ] BLOCKED ON WORKFLOW-SCOPE HOLDER: add `pnpm test:social-signin` as required CI check
+- [ ] BLOCKED ON OWNER: add workflow file + required check `social-signin-emulator`
 - [x] Provider/domain checklist delivered; owner configuring Google/Apple/Twilio
-- [ ] BLOCKED ON OWNER: Google support email + care-preview hostname decision
+- [x] Google support email care@primecarevip.com; no care-preview (localhost + firebaseapp.com test, canary on care.primecarevip.com)
 - [x] Review PR #586 against updated owner requirements (2026-10-19); report and owner checklist delivered, sign-in code unchanged
 - [ ] Hub UI remains unfinished; do not expose social buttons before reviewed linking flow is ready
 - [x] Dry-run produced 2026-10-29 (992 active); per-member ID-only file in Files
-- [ ] GATE (BLOCKED ON OWNER): approval of dry-run before any canary; Auth-side facts need an owner-role read
+- [x] Dry-run approved 2026-10-29; canary staff first, then small member group
+- [ ] BLOCKED ON OWNER: confirm ~270 existing logins valid before real-member test
+- [ ] BLOCKED ON OWNER: separate sign-off to deploy blocking functions (watch existing sign-ins)
