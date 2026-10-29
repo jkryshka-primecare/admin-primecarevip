@@ -54,9 +54,14 @@
 ## Move 1 — Google + Apple portal sign-in (#585, draft PR #586)
 - [x] Issue #585 + draft PR #586: callables, linking core, blocking functions (unexported), 24 unit tests, Firestore flag
 - [x] Identity Platform enabled (IDENTITY_PLATFORM), confirmed by owner
-- [ ] Keep SMS send stubbed until owner confirms Twilio BAA covers Verify and A2P 10DLC registration; replace hand-rolled codes with Twilio Verify
-- [ ] Full path A/B flow, export blocking handlers, Auth-emulator tests required before merge
-- [ ] Provider/domain setup belongs to owner only; supply precise Firebase/Apple setup checklist, never attempt config writes
+- [x] Twilio Verify replaces hand-rolled codes (commit b8351cf)
+- [ ] BLOCKED ON OWNER: lift COMPLIANCE_HOLD + bind Twilio secrets only after BAA (Verify) + A2P 10DLC confirmed
+- [x] Full path A/B flow, blocking handlers exported default-off, governed claim, exclusions, phone rules (b8351cf)
+- [x] Emulator merge gate: 17/17 real Auth+Firestore+Functions tests; unit 29/29
+- [ ] BLOCKED ON WORKFLOW-SCOPE HOLDER: add `pnpm test:social-signin` as required CI check
+- [x] Provider/domain checklist delivered; owner configuring Google/Apple/Twilio
+- [ ] BLOCKED ON OWNER: Google support email + care-preview hostname decision
 - [x] Review PR #586 against updated owner requirements (2026-10-19); report and owner checklist delivered, sign-in code unchanged
 - [ ] Hub UI remains unfinished; do not expose social buttons before reviewed linking flow is ready
-- [ ] GATE: read-only dry-run A/B/C counts → owner approval before canary
+- [x] Dry-run produced 2026-10-29 (992 active); per-member ID-only file in Files
+- [ ] GATE (BLOCKED ON OWNER): approval of dry-run before any canary; Auth-side facts need an owner-role read
