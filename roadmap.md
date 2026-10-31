@@ -1,8 +1,9 @@
 # Roadmap
 
 ## Oct 31 17:11 — Hub compatibility and controlled registration
-- [ ] Confirm My Health Hub uses prive-care-vip Auth and existing UID-preserving linking contract; distinguish code compatibility from untested live social login.
-- [ ] Confirm PR #588 deploy behavior and whether it supports keeping both blocking triggers None through deployment and genuine production-token verification.
+- [x] Live Hub firebase-Dw9gVZYY.js confirms prive-care-vip Auth and us-central1 functions; existing signInWithToken accepts linking callables' true-case custom token. Frontend integration, not rearchitecture; 267 CLEAN remains prior preflight evidence, not live social verification.
+- [x] PR #588 remains open at fc29f2e; current main/retry deployments create/update blocking endpoints and Firebase CLI registers triggers. It does NOT support deploy-without-arming. Registration checker only validates an exported config; signed fixtures are not production-issued blocking tokens.
+- [ ] BLOCKED: #588 needs a reviewed resource-only deployment path with no Identity Platform config mutation, fail-closed permissions and pre/post None checks before merge; genuine production blocking event testing cannot occur with both project triggers None without an separately approved isolated testing arrangement.
 - [ ] BLOCKED: social controls/reset repair must be made in My Health Hub itself; this project's cross-project snapshot is read-only.
 - Keep custom domain unchanged, flag off, triggers None, canary held; no production changes authorized.
 
