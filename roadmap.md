@@ -1,5 +1,13 @@
 # Roadmap
 
+## Oct 31 — deployed social sign-in health and owner login
+- [ ] BLOCKED: post-deploy Cloud Logging denied (403 all log views) for lovable-portal-readonly; need Logs Viewer and Private Logs Viewer for Auth audit logs, or an owner-provided read-only export.
+- [ ] BLOCKED: owner Firebase Auth lookup denied (INSUFFICIENT_PERMISSION); need temporary Firebase Auth Viewer to confirm providers/authUid and CLEAN eligibility.
+- [x] Public member login inspected: Forgot password clickable with empty email, notice displayed, no page JavaScript errors; populated-email/send path not exercised.
+- [x] Public login masks all sign-in errors and reset failures; public asset bundle differs from artifacts/web-member source at 081627b. No frontend edits made.
+- [x] Deploy #690 verified green: Oct 31 16:02:36–16:09:03 UTC; deployed blocking source preserves password/custom-token no-I/O pass-through (source evidence only).
+- Rollout flag remains off; no canary or deployment authorized.
+
 ## D-317 — durable slow-chart hydration recovery (in progress)
 - [x] Issue number attempt — GitHub Issues API still 403; MK must file (proposed #530 designator) (API has been 403; propose designator if blocked)
 - [x] Shared terminal-status helper (`hydrationStatus` write out of `claimAccount.js`)
