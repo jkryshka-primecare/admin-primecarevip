@@ -1,5 +1,11 @@
 # Roadmap
 
+## Oct 31 — deployed social sign-in health and owner login
+- [ ] Read post-deploy Cloud Logging: password success/failure baseline and blocking-handler errors.
+- [ ] Inspect owner Firebase Auth providers and CLEAN eligibility without password access.
+- [ ] Diagnose member-portal Forgot password interaction and console errors.
+- Rollout flag remains off; no canary or deployment authorized.
+
 ## D-317 — durable slow-chart hydration recovery (in progress)
 - [x] Issue number attempt — GitHub Issues API still 403; MK must file (proposed #530 designator) (API has been 403; propose designator if blocked)
 - [x] Shared terminal-status helper (`hydrationStatus` write out of `claimAccount.js`)
