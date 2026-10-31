@@ -1,6 +1,9 @@
 # Roadmap
 
 ## Oct 31 — deployed social sign-in health and owner login
+- [ ] Incident repair: fix gen2 blocking-token audience and add production-like regression coverage; preserve password/custom-token access and correct registration URI.
+- [ ] Incident repair: reconcile care custom-address release, add flag-gated UID-preserving social controls, and make reset failures truthful.
+- Owner mitigation at 16:50 UTC: both blocking triggers set to None; sign-ins restored. Keep triggers unregistered, flag off, and canary held until fixes and fresh sign-ins are verified.
 - [x] Temporary reader roles worked; read-only capture completed Oct 31 16:40 UTC. Since 16:09:03: beforeSocialSignIn 4 requests, all HTTP 500 (SDK blocking-token audience mismatch: expected run.app, received cloudfunctions.net URL). beforeSocialCreate no requests observed. No password-attempt audit records or usable success-rate baseline available; canary health gate FAILED.
 - [x] Owner Auth verified enabled, password-only, exact email and true-case authUid; deployed resolver recheck CLEAN/path A/eligible. Failed attempt cannot be tied to an individual from available logs; blocking SDK errors are proven, wrong password is not.
 - [x] Public member login inspected: Forgot password clickable with empty email, notice displayed, no page JavaScript errors; populated-email/send path not exercised.
