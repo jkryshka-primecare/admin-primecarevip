@@ -1,10 +1,13 @@
 # Roadmap
 
 ## Oct 31 — deployed social sign-in health and owner login
-- [ ] BLOCKED: post-deploy Cloud Logging denied (403 all log views) for lovable-portal-readonly; need Logs Viewer and Private Logs Viewer for Auth audit logs, or an owner-provided read-only export.
-- [ ] BLOCKED: owner Firebase Auth lookup denied (INSUFFICIENT_PERMISSION); need temporary Firebase Auth Viewer to confirm providers/authUid and CLEAN eligibility.
+- [x] Temporary reader roles worked; read-only capture completed Oct 31 16:40 UTC. Since 16:09:03: beforeSocialSignIn 4 requests, all HTTP 500 (SDK blocking-token audience mismatch: expected run.app, received cloudfunctions.net URL). beforeSocialCreate no requests observed. No password-attempt audit records or usable success-rate baseline available; canary health gate FAILED.
+- [x] Owner Auth verified enabled, password-only, exact email and true-case authUid; deployed resolver recheck CLEAN/path A/eligible. Failed attempt cannot be tied to an individual from available logs; blocking SDK errors are proven, wrong password is not.
 - [x] Public member login inspected: Forgot password clickable with empty email, notice displayed, no page JavaScript errors; populated-email/send path not exercised.
 - [x] Public login masks all sign-in errors and reset failures; public asset bundle differs from artifacts/web-member source at 081627b. No frontend edits made.
+- [x] Hosting provenance: #690 built index-SVIkYpg8.js and released care-primecarevip at 16:03:57; care-primecarevip.web.app serves that exact entry. care.primecarevip.com serves separate index-DRMfWF7U.js + login-DHi2AFTy.js through Cloudflare. Custom-address serving source remains unidentified; not a skipped #690 Hosting deployment.
+- [ ] BLOCKED: owner authorization for a separately reviewed production sign-in audience repair; no deploy or settings change authorized. Validate fresh password/custom-token sign-ins after repair before canary.
+- [ ] BLOCKED: resolve custom-address release provenance and provide reviewed social UI before staff canary; live login has no Google/Apple controls.
 - [x] Deploy #690 verified green: Oct 31 16:02:36–16:09:03 UTC; deployed blocking source preserves password/custom-token no-I/O pass-through (source evidence only).
 - Rollout flag remains off; no canary or deployment authorized.
 
