@@ -1,5 +1,12 @@
 # Roadmap
 
+## Oct 31 17:11 — Hub compatibility and controlled registration
+- [x] Live Hub firebase-Dw9gVZYY.js confirms prive-care-vip Auth and us-central1 functions; existing signInWithToken accepts linking callables' true-case custom token. Frontend integration, not rearchitecture; 267 CLEAN remains prior preflight evidence, not live social verification.
+- [x] PR #588 remains open at fc29f2e; current main/retry deployments create/update blocking endpoints and Firebase CLI registers triggers. It does NOT support deploy-without-arming. Registration checker only validates an exported config; signed fixtures are not production-issued blocking tokens.
+- [ ] BLOCKED: #588 needs a reviewed resource-only deployment path with no Identity Platform config mutation, fail-closed permissions and pre/post None checks before merge; genuine production blocking event testing cannot occur with both project triggers None without an separately approved isolated testing arrangement.
+- [ ] BLOCKED: social controls/reset repair must be made in My Health Hub itself; this project's cross-project snapshot is read-only.
+- Keep custom domain unchanged, flag off, triggers None, canary held; no production changes authorized.
+
 ## Oct 31 — deployed social sign-in health and owner login
 - [x] Incident audience repair drafted in issue #587 / PR #588 (fc29f2e): version-locked exact-URI SDK backport, explicit us-east1, registration checker; 19 signed-token/registration tests + 19 real emulator tests + 29 quick tests pass. Original SDK fails six regression cases. Clean install/postinstall validated. Required gate updated; GitHub runs still in progress. Reviewer root-path concern disproved with actual providers/identity.js resolution.
 - [ ] BLOCKED: My Health Hub frontend must be edited in its own Lovable chat (cross-project checkout is read-only); owner chose KEEP it at care.primecarevip.com. Add reviewed provider-token/callable social flow, keep display flag off, and stop masking reset-send errors. Do not repoint DNS to Firebase web-member.
