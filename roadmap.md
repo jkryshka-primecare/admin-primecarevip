@@ -1,16 +1,16 @@
 # Roadmap
 
 ## Oct 31 — deployed social sign-in health and owner login
-- [ ] Incident repair: fix gen2 blocking-token audience and add production-like regression coverage; preserve password/custom-token access and correct registration URI.
-- [ ] Incident repair: reconcile care custom-address release, add flag-gated UID-preserving social controls, and make reset failures truthful.
+- [x] Incident audience repair drafted in issue #587 / PR #588 (fc29f2e): version-locked exact-URI SDK backport, explicit us-east1, registration checker; 19 signed-token/registration tests + 19 real emulator tests + 29 quick tests pass. Original SDK fails six regression cases. Clean install/postinstall validated. Required gate updated; GitHub runs still in progress. Reviewer root-path concern disproved with actual providers/identity.js resolution.
+- [ ] BLOCKED: My Health Hub frontend must be edited in its own Lovable chat (cross-project checkout is read-only); owner chose KEEP it at care.primecarevip.com. Add reviewed provider-token/callable social flow, keep display flag off, and stop masking reset-send errors. Do not repoint DNS to Firebase web-member.
 - Owner mitigation at 16:50 UTC: both blocking triggers set to None; sign-ins restored. Keep triggers unregistered, flag off, and canary held until fixes and fresh sign-ins are verified.
 - [x] Temporary reader roles worked; read-only capture completed Oct 31 16:40 UTC. Since 16:09:03: beforeSocialSignIn 4 requests, all HTTP 500 (SDK blocking-token audience mismatch: expected run.app, received cloudfunctions.net URL). beforeSocialCreate no requests observed. No password-attempt audit records or usable success-rate baseline available; canary health gate FAILED.
 - [x] Owner Auth verified enabled, password-only, exact email and true-case authUid; deployed resolver recheck CLEAN/path A/eligible. Failed attempt cannot be tied to an individual from available logs; blocking SDK errors are proven, wrong password is not.
 - [x] Public member login inspected: Forgot password clickable with empty email, notice displayed, no page JavaScript errors; populated-email/send path not exercised.
 - [x] Public login masks all sign-in errors and reset failures; public asset bundle differs from artifacts/web-member source at 081627b. No frontend edits made.
 - [x] Hosting provenance: #690 built index-SVIkYpg8.js and released care-primecarevip at 16:03:57; care-primecarevip.web.app serves that exact entry. care.primecarevip.com serves separate index-DRMfWF7U.js + login-DHi2AFTy.js through Cloudflare. Custom-address serving source remains unidentified; not a skipped #690 Hosting deployment.
-- [ ] BLOCKED: owner authorization for a separately reviewed production sign-in audience repair; no deploy or settings change authorized. Validate fresh password/custom-token sign-ins after repair before canary.
-- [ ] BLOCKED: resolve custom-address release provenance and provide reviewed social UI before staff canary; live login has no Google/Apple controls.
+- [ ] BLOCKED: separate owner approval to merge/deploy/re-register PR #588; broad portal-functions deployment would re-register triggers. Keep both None. Validate fresh password/custom-token sign-ins after authorized registration before canary.
+- [x] Custom-address provenance resolved: live login implementation matches My Health Hub snapshot cb2ef5ec, not Firebase web-member. Repair handoff recorded in PR #588 plans/MY-HEALTH-HUB-SOCIAL-REPAIR.md; UI remains blocked on work in that project.
 - [x] Deploy #690 verified green: Oct 31 16:02:36–16:09:03 UTC; deployed blocking source preserves password/custom-token no-I/O pass-through (source evidence only).
 - Rollout flag remains off; no canary or deployment authorized.
 
