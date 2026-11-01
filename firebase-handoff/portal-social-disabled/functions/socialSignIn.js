@@ -228,30 +228,9 @@ exports.socialStartVerification = onCall(VERIFY_OPTS, async (req) => {
 // socialClaimLocks/{elationPatientId}: { state: pending|done|released, pendingUid, leaseUntilMs }
 //   1. Transaction: refuse if the roster doc is already bound or a live lease is
 //      held; otherwise take the lease and RECORD the uid we are about to create.
-//   2. If an expired lease left a pendingUid behind (crash mid-claim), delete
-//      that Auth user — but only if no roster doc is bound to it.
-//   3. createUser(uid = pendingUid) -> linkProvider -> bindMember (transactional).
-//   4. Any failure: delete the new user, release the lease. If the delete itself
-//      fails the lease stays pending and step 2 of the next attempt finishes it.
-// deleteIfUnbound is the ONLY deleteUser call in this flow. It refuses (returns
-// false) unless the uid is one this flow minted for a claim lease AND nothing
-// marks it as a real member login:
-//   - no roster doc bound by firebaseUid (lower-case) OR authUid (true case);
-//   - the Auth user has no password provider (path-B users are created
-//     password-less; every claimed member login has one);
-// Callers only pass a lease pendingUid, and the main path only after its own
-// createUser succeeded in this same lease window.
-// Automatic deletion intentionally disabled: other owning-repo binding writers
-// do not yet participate in a shared UID tombstone protocol. Reconcile manually.
-async function deleteIfUnbound() { return false; }
-async function settleLease(ref, uid, generation, fields) {
-  return db().runTransaction(async tx => {
-    const snap = await tx.get(ref);
-    if (!snap.exists || snap.get('pendingUid') !== uid || snap.get('generation') !== generation) return false;
-    tx.set(ref, fields, { merge: true }); return true;
-  });
-}
-
+//   2. Expired/failed created accounts are held for reconciliation, never deleted.
+//   3. Creation is followed by atomic logical mapping + patient binding.
+//   4. A stale worker cannot mutate a successor's generation-bound lease.
 async function governedSocialClaim({ elationPatientId, id, challengeId, req }) {
   const pid = String(elationPatientId);
   const lockRef = db().collection('socialClaimLocks').doc(pid);
@@ -278,13 +257,11 @@ async function governedSocialClaim({ elationPatientId, id, challengeId, req }) {
     created = true;
     await Session.link(db(), uid, id, pid, { claimUid: uid, generation: lease.generation, access: await access(req), eligibility: S.eligibility });
   } catch (e) {
-    let cleaned = false;
-    // Never delete a uid this attempt did not create (e.g. uid-already-exists).
-    try { cleaned = created ? await deleteIfUnbound(uid) : false; } catch (delErr) { logError('socialSignIn', 'claim-cleanup-failed', delErr, { elationPatientId: pid }); }
-    await settleLease(lockRef, uid, lease.generation, { state: 'reconciliation', pendingUid: created ? uid : null, leaseUntilMs: 0 }).catch(() => {});
+    // No Auth deletion: preserve recovery metadata for operator reconciliation.
+    await Session.settleLease(db(), lockRef, uid, lease.generation, { state: 'reconciliation', pendingUid: created ? uid : null, leaseUntilMs: 0 }).catch(() => {});
     return { ok: false, reason: (e.details && e.details.reason) || e.reason || 'BIND_FAILED' };
   }
-  await settleLease(lockRef, uid, lease.generation, { state: 'done', pendingUid: null, leaseUntilMs: 0, boundUidLc: uid.toLowerCase() });
+  await Session.settleLease(db(), lockRef, uid, lease.generation, { state: 'done', pendingUid: null, leaseUntilMs: 0, boundUidLc: uid.toLowerCase() });
   return { ok: true, uid };
 }
 
