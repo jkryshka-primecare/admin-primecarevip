@@ -1,5 +1,12 @@
 # Roadmap
 
+## Nov 1 14:28 — pcvip-social-test hosted verification
+- [x] Disposable Editor access/billing/password/Firestore verified; native providers absent and blockers None. Both direct-provider probes returned OPERATION_NOT_ALLOWED with intentionally invalid test tokens.
+- [ ] Five-callable deployment BLOCKED: secret IAM administration denied; bootstrap two-callable Cloud Build failed with runtime/build account missing permissions. Two FAILED resources only, no hosted callable success.
+- [x] Synthetic chart/account/staff fixture and disabled test flags seeded; password sign-in succeeded with true-case UID. No production data/credentials transferred to test runtime.
+- [ ] Hosted A/B/C gate BLOCKED: project-local signing (foreign signer CREDENTIAL_MISMATCH; test signer signBlob 403), genuine nonce-bound provider sessions, and synthetic-only Elation/Twilio path-B setup required. No fixture-JWKS substitutes used.
+- [x] Sanitized results/precise blockers recorded in firebase-handoff/portal-social-disabled/HOSTED-TEST-2026-11-01.md; production untouched, canary held.
+
 ## Nov 1 13:07 — approved logical-link production PR
 - [x] Real draft portal PR #589, commit ab9341d: logical mapping/nonce/reconciliation/staff gates, exports, explicit denied client collections and INTEGRATION-CONTRACT v1.82. Exact PR-layout checks: 24 emulator + 13 signed-token/no-mutation pass; Hub 10 focused tests pass.
 - [ ] Existing social-signin-gate still requires migration from native provider-link/deletion assertions; new logical gate added, CI not certified green. No merge until both gates and hosted test pass.
