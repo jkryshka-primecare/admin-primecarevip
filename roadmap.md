@@ -1,9 +1,9 @@
 # Roadmap
 
 ## Nov 1 19:48 — runtime permission rerun
-- [ ] Rerun hosted checks with the newly granted runtime Auth/Firestore permissions; synthetic accounts only.
-- [ ] Exercise full hosted A/B/C wherever real provider sessions and synthetic-only second-factor integrations permit; identify any remaining gate explicitly.
-- [ ] Restore test flags off and confirm disabled providers/triggers None; update sanitized results, production unchanged.
+- [x] 18/18 hosted checks PASS with new runtime Auth/Firestore permissions; named synthetic staff availability and server-bound attempt creation now succeed. All earlier test permission blockers cleared.
+- [ ] Full hosted A/B/C blocked on genuine nonce-bound provider sessions and approved synthetic-only Elation/Twilio integration, not permissions. Actual A mapping/mint, B classification/verification/claim/hydration, C classification and valid-session replay/concurrent completion remain unexecuted; no fixture substitution.
+- [x] Test master/practice flags restored false, disabled providers/triggers None confirmed; sanitized results updated, production unchanged and canary held.
 
 ## Nov 1 19:14 — rerun after owner grants
 - [x] All five test-only callable invoker policies verified allUsers; browser transport reaches application code. Five ACTIVE, audiences populated, native providers disabled, blockers None.
