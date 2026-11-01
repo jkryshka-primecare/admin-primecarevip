@@ -1,5 +1,10 @@
 # Roadmap
 
+## Nov 1 18:54 — resume provisioned isolated test
+- [ ] Deploy exactly the five #589 social callables to pcvip-social-test; no production changes or blocking exports.
+- [ ] Recheck disabled native providers/None triggers and run synthetic-only hosted A/B/C; distinguish genuine provider/integration evidence from refusal probes.
+- [ ] Report verified results and any remaining hosted prerequisites; keep production canary held.
+
 ## Nov 1 14:28 — pcvip-social-test hosted verification
 - [x] Disposable Editor access/billing/password/Firestore verified; native providers absent and blockers None. Both direct-provider probes returned OPERATION_NOT_ALLOWED with intentionally invalid test tokens.
 - [ ] Five-callable deployment BLOCKED: secret IAM administration denied; bootstrap two-callable Cloud Build failed with runtime/build account missing permissions. Two FAILED resources only, no hosted callable success.
