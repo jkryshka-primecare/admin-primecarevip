@@ -26,9 +26,9 @@ const { defineSecret } = require('firebase-functions/params');
 const { logError } = require('./middleware/logger');
 const { verifyProviderIdToken } = require('./core/services/auth/providerToken');
 const S = require('./core/services/auth/socialSignIn');
+const Session = require('./core/services/auth/socialSession');
 const verify = require('./core/services/auth/verifySender');
 const { checkThrottle, recordFailure, clearThrottle } = require('./core/services/patient/dobThrottle');
-const { bindMember } = require('./core/services/patient/bindMember');
 const { runPostClaimSteps } = require('./core/services/patient/postClaim');
 const { elationGet } = require('./core/services/elation/client');
 
@@ -38,7 +38,7 @@ const ELATION_CLIENT_SECRET = defineSecret('ELATION_CLIENT_SECRET');
 const db = () => admin.firestore();
 // Twilio Verify secrets: bound ONLY to the two path-B callables (hold lifted 2026-10-30).
 const VERIFY_SECRETS = verify.VERIFY_SECRET_NAMES.map((n) => defineSecret(n));
-const OPTS = { timeoutSeconds: 180, memory: '512MiB', secrets: [ELATION_CLIENT_ID, ELATION_CLIENT_SECRET] };
+const OPTS = { region: 'us-central1', timeoutSeconds: 180, memory: '512MiB', secrets: [ELATION_CLIENT_ID, ELATION_CLIENT_SECRET] };
 const VERIFY_OPTS = { ...OPTS, secrets: [...OPTS.secrets, ...VERIFY_SECRETS] };
 
 const linkDocId = (providerId, providerUid) => `${providerId}|${providerUid}`;
@@ -77,19 +77,35 @@ async function requirePracticeFlag(roster) {
   if (!(await S.readSocialFlag(db(), S.practiceOf(roster)))) throw new HttpsError('failed-precondition', 'SOCIAL_SIGNIN_DISABLED');
 }
 
-async function verified(data) {
+async function access(req) {
+  const allowed = await Session.staffAccess(db(), admin.auth(), req);
+  if (!allowed) throw new HttpsError('failed-precondition', 'SOCIAL_SIGNIN_DISABLED');
+  return allowed;
+}
+async function verified(req, stages) {
+  const allowed = await access(req);
+  const attempt = await Session.readAttempt(db(), req.data, allowed, stages);
   try {
-    return await verifyProviderIdToken(String(data && data.providerId), String(data && data.idToken));
-  } catch (e) {
-    throw new HttpsError('unauthenticated', e.reason || 'BAD_TOKEN');
-  }
+    const id = await verifyProviderIdToken(String(req.data.providerId), String(req.data.idToken), { nonceHash: attempt.nonceHash });
+    Session.checkIdentity(attempt, id);
+    return id;
+  } catch (e) { throw new HttpsError('unauthenticated', 'INVALID_PROVIDER_RESPONSE'); }
 }
-
-async function recordLink(trueUid, id, elationPatientId) {
-  await db().collection('socialLinks').doc(linkDocId(id.providerId, id.providerUid)).set({
-    uid: trueUid, providerId: id.providerId, elationPatientId: String(elationPatientId), at: admin.firestore.Timestamp.now(),
-  });
+async function recordLink(trueUid, id, pid) {
+  const user = await admin.auth().getUser(trueUid);
+  if (user.disabled) throw refuse();
+  const roster = (await db().collection('patients').doc(String(pid)).get()).data();
+  if (!S.eligibility({ roster, authUser: user }).ok) throw refuse();
+  return Session.link(db(), trueUid, id, pid);
 }
+exports.socialAvailability = onCall({ region: 'us-central1' }, async req => {
+  const a = await Session.staffAccess(db(), admin.auth(), req);
+  return { google: Boolean(a && a.google), apple: Boolean(a && a.apple) };
+});
+exports.socialBeginAttempt = onCall({ region: 'us-central1' }, async req => {
+  const a = await access(req);
+  return Session.begin(db(), String(req.data && req.data.providerId), a);
+});
 
 const mint = (trueUid) => admin.auth().createCustomToken(trueUid);
 const refuse = () => new HttpsError('failed-precondition', 'CONTACT_PRACTICE');
@@ -109,23 +125,25 @@ async function claimedLogin(d, roster, elationPatientId) {
 // ---- path A ---------------------------------------------------------------
 exports.socialLinkExisting = onCall(OPTS, async (req) => {
   await requireMasterFlag();
-  const id = await verified(req.data);
+  const id = await verified(req, ['new']);
   const d = deps();
-  const c = await S.classifySocialIdentity(id, d);
+  await Session.advance(db(), req.data, id, ['new'], 'resolving');
+  const c = await Session.mapped(db(), admin.auth(), S, d, id) || await S.classifySocialIdentity(id, d);
   if (c.path !== 'A') {
+    await Session.advance(db(), req.data, id, ['resolving'], c.path === 'B' ? 'identity-required' : 'done');
     await audit({ action: 'social_classify', path: c.path, reason: c.reason, provider: id.providerId, elationPatientId: c.elationPatientId || null });
     return { path: c.path, reason: c.path === 'B' ? 'VERIFY_IDENTITY' : 'CONTACT_PRACTICE' };
   }
   await requirePracticeFlag({ practiceId: c.practiceId });
   try {
-    const r = await S.linkProvider(d, c.trueUid, id);
-    await recordLink(c.trueUid, id, c.elationPatientId);
+    const r = await recordLink(c.trueUid, id, c.elationPatientId);
     await audit({ action: 'social_link', path: 'A', provider: id.providerId, elationPatientId: c.elationPatientId, uid: c.trueUid.toLowerCase(), newlyLinked: r.linked });
   } catch (e) {
     logError('socialSignIn', 'link-failed', e, { elationPatientId: c.elationPatientId, reason: e.reason });
     await audit({ action: 'social_link_failed', path: 'A', provider: id.providerId, elationPatientId: c.elationPatientId, reason: e.reason || 'LINK_FAILED' });
     throw refuse();
   }
+  await Session.advance(db(), req.data, id, ['resolving'], 'done');
   return { path: 'A', customToken: await mint(c.trueUid) };
 });
 
@@ -134,7 +152,7 @@ const NOT_VERIFIED = 'NOT_VERIFIED'; // generic: no-match, ambiguous and DOB mis
 
 exports.socialStartVerification = onCall(VERIFY_OPTS, async (req) => {
   await requireMasterFlag();
-  const id = await verified(req.data);
+  const id = await verified(req, ['identity-required']);
   const throttleKey = `social_${id.providerId}_${id.providerUid}`;
   const t = await checkThrottle(throttleKey);
   if (t.blocked) throw new HttpsError('resource-exhausted', t.hardLocked ? 'DOB_LOCKED' : 'DOB_THROTTLED', { retryAfter: t.hardLocked ? null : t.retryAfterSeconds });
@@ -174,7 +192,10 @@ exports.socialStartVerification = onCall(VERIFY_OPTS, async (req) => {
   if (!ch.channel) throw await stop(ch.reason);
 
   let started;
-  try { started = await verify.startVerification(ch); }
+  try {
+    await Session.advance(db(), req.data, id, ['identity-required'], 'sending');
+    started = await verify.startVerification(ch);
+  }
   catch (e) {
     logError('socialSignIn', 'verify-start-failed', e, { elationPatientId: pid, channel: ch.channel, reason: e.reason });
     await audit({ action: 'social_code_not_sent', path: 'B', provider: id.providerId, elationPatientId: pid, channel: ch.channel, reason: e.reason || 'VERIFY_START_FAILED' });
@@ -183,8 +204,9 @@ exports.socialStartVerification = onCall(VERIFY_OPTS, async (req) => {
   const ref = db().collection('socialChallenges').doc();
   await ref.set({
     ...S.newChallenge({ nowMs: Date.now(), elationPatientId: pid, providerId: id.providerId, providerUid: id.providerUid, channel: ch.channel, verificationSid: started.verificationSid }),
-    createdAt: admin.firestore.Timestamp.now(),
+    attemptId: req.data.attemptId, createdAt: admin.firestore.Timestamp.now(),
   });
+  await Session.advance(db(), req.data, id, ['sending'], 'code-required', { challengeId: ref.id });
   await audit({ action: 'social_code_sent', path: 'B', provider: id.providerId, elationPatientId: pid, channel: ch.channel });
   return { challengeId: ref.id, channel: ch.channel, destination: S.maskDestination(ch) };
 });
@@ -229,7 +251,7 @@ async function governedSocialClaim({ elationPatientId, id, challengeId }) {
   const lease = await db().runTransaction(async (tx) => {
     const [lock, pat] = await Promise.all([tx.get(lockRef), tx.get(patRef)]);
     if (!pat.exists) return { ok: false, reason: 'NO_PATIENT_RECORD' };
-    if (pat.get('firebaseUid')) return { ok: false, reason: 'ALREADY_BOUND' };
+    if (pat.get('firebaseUid') || pat.get('authUid')) return { ok: false, reason: 'ALREADY_BOUND' };
     const l = lock.exists ? lock.data() : null;
     const nowMs = Date.now();
     if (l && l.state === 'pending' && l.leaseUntilMs > nowMs) return { ok: false, reason: 'CLAIM_IN_PROGRESS' };
@@ -250,8 +272,7 @@ async function governedSocialClaim({ elationPatientId, id, challengeId }) {
   try {
     await admin.auth().createUser({ uid, emailVerified: false });
     created = true;
-    await S.linkProvider(deps(), uid, id);
-    await bindMember({ db: db(), FieldValue: admin.firestore.FieldValue, elationPatientId: pid, rawUid: uid, actor: 'socialSignIn' });
+    await Session.link(db(), uid, id, pid, { claimUid: uid });
   } catch (e) {
     let cleaned = false;
     // Never delete a uid this attempt did not create (e.g. uid-already-exists).
@@ -266,7 +287,7 @@ async function governedSocialClaim({ elationPatientId, id, challengeId }) {
 // ---- path B step 2 ----------------------------------------------------------
 exports.socialConfirmVerification = onCall(VERIFY_OPTS, async (req) => {
   await requireMasterFlag();
-  const id = await verified(req.data);
+  const id = await verified(req, ['code-required']);
   const challengeId = String((req.data && req.data.challengeId) || '');
   const code = String((req.data && req.data.code) || '');
   if (!challengeId) throw new HttpsError('invalid-argument', 'NO_CHALLENGE');
@@ -276,6 +297,7 @@ exports.socialConfirmVerification = onCall(VERIFY_OPTS, async (req) => {
   const gate = await db().runTransaction(async (tx) => {
     const snap = await tx.get(ref);
     const c = snap.exists ? snap.data() : null;
+    if (!c || c.attemptId !== req.data.attemptId) return { ok: false, reason: 'CHALLENGE_MISMATCH' };
     const g = S.challengeGate(c, id, Date.now());
     if (!g.ok) return g;
     tx.update(ref, { checks: c.checks + 1 });
@@ -302,6 +324,7 @@ exports.socialConfirmVerification = onCall(VERIFY_OPTS, async (req) => {
     tx.update(ref, { usedAtMs: Date.now() });
     return true;
   });
+  if (used) await Session.advance(db(), req.data, id, ['code-required'], 'completing');
   if (!used) throw new HttpsError('permission-denied', 'CODE_USED');
 
   const elationPatientId = String(gate.challenge.elationPatientId);
@@ -317,7 +340,7 @@ exports.socialConfirmVerification = onCall(VERIFY_OPTS, async (req) => {
       throw refuse();
     }
     trueUid = l.user.uid;
-    try { await S.linkProvider(d, trueUid, id); await recordLink(trueUid, id, elationPatientId); }
+    try { await recordLink(trueUid, id, elationPatientId); }
     catch (e) {
       await audit({ action: 'social_link_failed', path: 'B', provider: id.providerId, elationPatientId, reason: e.reason || 'LINK_FAILED' });
       throw refuse();
@@ -340,6 +363,7 @@ exports.socialConfirmVerification = onCall(VERIFY_OPTS, async (req) => {
     await audit({ action: 'social_claim', path: 'B', provider: id.providerId, elationPatientId, uid: trueUid.toLowerCase() });
   }
   await clearThrottle(`social_${id.providerId}_${id.providerUid}`).catch(() => {});
+  await Session.advance(db(), req.data, id, ['completing'], 'done');
   return { path: 'B', customToken: await mint(trueUid) };
 });
 
