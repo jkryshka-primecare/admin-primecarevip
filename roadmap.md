@@ -1,5 +1,10 @@
 # Roadmap
 
+## Nov 1 14:28 — pcvip-social-test hosted verification
+- [ ] Verify disposable project access, disabled providers and absent blocking triggers; deploy only #589's five social callables to pcvip-social-test.
+- [ ] Seed synthetic-only fixtures; exercise direct-provider refusal and genuine provider-token logical A/B/C plus custom-token UID read-back, with no production access or data.
+- [ ] Report hosted results and any unmet prerequisites; production flags off, triggers None, canary held.
+
 ## Nov 1 13:07 — approved logical-link production PR
 - [x] Real draft portal PR #589, commit ab9341d: logical mapping/nonce/reconciliation/staff gates, exports, explicit denied client collections and INTEGRATION-CONTRACT v1.82. Exact PR-layout checks: 24 emulator + 13 signed-token/no-mutation pass; Hub 10 focused tests pass.
 - [ ] Existing social-signin-gate still requires migration from native provider-link/deletion assertions; new logical gate added, CI not certified green. No merge until both gates and hosted test pass.
