@@ -1,5 +1,14 @@
 # Roadmap
 
+## Nov 1 — callable-only My Health Hub frontend and deferred blocking hardening
+- [x] Owner request recorded: keep My Health Hub, provider tokens -> reviewed callables -> custom token; review diff before staff. #588 deferred; future resource-only deployment and isolated Identity Platform audience verification only.
+- [x] Deployed socialSignIn.js at 081627b confirms linking/minting has no blocking-handler dependency; official Identity Platform docs exclude custom authentication from blocking functions.
+- [x] Deferral/registration hold posted to PR #588; no merge/deploy/registration/flag/account changes.
+- [ ] Prepare reviewable frontend source diff from Hub snapshot cb2ef5ec; application/testing in My Health Hub requires opening that project (cross-project writes unsupported).
+- [ ] BLOCKED: actual provider popup integration needs public Google client ID and owner-authorized Apple popup return URL/config; no configuration guessed or changed.
+- [ ] BLOCKED: before canary, review direct social sign-in bypass risk with providers enabled and triggers None; UI/server flags do not constrain Identity Platform's direct provider endpoint.
+- Flag off, triggers None, canary hold remain unchanged.
+
 ## Oct 31 17:11 — Hub compatibility and controlled registration
 - [x] Live Hub firebase-Dw9gVZYY.js confirms prive-care-vip Auth and us-central1 functions; existing signInWithToken accepts linking callables' true-case custom token. Frontend integration, not rearchitecture; 267 CLEAN remains prior preflight evidence, not live social verification.
 - [x] PR #588 remains open at fc29f2e; current main/retry deployments create/update blocking endpoints and Firebase CLI registers triggers. It does NOT support deploy-without-arming. Registration checker only validates an exported config; signed fixtures are not production-issued blocking tokens.
