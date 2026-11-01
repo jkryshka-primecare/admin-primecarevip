@@ -21,6 +21,7 @@
 // All calls are staff-targeted; blockers remain unregistered and unchanged.
 
 const admin = require('firebase-admin');
+const { Timestamp } = require('firebase-admin/firestore');
 const { onCall, HttpsError } = require('firebase-functions/v2/https');
 const { defineSecret } = require('firebase-functions/params');
 const { logError } = require('./middleware/logger');
@@ -63,7 +64,7 @@ function deps() {
 
 async function audit(entry) {
   // No tokens, codes, emails or phone numbers in the audit row.
-  await db().collection('portalAdminAudit').add({ at: admin.firestore.Timestamp.now(), actor: 'socialSignIn', ...entry });
+  await db().collection('portalAdminAudit').add({ at: Timestamp.now(), actor: 'socialSignIn', ...entry });
 }
 
 async function requireMasterFlag() {
@@ -90,12 +91,12 @@ async function verified(req, stages) {
     return id;
   } catch (e) { throw new HttpsError('unauthenticated', 'INVALID_PROVIDER_RESPONSE'); }
 }
-async function recordLink(trueUid, id, pid) {
+async function recordLink(trueUid, id, pid, req) {
   const user = await admin.auth().getUser(trueUid);
   if (user.disabled) throw refuse();
   const roster = (await db().collection('patients').doc(String(pid)).get()).data();
   if (!S.eligibility({ roster, authUser: user }).ok) throw refuse();
-  return Session.link(db(), trueUid, id, pid);
+  return Session.link(db(), trueUid, id, pid, { access: await access(req), eligibility: S.eligibility });
 }
 async function requireTargetPractice(req, practiceId) {
   const a = await access(req);
@@ -110,10 +111,12 @@ exports.socialBeginAttempt = onCall({ region: 'us-central1' }, async req => {
   return Session.begin(db(), String(req.data && req.data.providerId), a);
 });
 
-const mint = async (trueUid) => {
+const mint = async (trueUid, req) => {
   const user = await admin.auth().getUser(trueUid);
   const b = await S.resolveBinding(deps(), trueUid);
   if (!b.ok || b.roster.authUid !== trueUid || !S.eligibility({ roster: b.roster, authUser: user }).ok) throw refuse();
+  await requireTargetPractice(req, S.practiceOf(b.roster));
+  await requirePracticeFlag(b.roster);
   return admin.auth().createCustomToken(trueUid);
 };
 const refuse = () => new HttpsError('failed-precondition', 'CONTACT_PRACTICE');
@@ -145,7 +148,7 @@ exports.socialLinkExisting = onCall(OPTS, async (req) => {
   await requirePracticeFlag({ practiceId: c.practiceId });
   await requireTargetPractice(req, c.practiceId);
   try {
-    const r = await recordLink(c.trueUid, id, c.elationPatientId);
+    const r = await recordLink(c.trueUid, id, c.elationPatientId, req);
     await audit({ action: 'social_link', path: 'A', provider: id.providerId, elationPatientId: c.elationPatientId, uid: c.trueUid.toLowerCase(), newlyLinked: r.linked });
   } catch (e) {
     logError('socialSignIn', 'link-failed', e, { elationPatientId: c.elationPatientId, reason: e.reason });
@@ -153,7 +156,7 @@ exports.socialLinkExisting = onCall(OPTS, async (req) => {
     throw refuse();
   }
   await Session.advance(db(), req.data, id, ['resolving'], 'done');
-  return { path: 'A', customToken: await mint(c.trueUid) };
+  return { path: 'A', customToken: await mint(c.trueUid, req) };
 });
 
 // ---- path B step 1 ----------------------------------------------------------
@@ -214,7 +217,7 @@ exports.socialStartVerification = onCall(VERIFY_OPTS, async (req) => {
   const ref = db().collection('socialChallenges').doc();
   await ref.set({
     ...S.newChallenge({ nowMs: Date.now(), elationPatientId: pid, providerId: id.providerId, providerUid: id.providerUid, channel: ch.channel, verificationSid: started.verificationSid }),
-    attemptId: req.data.attemptId, createdAt: admin.firestore.Timestamp.now(),
+    attemptId: req.data.attemptId, createdAt: Timestamp.now(),
   });
   await Session.advance(db(), req.data, id, ['sending'], 'code-required', { challengeId: ref.id });
   await audit({ action: 'social_code_sent', path: 'B', provider: id.providerId, elationPatientId: pid, channel: ch.channel });
@@ -238,23 +241,18 @@ exports.socialStartVerification = onCall(VERIFY_OPTS, async (req) => {
 //     password-less; every claimed member login has one);
 // Callers only pass a lease pendingUid, and the main path only after its own
 // createUser succeeded in this same lease window.
-async function deleteIfUnbound(uid) {
-  const u = String(uid || '');
-  if (!u) return false;
-  const pats = db().collection('patients');
-  const [byLc, byTrue] = await Promise.all([
-    pats.where('firebaseUid', '==', u.toLowerCase()).limit(1).get(),
-    pats.where('authUid', '==', u).limit(1).get(),
-  ]);
-  if (!byLc.empty || !byTrue.empty) return false;
-  let user;
-  try { user = await admin.auth().getUser(u); } catch (e) { if (e.code === 'auth/user-not-found') return true; throw e; }
-  if ((user.providerData || []).some((p) => p.providerId === 'password') || user.passwordHash) return false;
-  try { await admin.auth().deleteUser(u); } catch (e) { if (e.code !== 'auth/user-not-found') throw e; }
-  return true;
+// Automatic deletion intentionally disabled: other owning-repo binding writers
+// do not yet participate in a shared UID tombstone protocol. Reconcile manually.
+async function deleteIfUnbound() { return false; }
+async function settleLease(ref, uid, generation, fields) {
+  return db().runTransaction(async tx => {
+    const snap = await tx.get(ref);
+    if (!snap.exists || snap.get('pendingUid') !== uid || snap.get('generation') !== generation) return false;
+    tx.set(ref, fields, { merge: true }); return true;
+  });
 }
 
-async function governedSocialClaim({ elationPatientId, id, challengeId }) {
+async function governedSocialClaim({ elationPatientId, id, challengeId, req }) {
   const pid = String(elationPatientId);
   const lockRef = db().collection('socialClaimLocks').doc(pid);
   const patRef = db().collection('patients').doc(pid);
@@ -265,32 +263,28 @@ async function governedSocialClaim({ elationPatientId, id, challengeId }) {
     const l = lock.exists ? lock.data() : null;
     const nowMs = Date.now();
     if (l && l.state === 'pending' && l.leaseUntilMs > nowMs) return { ok: false, reason: 'CLAIM_IN_PROGRESS' };
-    const staleUid = l && l.state === 'pending' ? l.pendingUid : null;
+    const staleUid = l && ['pending', 'reconciliation'].includes(l.state) ? l.pendingUid : null;
+    if (staleUid) return { ok: false, reason: 'STALE_CLAIM_RECONCILIATION' };
     const pendingUid = db().collection('socialClaimLocks').doc().id;
-    tx.set(lockRef, { state: 'pending', pendingUid, leaseUntilMs: nowMs + S.CLAIM_LEASE_MS, challengeId, providerId: id.providerId, at: admin.firestore.Timestamp.now() });
-    return { ok: true, pendingUid, staleUid };
+    const generation = db().collection('socialClaimLocks').doc().id;
+    tx.set(lockRef, { state: 'pending', pendingUid, generation, leaseUntilMs: nowMs + S.CLAIM_LEASE_MS, challengeId, providerId: id.providerId, at: Timestamp.now() });
+    return { ok: true, pendingUid, generation, staleUid };
   });
   if (!lease.ok) return lease;
-  if (lease.staleUid && !(await deleteIfUnbound(lease.staleUid))) {
-    // Stale uid now belongs to a real login: leave it, release, refuse this attempt.
-    await lockRef.set({ state: 'released', pendingUid: null, leaseUntilMs: 0, staleUidKept: lease.staleUid }, { merge: true });
-    return { ok: false, reason: 'STALE_UID_IN_USE' };
-  }
-
   const uid = lease.pendingUid;
   let created = false;
   try {
     await admin.auth().createUser({ uid, emailVerified: false });
     created = true;
-    await Session.link(db(), uid, id, pid, { claimUid: uid });
+    await Session.link(db(), uid, id, pid, { claimUid: uid, generation: lease.generation, access: await access(req), eligibility: S.eligibility });
   } catch (e) {
     let cleaned = false;
     // Never delete a uid this attempt did not create (e.g. uid-already-exists).
     try { cleaned = created ? await deleteIfUnbound(uid) : false; } catch (delErr) { logError('socialSignIn', 'claim-cleanup-failed', delErr, { elationPatientId: pid }); }
-    if (cleaned) await lockRef.set({ state: 'released', pendingUid: null, leaseUntilMs: 0 }, { merge: true }).catch(() => {});
+    await settleLease(lockRef, uid, lease.generation, { state: 'reconciliation', pendingUid: created ? uid : null, leaseUntilMs: 0 }).catch(() => {});
     return { ok: false, reason: (e.details && e.details.reason) || e.reason || 'BIND_FAILED' };
   }
-  await lockRef.set({ state: 'done', pendingUid: null, leaseUntilMs: 0, boundUidLc: uid.toLowerCase() }, { merge: true });
+  await settleLease(lockRef, uid, lease.generation, { state: 'done', pendingUid: null, leaseUntilMs: 0, boundUidLc: uid.toLowerCase() });
   return { ok: true, uid };
 }
 
@@ -329,15 +323,17 @@ exports.socialConfirmVerification = onCall(VERIFY_OPTS, async (req) => {
     await audit({ action: 'social_code_failed', path: 'B', provider: id.providerId, reason: 'CODE_MISMATCH', elationPatientId: gate.challenge.elationPatientId });
     throw new HttpsError('permission-denied', 'CODE_MISMATCH');
   }
-  // Single use: mark used atomically; a second concurrent confirm loses here.
-  const used = await db().runTransaction(async (tx) => {
-    const s = await tx.get(ref);
-    if (!s.exists || s.get('usedAtMs')) return false;
+  // Challenge consumption and attempt progression are one transaction.
+  await db().runTransaction(async tx => {
+    const attemptRef = db().collection('socialAttempts').doc(req.data.attemptId);
+    const [challenge, att] = await Promise.all([tx.get(ref), tx.get(attemptRef)]);
+    const a = att.exists ? att.data() : null;
+    Session.gate(a, req.data.proof, Date.now(), ['code-required']);
+    Session.checkIdentity(a, id);
+    if (!challenge.exists || challenge.get('usedAtMs') || challenge.get('attemptId') !== req.data.attemptId || a.challengeId !== challengeId) throw refuse();
     tx.update(ref, { usedAtMs: Date.now() });
-    return true;
+    tx.update(attemptRef, { stage: 'completing' });
   });
-  if (used) await Session.advance(db(), req.data, id, ['code-required'], 'completing');
-  if (!used) throw new HttpsError('permission-denied', 'CODE_USED');
 
   const elationPatientId = String(gate.challenge.elationPatientId);
   const d = deps();
@@ -354,7 +350,7 @@ exports.socialConfirmVerification = onCall(VERIFY_OPTS, async (req) => {
       throw refuse();
     }
     trueUid = l.user.uid;
-    try { await recordLink(trueUid, id, elationPatientId); }
+    try { await recordLink(trueUid, id, elationPatientId, req); }
     catch (e) {
       await audit({ action: 'social_link_failed', path: 'B', provider: id.providerId, elationPatientId, reason: e.reason || 'LINK_FAILED' });
       throw refuse();
@@ -366,19 +362,19 @@ exports.socialConfirmVerification = onCall(VERIFY_OPTS, async (req) => {
       await audit({ action: 'social_claim_failed', path: 'B', provider: id.providerId, elationPatientId, reason: elig.reason });
       throw refuse();
     }
-    const r = await governedSocialClaim({ elationPatientId, id, challengeId });
+    const r = await governedSocialClaim({ elationPatientId, id, challengeId, req });
     if (!r.ok) {
       await audit({ action: 'social_claim_failed', path: 'B', provider: id.providerId, elationPatientId, reason: r.reason });
       throw refuse();
     }
     trueUid = r.uid;
-    await recordLink(trueUid, id, elationPatientId);
+    await recordLink(trueUid, id, elationPatientId, req);
     await runPostClaimSteps({ elationPatientId, uid: trueUid.toLowerCase(), actor: 'socialSignIn' });
     await audit({ action: 'social_claim', path: 'B', provider: id.providerId, elationPatientId, uid: trueUid.toLowerCase() });
   }
   await clearThrottle(`social_${id.providerId}_${id.providerUid}`).catch(() => {});
   await Session.advance(db(), req.data, id, ['completing'], 'done');
-  return { path: 'B', customToken: await mint(trueUid) };
+  return { path: 'B', customToken: await mint(trueUid, req) };
 });
 
 exports._test = { governedSocialClaim, deleteIfUnbound, linkDocId };
