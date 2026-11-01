@@ -85,6 +85,9 @@ async function access(req) {
 async function verified(req, stages) {
   const allowed = await access(req);
   const attempt = await Session.readAttempt(db(), req.data, allowed, stages);
+  // Ignore caller-supplied actor/scope; transaction transitions use live access.
+  req.data.actorUid = allowed.uid;
+  req.data.practiceId = allowed.practiceId;
   try {
     const id = await verifyProviderIdToken(String(req.data.providerId), String(req.data.idToken), { nonceHash: attempt.nonceHash });
     Session.checkIdentity(attempt, id);
@@ -307,6 +310,7 @@ exports.socialConfirmVerification = onCall(VERIFY_OPTS, async (req) => {
     const a = att.exists ? att.data() : null;
     Session.gate(a, req.data.proof, Date.now(), ['code-required']);
     Session.checkIdentity(a, id);
+    if (a.actorUid !== req.data.actorUid || a.practiceId !== req.data.practiceId) throw refuse();
     if (!challenge.exists || challenge.get('usedAtMs') || challenge.get('attemptId') !== req.data.attemptId || a.challengeId !== challengeId) throw refuse();
     tx.update(ref, { usedAtMs: Date.now() });
     tx.update(attemptRef, { stage: 'completing' });

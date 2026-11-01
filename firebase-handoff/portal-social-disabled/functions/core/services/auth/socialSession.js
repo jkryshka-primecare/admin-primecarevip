@@ -59,6 +59,7 @@ async function advance(db, data, id, from, to, extra = {}) {
   return db.runTransaction(async (tx) => {
     const ref = attemptRef(db, data), snap = await tx.get(ref), a = snap.exists ? snap.data() : null;
     gate(a, data.proof, Date.now(), from); checkIdentity(a, id);
+    if (!data.actorUid || a.actorUid !== data.actorUid || a.practiceId !== data.practiceId) fail('INVALID_ATTEMPT');
     tx.update(ref, { stage: to, identityKey: identityKey(id), ...extra });
   });
 }
