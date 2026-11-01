@@ -4,9 +4,10 @@
 - [x] Owner request recorded: keep My Health Hub, provider tokens -> reviewed callables -> custom token; review diff before staff. #588 deferred; future resource-only deployment and isolated Identity Platform audience verification only.
 - [x] Deployed socialSignIn.js at 081627b confirms linking/minting has no blocking-handler dependency; official Identity Platform docs exclude custom authentication from blocking functions.
 - [x] Deferral/registration hold posted to PR #588; no merge/deploy/registration/flag/account changes.
-- [ ] Prepare reviewable frontend source diff from Hub snapshot cb2ef5ec; application/testing in My Health Hub requires opening that project (cross-project writes unsupported).
+- [x] Review-only frontend source/diff prepared from Hub cb2ef5ec; 10 callable/reset logic tests pass. Includes hard-off controls, custom-token-only flow, reset failure propagation. NOT applied or live; project-native diff/PR and browser checks require My Health Hub chat (cross-project writes unsupported).
 - [ ] BLOCKED: actual provider popup integration needs public Google client ID and owner-authorized Apple popup return URL/config; no configuration guessed or changed.
 - [ ] BLOCKED: before canary, review direct social sign-in bypass risk with providers enabled and triggers None; UI/server flags do not constrain Identity Platform's direct provider endpoint.
+- [ ] BLOCKED: server-bound provider nonce/replay review and safe frontend availability gating are needed before activating this review-only patch; current provider validator does not validate an expected nonce.
 - Flag off, triggers None, canary hold remain unchanged.
 
 ## Oct 31 17:11 — Hub compatibility and controlled registration
