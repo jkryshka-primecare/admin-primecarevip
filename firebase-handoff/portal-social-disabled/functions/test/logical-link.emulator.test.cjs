@@ -69,9 +69,17 @@ test('expired claim lease never binds or creates a mapping',async()=>{
 });
 test('attempt completion is atomic and replays fail',async()=>{
   const access={ uid,practiceId:'default',google:true,apple:false };const a=await S.begin(db,'google.com',access);const bound={ ...id,nonce:a.nonce };
+  a.actorUid=uid; a.practiceId='default';
   const results=await Promise.allSettled([S.advance(db,a,bound,['new'],'done'),S.advance(db,a,bound,['new'],'done')]);
   assert.equal(results.filter(r=>r.status==='fulfilled').length,1);assert.equal(results.filter(r=>r.status==='rejected').length,1);
   await assert.rejects(S.advance(db,a,bound,['new'],'done'),/ATTEMPT_USED/);
+});
+test('attempt actor/scope substitution cannot complete',async()=>{
+  const a=await S.begin(db,'google.com',{uid,practiceId:'default',google:true});
+  const identity={...id,nonce:a.nonce};
+  await assert.rejects(S.advance(db,{...a,actorUid:'another',practiceId:'default'},identity,['new'],'done'),/INVALID_ATTEMPT/);
+  await assert.rejects(S.advance(db,{...a,actorUid:uid,practiceId:'other'},identity,['new'],'done'),/INVALID_ATTEMPT/);
+  assert.equal((await db.doc(`socialAttempts/${a.attemptId}`).get()).get('stage'),'new');
 });
 test('staff availability fails closed for anonymous/off/untargeted/disabled users',async()=>{
   const env={ SOCIAL_GOOGLE_CLIENT_IDS:'fixture' };

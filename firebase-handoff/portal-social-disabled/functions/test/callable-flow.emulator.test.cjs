@@ -72,3 +72,25 @@ test('B cross-attempt challenge substitution is refused',async()=>{
   assert.ok((await call('socialConfirmVerification',{ ...data,challengeId:started.result.challengeId,code:'246810' })).error);
   assert.equal((await db.collection('socialIdentityLinks').get()).size,0);
 });
+test('concurrent B completion returns one custom token and never deletes a real login',async()=>{
+  const a=await begin(), data=identity(a,{email_verified:false});
+  await call('socialLinkExisting',data);
+  const start=await call('socialStartVerification',{...data,firstName:'Fixture',lastName:'Staff',dob:'1980-01-02'});
+  const payload={...data,challengeId:start.result.challengeId,code:'246810'};
+  const results=await Promise.all([call('socialConfirmVerification',payload),call('socialConfirmVerification',payload)]);
+  assert.equal(results.filter(r=>r.result && r.result.customToken).length,1);
+  assert.equal((await auth.getUser(uid)).uid,uid);
+  assert.deepEqual((await auth.getUser(uid)).providerData.map(p=>p.providerId),['password']);
+});
+test('failed new claim remains on reconciliation hold with no Auth deletion',async()=>{
+  await db.doc('patients/NEW-STAFF').set({firstName:'New',lastName:'Staff',dob:'1980-01-02',practiceId:'default'});
+  const a=await begin(),data=identity(a,{email_verified:false});await call('socialLinkExisting',data);
+  const start=await call('socialStartVerification',{...data,firstName:'New',lastName:'Staff',dob:'1980-01-02'});
+  await db.collection('socialIdentityLinks').doc(require('../core/services/auth/socialSession').identityKey({providerId:'google.com',providerUid:'provider-subject'})).set({uid:'other',elationPatientId:'OTHER'});
+  assert.ok((await call('socialConfirmVerification',{...data,challengeId:start.result.challengeId,code:'246810'})).error);
+  const lock=await db.doc('socialClaimLocks/NEW-STAFF').get();
+  assert.equal(lock.get('state'),'reconciliation');
+  assert.ok(await auth.getUser(lock.get('pendingUid')));
+  assert.equal((await auth.getUser(uid)).uid,uid);
+  assert.equal((await db.doc('patients/NEW-STAFF').get()).get('authUid'),undefined);
+});
