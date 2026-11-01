@@ -17,12 +17,17 @@ Reference: https://cloud.google.com/identity-platform/docs/blocking-functions
 - Reset awaits the send, exposes operational failures, preserves neutral unknown-account handling, clears notices and restores the button; same-origin /login continuation. No resets were sent while preparing this diff.
 - Ten focused logic tests pass: 8 callable/state/serialization tests and 2 reset-error tests. These frontend tests do NOT replace real Firebase emulator UID-preservation tests or production verification.
 
+## Nov 1 logical-linking revision — draft, not a completed release
+The companion `portal-social-disabled` proposal removes native Auth provider links, adds server-bound nonce/proof attempts and a non-PHI staff availability callable. Updated frontend sources require this NEW callable protocol; they are not compatible with the deployed protocol. Native providers must be owner-confirmed disabled; no provider setting was changed here.
+
+The initial availability design requires a signed-in, explicitly targeted staff session. It does not provide an anonymous canary login screen. Review placement/bootstrap in My Health Hub before activation. Automatic failed-claim Auth deletion is disabled pending cross-writer coordination; failures retain reconciliation metadata, never silently delete real logins.
+
 ## Remaining integration gates — not a completed frontend release
 1. Apply diff in My Health Hub and review changed files before publishing; no cross-project write/PR is possible from this chat. Package/lock files and dependencies are unchanged.
-2. Supply the public Google web client ID already wired server-side; Google config here is deliberately blank.
+2. Set the explicitly public `VITE_SOCIAL_GOOGLE_CLIENT_ID` to the approved Google web client ID matching the server audience list. The named secret reference has not been copied/exposed; owning-project configuration is still required.
 3. Owner must confirm an authorized Apple JS popup return URL for the Services ID. Firebase's /__/auth/handler is for Firebase's OAuth flow; do not silently reuse it for a standalone Apple JS flow. appleRedirectUri is deliberately blank, Apple remains disabled. No Apple portal/domain settings changed. Apple SDK integration is unverified.
-4. Review provider state/nonce/replay requirements and server verification together before enabling; current deployed provider validator checks signature/issuer/audience/expiry, but does not validate an expected nonce. This proposal generates provider nonces but does not claim server-bound nonce coverage.
-5. No safe anonymous display-flag reader exists in the reviewed Hub sources. Hard-off UI is suitable for review, not dynamic staff targeting. Decide/review a non-PHI read-only availability endpoint or approved UI gating before activation; do not infer the Firestore master flag from client config.
+4. Draft nonce/proof and single-use attempt logic is locally tested with signed fixtures; hosted provider token validation and the full owning-repository suite remain required. The deployed validator is unchanged.
+5. Draft `socialAvailability` returns booleans only and fails closed for anonymous/off/untargeted staff; no PHI lookup. New collections must deny client writes in the owning project. Keep frontend hard-off and review authenticated staff bootstrap/placement.
 6. In the owning project run its checks, focused tests, and keyboard/mobile browser checks; real A/B/C flows, fresh password login, real custom-token login and true-case UID/password provider read-back remain unverified here. No screenshot or live provider flow has been verified.
 7. Keep master flag off, triggers None, canary on hold. Future blocking hardening requires resource-only deployment that cannot mutate registrations and isolated Identity Platform project/tenant audience testing. No production registration window.
 

@@ -36,7 +36,7 @@ test('practice transfer after wrapper precheck prevents mapping commit',async()=
 });
 test('suspension after wrapper precheck prevents mapping commit',async()=>{
   const logic=require('../core/services/auth/socialSignIn');
-  await db.doc(`patients/${pid}`).update({status:'suspended'});
+  await db.doc(`patients/${pid}`).update({portalAccess:{status:'suspended'}});
   await assert.rejects(S.link(db,uid,id,pid,{eligibility:logic.eligibility}),/MEMBER_INELIGIBLE/);
   assert.equal((await db.collection('socialIdentityLinks').get()).size,0);
 });

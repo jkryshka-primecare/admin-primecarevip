@@ -354,4 +354,4 @@ exports.socialConfirmVerification = onCall(VERIFY_OPTS, async (req) => {
   return { path: 'B', customToken: await mint(trueUid, req) };
 });
 
-exports._test = { governedSocialClaim, deleteIfUnbound, linkDocId };
+exports._test = { governedSocialClaim, linkDocId };

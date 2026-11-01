@@ -139,10 +139,6 @@ async function classifySocialIdentity(identity, deps, now = new Date()) {
   return { path: 'A', trueUid: user.uid, elationPatientId: b.elationPatientId, practiceId: practiceOf(b.roster) };
 }
 
-/**
- * Attach a social provider to an EXISTING Auth user. Never creates a user.
- * deps: { getUser(uid), updateUser(uid, props) }
- */
 // ---- path B candidate (name + DOB; no email involved) ---------------------
 // deps.findRosterByDob(dob) -> array of { id, data }
 async function findPathBCandidate(deps, { firstName, lastName, dob }) {
