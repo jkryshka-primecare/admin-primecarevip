@@ -57,7 +57,7 @@ test('path C conflicting binding never creates a mapping or custom token',async(
   const a=await begin(), r=await call('socialLinkExisting',identity(a));assert.equal(r.result.path,'C');assert.equal(r.result.customToken,undefined);
   assert.equal((await db.collection('socialIdentityLinks').get()).size,0);
 });
-test('Apple relay B uses live chart verification, bound attempt and preserved UID',async()=>{
+test('relay/unverified-email B uses live chart verification, bound attempt and preserved UID',async()=>{
   const a=await begin(), data=identity(a,{ email:'relay@privaterelay.appleid.com',email_verified:false });
   assert.equal((await call('socialLinkExisting',data)).result.path,'B');
   const started=await call('socialStartVerification',{ ...data,firstName:'Fixture',lastName:'Staff',dob:'1980-01-02' });assert.ok(started.result.challengeId);

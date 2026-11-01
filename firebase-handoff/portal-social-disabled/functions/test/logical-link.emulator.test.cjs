@@ -21,6 +21,25 @@ test('logical link preserves true-case UID/password, adds no native provider',as
 test('same identity/same UID is idempotent',async()=>{
   await S.link(db,uid,id,pid);assert.equal((await S.link(db,uid,id,pid)).linked,false);
 });
+test('expired worker cleanup cannot modify successor lease',async()=>{
+  const ref=db.doc('socialClaimLocks/LEASE');const next={state:'pending',pendingUid:'successor',generation:'B',leaseUntilMs:Date.now()+120000};
+  await ref.set(next);
+  assert.equal(await S.settleLease(db,ref,'old','A',{state:'reconciliation',pendingUid:null}),false);
+  assert.deepEqual((await ref.get()).data(),next);
+});
+test('practice transfer after wrapper precheck prevents mapping commit',async()=>{
+  const access={uid,practiceId:'default'};
+  await db.doc('config/socialSignIn').set({enabled:true});await db.doc('config/socialSignIn/practices/default').set({enabled:true});await db.doc(`socialStaffTargets/${uid}`).set({enabled:true,practiceId:'default'});
+  await db.doc(`patients/${pid}`).update({practiceId:'other'});
+  await assert.rejects(S.link(db,uid,id,pid,{access}),/PRACTICE_SCOPE_CHANGED/);
+  assert.equal((await db.collection('socialIdentityLinks').get()).size,0);
+});
+test('suspension after wrapper precheck prevents mapping commit',async()=>{
+  const logic=require('../core/services/auth/socialSignIn');
+  await db.doc(`patients/${pid}`).update({status:'suspended'});
+  await assert.rejects(S.link(db,uid,id,pid,{eligibility:logic.eligibility}),/MEMBER_INELIGIBLE/);
+  assert.equal((await db.collection('socialIdentityLinks').get()).size,0);
+});
 test('concurrent identity ownership allows only one UID',async()=>{
   const other='OtherTrueCase';await auth.createUser({ uid:other });await db.doc('patients/OTHER').set({ authUid:other,firebaseUid:other.toLowerCase() });
   const r=await Promise.allSettled([S.link(db,uid,id,pid),S.link(db,other,id,'OTHER')]);

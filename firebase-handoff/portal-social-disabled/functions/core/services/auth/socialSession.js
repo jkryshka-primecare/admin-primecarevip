@@ -110,4 +110,11 @@ async function mapped(db, auth, S, deps, id) {
     return { path: 'A', trueUid: user.uid, elationPatientId: b.elationPatientId, practiceId: S.practiceOf(b.roster) };
   } catch { return { path: 'C' }; }
 }
-module.exports = { TTL, digest, gate, checkIdentity, identityKey, staffAccess, begin, readAttempt, advance, link, mapped };
+async function settleLease(db, ref, uid, generation, fields) {
+  return db.runTransaction(async tx => {
+    const snap = await tx.get(ref);
+    if (!snap.exists || snap.get('pendingUid') !== uid || snap.get('generation') !== generation) return false;
+    tx.set(ref, fields, { merge:true }); return true;
+  });
+}
+module.exports = { TTL, digest, gate, checkIdentity, identityKey, staffAccess, begin, readAttempt, advance, link, mapped, settleLease };
