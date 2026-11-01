@@ -1,5 +1,10 @@
 # Roadmap
 
+## Nov 1 19:54 — genuine Google session setup
+- [x] Owner clarified scope: real Google audience/nonce/signature; Apple deferred to synthetic/unit; Elation/Twilio synthetic/stubbed only, no production credentials.
+- [ ] Obtain owner-operated Google test account and approved test web OAuth client; capture credentials through an interactive test-only browser session, never chat.
+- [ ] Prepare isolated, clearly labeled Elation/Twilio adapters before full B; keep production unchanged and test flags off outside controlled runs.
+
 ## Nov 1 19:48 — runtime permission rerun
 - [x] 18/18 hosted checks PASS with new runtime Auth/Firestore permissions; named synthetic staff availability and server-bound attempt creation now succeed. All earlier test permission blockers cleared.
 - [ ] Full hosted A/B/C blocked on genuine nonce-bound provider sessions and approved synthetic-only Elation/Twilio integration, not permissions. Actual A mapping/mint, B classification/verification/claim/hydration, C classification and valid-session replay/concurrent completion remain unexecuted; no fixture substitution.
