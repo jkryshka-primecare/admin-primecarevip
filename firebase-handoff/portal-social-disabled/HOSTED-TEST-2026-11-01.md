@@ -2,6 +2,18 @@
 
 Revision: PR #589, ab9341d08874b5e76c395985318603cb4d153458. Date: 2026-11-01 UTC.
 
+## Resumed run after provisioning (18:54 UTC request)
+- Successfully deployed exactly five reviewed callables to pcvip-social-test, all ACTIVE in us-central1: socialAvailability, socialBeginAttempt, socialLinkExisting, socialStartVerification, socialConfirmVerification. No blocking exports deployed. The staging index only selects these exports; implementation modules unchanged. The generated Bun lockfile was removed from staging to preserve the reviewed npm-based Cloud Build path.
+- Google/Apple configurations remain absent; both blocking triggers remain None. Server environment metadata confirms a populated Google audience and Apple audience com.primecarevip.portal.web on all five functions.
+- Direct Google and Apple endpoint probes again returned OPERATION_NOT_ALLOWED with intentionally invalid synthetic tokens. This is disabled-provider refusal evidence, not genuine external token validation.
+- Fresh password authentication and a test-project-signed custom token both succeed; verifying the returned Firebase ID token confirms exact UID SyntheticStaffTrueCase02. Password provider remains intact. The custom token was independently signed with the test runtime account; it was NOT returned by socialLinkExisting and does not establish path A.
+- Hosted callable requests cannot reach application logic: browser-style requests receive HTTP 401, and runtime-signed server authorization receives HTTP 403. Adding roles/run.invoker failed because run.services.setIamPolicy returned HTTP 403 for the automation account. Deployment succeeded but callable invocation permission was not installed.
+- Owner action: in pcvip-social-test only, grant roles/run.invoker to allUsers on the five callable Cloud Run services (normal Firebase browser-callable transport; in-function authentication/staff gates still apply), or authorize automation to set that narrowly scoped service policy. No production policy changes.
+- Full hosted A/B/C also still requires genuine nonce-bound Google/Apple sessions and an approved synthetic-only Elation/Twilio integration. Existing source hardcodes the production Elation host; inert sentinel secrets are not usable test credentials. No provider/JWKS substitutions or production integrations were introduced.
+- Only synthetic test records used; test master and synthetic practice flags restored off after probes. Production not accessed or changed. Final test provider/blocking configuration unchanged.
+- The Firebase CLI reported an artifact-cleanup-policy warning after five successful deployments; no --force used. Owner plans to delete the disposable project.
+- **Gate remains NOT PASSED.** A/B/C application outcomes, replay/concurrent completion and full second-factor/hydration remain unverified on hosted callables. Earlier permission blockers for source build/secret binding/signing are cleared; callable transport permission and genuine-session/integration prerequisites remain.
+
 ## Observed
 - Automation Editor access, billing, Email/Password and default Firestore confirmed. Google/Apple configurations absent; blocking triggers empty before/after.
 - Direct accounts:signInWithIdp probes for google.com and apple.com each returned HTTP 400 `OPERATION_NOT_ALLOWED : The identity provider configuration is not found.` Inputs used intentionally invalid synthetic tokens. This proves disabled-provider endpoint refusal, NOT successful genuine external token validation.

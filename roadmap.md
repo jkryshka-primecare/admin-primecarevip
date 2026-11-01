@@ -1,9 +1,10 @@
 # Roadmap
 
 ## Nov 1 18:54 — resume provisioned isolated test
-- [ ] Deploy exactly the five #589 social callables to pcvip-social-test; no production changes or blocking exports.
-- [ ] Recheck disabled native providers/None triggers and run synthetic-only hosted A/B/C; distinguish genuine provider/integration evidence from refusal probes.
-- [ ] Report verified results and any remaining hosted prerequisites; keep production canary held.
+- [x] Five #589 callables deployed and verified ACTIVE in pcvip-social-test/us-central1; audiences present, no blocking exports or production changes.
+- [x] Native providers disabled, triggers None; direct refusal probes OPERATION_NOT_ALLOWED. Fresh password and independently signed test-project custom token preserve true-case synthetic UID; NOT path-A evidence.
+- [ ] Hosted A/B/C BLOCKED: endpoint invoker policy missing (401/403); run.services.setIamPolicy denied. Genuine nonce-bound provider sessions and approved synthetic-only Elation/Twilio integration remain unavailable. No fixture substitution.
+- [x] Sanitized report updated; test master/practice flags restored off; production canary held.
 
 ## Nov 1 14:28 — pcvip-social-test hosted verification
 - [x] Disposable Editor access/billing/password/Firestore verified; native providers absent and blockers None. Both direct-provider probes returned OPERATION_NOT_ALLOWED with intentionally invalid test tokens.
