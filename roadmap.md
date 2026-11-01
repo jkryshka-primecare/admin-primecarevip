@@ -1,8 +1,10 @@
 # Roadmap
 
 ## Nov 1 12:14 — disabled-provider bypass and remaining canary gates
-- [ ] Verify native Admin link versus logical mapping with Firebase Google/Apple providers disabled; no production provider/config/account changes.
-- [ ] Close server-bound nonce/replay, Google client configuration, Apple Services-ID return authorization, us-central1 confirmation and non-PHI staff availability.
+- [x] Documented distinction: custom auth supports logical mapping with native providers disabled; current build performs native providerToLink whose disabled-provider production acceptance is unverified. Review in firebase-handoff/portal-social-ui/PROVIDERS-DISABLED-REVIEW.md. No provider/config/account changes.
+- [x] Live us-central1 check: all three social callables return SOCIAL_SIGNIN_DISABLED; reviewed frontend tests 10/10 pass.
+- [ ] Logical-only mapping, server-bound nonce/replay and non-PHI server-targeted staff availability require a joint backend/frontend draft change and isolated hosted tests; current deployed flow is not certified providers-disabled.
+- [ ] Google reference is present server-side but Hub public configuration remains unset; Apple standalone Services-ID return URL awaits owner authorization. Auth provider/account-link config reads returned 403, not verified.
 - [ ] Apply approved frontend in My Health Hub and verify real A/B/C, fresh password/custom-token and true-case UID read-back — blocked here by read-only cross-project access and hard-off production flow.
 - Flag off, both blocking triggers None, canary held. No provider-enable or re-registration authorization.
 
