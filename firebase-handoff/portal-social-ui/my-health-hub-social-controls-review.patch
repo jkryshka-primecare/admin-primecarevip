@@ -101,8 +101,7 @@
 +    {error ? <p role="alert" className="text-sm text-destructive">{error}</p> : null}
 +    {step !== "provider" ? <Button type="button" variant="ghost" disabled={busy} onClick={restart}>Back</Button> : null}
 +  </section>;
-+}
---- /dev/null
++}--- /dev/null
 +++ b/src/lib/reset-flow.test.ts
 @@ -0,0 +1,10 @@
 +import { expect, it, vi } from "vitest";
@@ -114,8 +113,7 @@
 +});
 +it("unknown account stays neutral without leaking account existence", async () => {
 +  await expect(requestReset(vi.fn().mockRejectedValue({ code: "auth/user-not-found" }), "x@example.invalid")).resolves.toBeUndefined();
-+});
---- /dev/null
++});--- /dev/null
 +++ b/src/lib/reset-flow.ts
 @@ -0,0 +1,9 @@
 +/** Report operational send failures truthfully without revealing account existence. */
@@ -126,8 +124,7 @@
 +    if (code === "auth/user-not-found") return;
 +    throw error;
 +  }
-+}
---- /dev/null
++}--- /dev/null
 +++ b/src/lib/social-callable.ts
 @@ -0,0 +1,12 @@
 +import { getFirebaseApp } from "@/lib/firebase";
@@ -141,21 +138,19 @@
 +  const { getFunctions, httpsCallable } = await import("firebase/functions");
 +  const response = await httpsCallable(getFunctions(app, "us-central1"), name, { timeout: 180000 })(data);
 +  return response.data;
-+};
---- /dev/null
++};--- /dev/null
 +++ b/src/lib/social-config.ts
 @@ -0,0 +1,10 @@
 +/** Review-only defaults. Enabling requires separate owner approval, never a URL parameter. */
 +export const socialConfig = {
 +  displayEnabled: false,
 +  // Explicitly PUBLIC web configuration in the owning Hub project; never a server secret import.
-+  googleClientId: import.meta.env.VITE_SOCIAL_GOOGLE_CLIENT_ID || "",
++  googleClientId: import.meta.env.VITE_SOCIAL_GOOGLE_CLIENT_ID || "44285595520-6r27m39dufu0ppt211h9k10qiqq7hd2a.apps.googleusercontent.com",
 +  appleClientId: "com.primecarevip.portal.web",
 +  // Owner must authorize an Apple web popup return URL for this Services ID.
 +  // Do not reuse Firebase's handler: this flow does not use Firebase OAuth.
 +  appleRedirectUri: import.meta.env.VITE_SOCIAL_APPLE_RETURN_URL || "",
-+} as const;
---- /dev/null
++} as const;--- /dev/null
 +++ b/src/lib/social-flow.test.ts
 @@ -0,0 +1,56 @@
 +import { describe, expect, it, vi } from "vitest";
@@ -213,8 +208,7 @@
 +    await flow.start(identity); await flow.verify({ firstName: "A", lastName: "B", dob: "1980-01-02" });
 +    await expect(flow.confirm("000000")).rejects.toThrow("CODE_MISMATCH"); expect(signIn).not.toHaveBeenCalled(); expect(call).toHaveBeenCalledTimes(3);
 +  });
-+});
---- /dev/null
++});--- /dev/null
 +++ b/src/lib/social-flow.ts
 @@ -0,0 +1,81 @@
 +/** Reviewed callable protocol only. Provider tokens never authenticate with Firebase. */
@@ -297,8 +291,7 @@
 +      return this.finish(result);
 +    });
 +  }
-+}
---- /dev/null
++}--- /dev/null
 +++ b/src/lib/social-providers.ts
 @@ -0,0 +1,66 @@
 +import type { ProviderIdentity, ProviderAttempt } from "./social-flow";

@@ -31,5 +31,12 @@ The initial availability design requires a signed-in, explicitly targeted staff 
 6. In the owning project run its checks, focused tests, and keyboard/mobile browser checks; real A/B/C flows, fresh password login, real custom-token login and true-case UID/password provider read-back remain unverified here. No screenshot or live provider flow has been verified.
 7. Keep master flag off, triggers None, canary on hold. Future blocking hardening requires resource-only deployment that cannot mutate registrations and isolated Identity Platform project/tenant audience testing. No production registration window.
 
+## Nov 1 13:07 approved integration follow-up
+Portal implementation is now draft PR #589 with contract v1.82; not merged/deployed. Exact staged PR tests: 24 emulator and 13 nonce/no-mutation tests pass locally; 10 frontend logic tests pass. Existing native-link gate still needs migration; hosted gate is blocked on the owner-selected separate test project/access. GitHub checks are not certified green.
+
+Public Google web client setting now has the approved main-config audience as its default. This is public OAuth identification, not a credential copied from the named secret. Runtime audience reads returned 403; deployed values remain unverified. Refreshed patch dry-run applies to the cb2ef5ec baseline. It has NOT been applied in My Health Hub and is not a project-native diff.
+
+Initial staff use must be authenticated account linking after a fresh password sign-in; availability does not support signed-out bootstrap. Move/review controls in the authenticated Hub account view before activation. Targets use exact true-case Auth UIDs; flags/targets remain off/unwritten. See PR rollout notes for setup and five-callable-only deployment hold.
+
 ## Review commands (owning project)
 Apply my-health-hub-social-controls-review.patch with path strip 1. Run bunx vitest run src/lib/social-flow.test.ts src/lib/reset-flow.test.ts. Keep social-config.ts displayEnabled false. Request a project-native diff/PR from the My Health Hub chat before any publish/staff test.
