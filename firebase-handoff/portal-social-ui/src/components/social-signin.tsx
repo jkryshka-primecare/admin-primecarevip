@@ -22,6 +22,18 @@ export function SocialSignIn() {
   const [lastName, setLastName] = useState("");
   const [dob, setDob] = useState("");
   const [code, setCode] = useState("");
+  const [available, setAvailable] = useState({ google: false, apple: false });
+  useEffect(() => {
+    if (!socialConfig.displayEnabled) return;
+    let active = true;
+    void callSocial("socialAvailability", {}).then(value => {
+      if (active && value && typeof value === "object") {
+        const a = value as Record<string, unknown>;
+        setAvailable({ google: a.google === true, apple: a.apple === true });
+      }
+    }).catch(() => { if (active) setAvailable({ google: false, apple: false }); });
+    return () => { active = false; };
+  }, []);
 
   const run = useCallback(async (action: () => Promise<void>) => {
     if (lock.current) return;
@@ -39,17 +51,17 @@ export function SocialSignIn() {
   }, [flow, run]);
 
   useEffect(() => {
-    if (!socialConfig.displayEnabled || step !== "provider" || !google.current) return;
+    if (!socialConfig.displayEnabled || !available.google || step !== "provider" || !google.current) return;
     let cancelled = false;
     let cleanup: (() => void) | undefined;
     void mountGoogle(google.current, start).then((dispose) => {
       if (cancelled) dispose(); else cleanup = dispose;
     }).catch(() => { if (!cancelled) setError("Google sign-in isn't available right now."); });
     return () => { cancelled = true; cleanup?.(); };
-  }, [step, start]);
+  }, [step, start, available.google]);
   useEffect(() => () => flow.clear(), [flow]);
 
-  if (!socialConfig.displayEnabled) return null;
+  if (!socialConfig.displayEnabled || (!available.google && !available.apple)) return null;
   const submit = (event: FormEvent) => {
     event.preventDefault();
     void run(async () => {
@@ -64,11 +76,11 @@ export function SocialSignIn() {
   };
   return <section className="mt-6 space-y-4" aria-label="Social sign-in" aria-busy={busy}>
     {step === "provider" ? <>
-      <div className={busy ? "pointer-events-none opacity-50" : ""} inert={busy ? true : undefined}><div ref={google} className="min-h-11 w-full" /></div>
-      <Button type="button" variant="outline" className="w-full" disabled={busy || !socialConfig.appleRedirectUri}
+      {available.google ? <div className={busy ? "pointer-events-none opacity-50" : ""} inert={busy ? true : undefined}><div ref={google} className="min-h-11 w-full" /></div> : null}
+      {available.apple ? <Button type="button" variant="outline" className="w-full" disabled={busy || !socialConfig.appleRedirectUri}
         onClick={() => void run(async () => { const identity = await acquireApple(); const outcome = await flow.start(identity); if (outcome === "identity-required") setStep("identity"); if (outcome === "contact-practice") setStep("contact"); })}>
         <Apple className="mr-2 h-4 w-4" />Continue with Apple
-      </Button>
+      </Button> : null}
     </> : step === "contact" ? <p role="status" className="text-sm text-muted-foreground">Please contact the practice to complete sign-in.</p> :
       <form onSubmit={submit} className="space-y-4">
         {step === "identity" ? <>

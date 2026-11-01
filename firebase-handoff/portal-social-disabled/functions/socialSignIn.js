@@ -17,8 +17,8 @@
 //
 // Every success returns a custom token minted from the TRUE-CASE uid. No path
 // creates an Auth user for an already-bound member. No patient lookup by email.
-// Every successful link is recorded in socialLinks/{providerId}|{providerUid};
-// the beforeSocialSignIn blocking function only admits linked identities found there.
+// REVIEW ONLY: logical socialIdentityLinks + custom tokens, native providers disabled.
+// All calls are staff-targeted; blockers remain unregistered and unchanged.
 
 const admin = require('firebase-admin');
 const { onCall, HttpsError } = require('firebase-functions/v2/https');
@@ -50,7 +50,6 @@ function deps() {
       catch (e) { if (e.code === 'auth/user-not-found') return null; throw e; }
     },
     getUser: (uid) => admin.auth().getUser(uid),
-    updateUser: (uid, props) => admin.auth().updateUser(uid, props),
     findRosterByUid: async (lcUid) => {
       const q = await db().collection('patients').where('firebaseUid', '==', lcUid).limit(3).get();
       return q.docs.map((d) => ({ id: d.id, data: d.data() }));
@@ -98,6 +97,10 @@ async function recordLink(trueUid, id, pid) {
   if (!S.eligibility({ roster, authUser: user }).ok) throw refuse();
   return Session.link(db(), trueUid, id, pid);
 }
+async function requireTargetPractice(req, practiceId) {
+  const a = await access(req);
+  if (a.practiceId !== String(practiceId)) throw refuse();
+}
 exports.socialAvailability = onCall({ region: 'us-central1' }, async req => {
   const a = await Session.staffAccess(db(), admin.auth(), req);
   return { google: Boolean(a && a.google), apple: Boolean(a && a.apple) };
@@ -107,7 +110,12 @@ exports.socialBeginAttempt = onCall({ region: 'us-central1' }, async req => {
   return Session.begin(db(), String(req.data && req.data.providerId), a);
 });
 
-const mint = (trueUid) => admin.auth().createCustomToken(trueUid);
+const mint = async (trueUid) => {
+  const user = await admin.auth().getUser(trueUid);
+  const b = await S.resolveBinding(deps(), trueUid);
+  if (!b.ok || b.roster.authUid !== trueUid || !S.eligibility({ roster: b.roster, authUser: user }).ok) throw refuse();
+  return admin.auth().createCustomToken(trueUid);
+};
 const refuse = () => new HttpsError('failed-precondition', 'CONTACT_PRACTICE');
 
 // Resolve the TRUE-CASE login of a claimed roster doc. authUid only — no email
@@ -135,6 +143,7 @@ exports.socialLinkExisting = onCall(OPTS, async (req) => {
     return { path: c.path, reason: c.path === 'B' ? 'VERIFY_IDENTITY' : 'CONTACT_PRACTICE' };
   }
   await requirePracticeFlag({ practiceId: c.practiceId });
+  await requireTargetPractice(req, c.practiceId);
   try {
     const r = await recordLink(c.trueUid, id, c.elationPatientId);
     await audit({ action: 'social_link', path: 'A', provider: id.providerId, elationPatientId: c.elationPatientId, uid: c.trueUid.toLowerCase(), newlyLinked: r.linked });
@@ -177,6 +186,7 @@ exports.socialStartVerification = onCall(VERIFY_OPTS, async (req) => {
     return refuse();
   };
   await requirePracticeFlag(cand.roster);
+  await requireTargetPractice(req, S.practiceOf(cand.roster));
 
   const claimed = Boolean(cand.roster.firebaseUid);
   let login = null;
@@ -290,7 +300,9 @@ exports.socialConfirmVerification = onCall(VERIFY_OPTS, async (req) => {
   const id = await verified(req, ['code-required']);
   const challengeId = String((req.data && req.data.challengeId) || '');
   const code = String((req.data && req.data.code) || '');
-  if (!challengeId) throw new HttpsError('invalid-argument', 'NO_CHALLENGE');
+  if (!/^[A-Za-z0-9_-]{1,128}$/.test(challengeId) || !/^\d{4,10}$/.test(code)) throw new HttpsError('invalid-argument', 'INVALID_CHALLENGE');
+  const attempt = await Session.readAttempt(db(), req.data, await access(req), ['code-required']);
+  if (attempt.challengeId !== challengeId) throw new HttpsError('permission-denied', 'CHALLENGE_MISMATCH');
   const ref = db().collection('socialChallenges').doc(challengeId);
 
   // Reserve one check (app-level cap) before asking Twilio.
@@ -330,6 +342,8 @@ exports.socialConfirmVerification = onCall(VERIFY_OPTS, async (req) => {
   const elationPatientId = String(gate.challenge.elationPatientId);
   const d = deps();
   const roster = (await db().collection('patients').doc(elationPatientId).get()).data() || {};
+  await requirePracticeFlag(roster);
+  await requireTargetPractice(req, S.practiceOf(roster));
 
   let trueUid;
   if (roster.firebaseUid) {

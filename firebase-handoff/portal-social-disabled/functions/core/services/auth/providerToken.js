@@ -21,7 +21,7 @@ async function verifyProviderIdToken(providerId, token, { nonceHash, fetchImpl =
   }
   const k = keys.keys.find(k => k.kid === h.kid); if (!k || k.kty !== 'RSA') fail('BAD_TOKEN');
   if (!crypto.verify('RSA-SHA256', Buffer.from(parts[0]+'.'+parts[1]), crypto.createPublicKey({ key: k, format: 'jwk' }), Buffer.from(parts[2], 'base64url'))) fail('BAD_TOKEN');
-  if (!c.issuers.includes(p.iss) || !(Array.isArray(p.aud) ? p.aud : [p.aud]).includes(audiences[0]) || (p.azp && !audiences.includes(p.azp))) fail('BAD_TOKEN');
+  if (!c.issuers.includes(p.iss) || !(Array.isArray(p.aud) ? p.aud : [p.aud]).some(a => audiences.includes(a)) || (p.azp && !audiences.includes(p.azp))) fail('BAD_TOKEN');
   if (typeof p.exp !== 'number' || p.exp <= nowSec || typeof p.iat !== 'number' || p.iat > nowSec+60 || p.iat < nowSec-600) fail('TOKEN_EXPIRED');
   if (typeof p.sub !== 'string' || !p.sub || typeof p.nonce !== 'string' || crypto.createHash('sha256').update(p.nonce).digest('hex') !== nonceHash) fail('NONCE_MISMATCH');
   return { providerId, providerUid: p.sub, nonce: p.nonce, email: typeof p.email === 'string' ? p.email.toLowerCase() : null, emailVerified: p.email_verified === true || p.email_verified === 'true' };

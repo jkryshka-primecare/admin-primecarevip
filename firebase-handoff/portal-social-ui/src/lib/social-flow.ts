@@ -1,5 +1,6 @@
 /** Reviewed callable protocol only. Provider tokens never authenticate with Firebase. */
-export type ProviderIdentity = { providerId: "google.com" | "apple.com"; idToken: string };
+export type ProviderAttempt = { attemptId: string; proof: string; nonce: string };
+export type ProviderIdentity = { providerId: "google.com" | "apple.com"; idToken: string; attemptId: string; proof: string };
 export type Challenge = { challengeId: string; channel: "sms" | "email"; destination: string };
 export type LinkOutcome = { path: "A" | "B" | "C"; customToken?: string };
 export type Callable = (name: string, data: Record<string, unknown>) => Promise<unknown>;
