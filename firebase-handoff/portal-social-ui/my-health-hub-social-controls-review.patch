@@ -367,3 +367,101 @@
 +  if (response.authorization.state !== state || !response.authorization.id_token) throw new Error("INVALID_PROVIDER_RESPONSE");
 +  return { providerId: "apple.com", idToken: response.authorization.id_token, attemptId: a.attemptId, proof: a.proof };
 +}
+--- a/src/routes/login.tsx
++++ b/src/routes/login.tsx
+@@ -6,6 +6,8 @@
+ import { Input } from "@/components/ui/input";
+ import { Label } from "@/components/ui/label";
+ import { usePortalAuth } from "@/hooks/use-portal-auth";
++import { SocialSignIn } from "@/components/social-signin";
++import { requestReset } from "@/lib/reset-flow";
+ 
+ 
+ export const Route = createFileRoute("/login")({
+@@ -48,6 +50,7 @@
+   const [email, setEmail] = useState(prefillEmail ?? "");
+   const [password, setPassword] = useState("");
+   const [busy, setBusy] = useState(false);
++  const [resetBusy, setResetBusy] = useState(false);
+   const [showPassword, setShowPassword] = useState(false);
+ 
+   const [notice, setNotice] = useState<string | null>(
+@@ -72,9 +75,10 @@
+     try {
+       await signIn(email.trim(), password);
+       await navigate({ to: "/" });
+-    } catch {
+-      // Identical copy for wrong password / unknown email — no account enumeration.
+-      setError("That email and password combination didn't work.");
++    } catch (failure) {
++      const code = failure && typeof failure === "object" && "code" in failure ? String(failure.code) : "";
++      const credentials = ["auth/invalid-credential", "auth/wrong-password", "auth/user-not-found", "auth/invalid-email", "auth/user-disabled"].includes(code);
++      setError(credentials ? "That email and password combination didn't work." : "Sign-in is unavailable right now. Please try again.");
+     } finally {
+       setBusy(false);
+     }
+@@ -151,38 +155,41 @@
+             ) : null}
+ 
+             <div className="flex justify-end">
+-              <button
++              <Button
+                 type="button"
+-                className="text-sm font-medium text-primary underline-offset-4 hover:underline"
++                variant="link"
++                disabled={resetBusy || busy || !configured}
+                 onClick={async () => {
+-                  setError(null);
++                  if (resetBusy || busy) return;
++                  setError(null); setNotice(null);
+                   if (!email.trim()) {
+                     setNotice("Enter your email above and we'll send reset instructions.");
+                     return;
+                   }
++                  setResetBusy(true);
+                   try {
+-                    await sendReset(email.trim());
++                    await requestReset(sendReset, email);
++                    setNotice("If that email is on file, we've sent password reset instructions.");
+                   } catch {
+-                    /* same message either way */
+-                  }
+-                  setNotice(
+-                    "If that email is on file, we've sent password reset instructions.",
+-                  );
++                    setError("We couldn't send reset instructions. Please try again or contact the practice.");
++                  } finally { setResetBusy(false); }
+                 }}
+               >
+-                Forgot password?
+-              </button>
++                {resetBusy ? "Sending…" : "Forgot password?"}
++              </Button>
+             </div>
+ 
+             <Button
+               type="submit"
+               className="w-full rounded-full py-6 text-base font-semibold shadow-soft"
+-              disabled={busy || !configured}
++              disabled={busy || resetBusy || !configured}
+             >
+               {busy ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
+               Sign in
+             </Button>
+           </form>
++
++          <SocialSignIn />
+ 
+           <p className="mt-8 text-center text-sm text-muted-foreground">
+             Having trouble logging in?{" "}
+--- a/src/hooks/use-portal-auth.tsx
++++ b/src/hooks/use-portal-auth.tsx
+@@ -95,7 +95,7 @@
+           throw new Error("Portal sign-in is not available right now.");
+         }
+         const { sendPasswordResetEmail } = await import("firebase/auth");
+-        await sendPasswordResetEmail(auth, email);
++        await sendPasswordResetEmail(auth, email, { url: `${window.location.origin}/login` });
+       },
+       signOut: async () => {
+         if (isDemoMode) {
