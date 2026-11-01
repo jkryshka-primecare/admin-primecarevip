@@ -1,5 +1,11 @@
 # Roadmap
 
+## Nov 1 12:14 — disabled-provider bypass and remaining canary gates
+- [ ] Verify native Admin link versus logical mapping with Firebase Google/Apple providers disabled; no production provider/config/account changes.
+- [ ] Close server-bound nonce/replay, Google client configuration, Apple Services-ID return authorization, us-central1 confirmation and non-PHI staff availability.
+- [ ] Apply approved frontend in My Health Hub and verify real A/B/C, fresh password/custom-token and true-case UID read-back — blocked here by read-only cross-project access and hard-off production flow.
+- Flag off, both blocking triggers None, canary held. No provider-enable or re-registration authorization.
+
 ## Nov 1 — callable-only My Health Hub frontend and deferred blocking hardening
 - [x] Owner request recorded: keep My Health Hub, provider tokens -> reviewed callables -> custom token; review diff before staff. #588 deferred; future resource-only deployment and isolated Identity Platform audience verification only.
 - [x] Deployed socialSignIn.js at 081627b confirms linking/minting has no blocking-handler dependency; official Identity Platform docs exclude custom authentication from blocking functions.
