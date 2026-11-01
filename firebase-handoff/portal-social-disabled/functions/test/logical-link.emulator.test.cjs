@@ -68,6 +68,6 @@ test('fresh password and custom-token sign-ins read back same true-case UID',asy
   await S.link(db,uid,id,pid);
   const post=async(name,data)=>{ const r=await fetch(`http://${process.env.FIREBASE_AUTH_EMULATOR_HOST}/identitytoolkit.googleapis.com/v1/accounts:${name}?key=fixture`,{ method:'POST',headers:{ 'Content-Type':'application/json' },body:JSON.stringify(data) });assert.equal(r.status,200);return r.json(); };
   const p=await post('signInWithPassword',{ email:'fixture@example.test',password:'FixturePass2468',returnSecureToken:true });assert.equal(p.localId,uid);
-  const c=await post('signInWithCustomToken',{ token:await auth.createCustomToken(uid),returnSecureToken:true });assert.equal(c.localId,uid);
+  const c=await post('signInWithCustomToken',{ token:await auth.createCustomToken(uid),returnSecureToken:true });assert.equal((await auth.verifyIdToken(c.idToken)).uid,uid);
   assert.deepEqual((await auth.getUser(uid)).providerData.map(p=>p.providerId),['password']);
 });
