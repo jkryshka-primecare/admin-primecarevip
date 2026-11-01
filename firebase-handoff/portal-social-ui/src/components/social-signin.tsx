@@ -23,6 +23,7 @@ export function SocialSignIn() {
   const [dob, setDob] = useState("");
   const [code, setCode] = useState("");
   const [available, setAvailable] = useState({ google: false, apple: false });
+  const [attemptGeneration, setAttemptGeneration] = useState(0);
   useEffect(() => {
     if (!socialConfig.displayEnabled) return;
     let active = true;
@@ -39,7 +40,7 @@ export function SocialSignIn() {
     if (lock.current) return;
     lock.current = true; setBusy(true); setError(null);
     try { await action(); }
-    catch { setError("We couldn't complete sign-in. Please try again or contact the practice."); }
+    catch { setError("We couldn't complete sign-in. Please start over or contact the practice."); setStep("contact"); }
     finally { lock.current = false; setBusy(false); }
   }, []);
   const start = useCallback((identity: ProviderIdentity) => {
@@ -58,7 +59,7 @@ export function SocialSignIn() {
       if (cancelled) dispose(); else cleanup = dispose;
     }).catch(() => { if (!cancelled) setError("Google sign-in isn't available right now."); });
     return () => { cancelled = true; cleanup?.(); };
-  }, [step, start, available.google]);
+  }, [step, start, available.google, attemptGeneration]);
   useEffect(() => () => flow.clear(), [flow]);
 
   if (!socialConfig.displayEnabled || (!available.google && !available.apple)) return null;
@@ -72,6 +73,7 @@ export function SocialSignIn() {
     });
   };
   const restart = () => {
+    setAttemptGeneration(value => value + 1);
     flow.clear(); setChallenge(null); setCode(""); setDob(""); setFirstName(""); setLastName(""); setError(null); setStep("provider");
   };
   return <section className="mt-6 space-y-4" aria-label="Social sign-in" aria-busy={busy}>

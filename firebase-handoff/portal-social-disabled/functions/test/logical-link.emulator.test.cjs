@@ -38,13 +38,13 @@ test('duplicate record binding refuses',async()=>{
 });
 test('claim binds roster and identity atomically under its live lease',async()=>{
   const newUid='ClaimNewTrueCase';await auth.createUser({ uid:newUid });await db.doc('patients/NEW').set({ dob:'1980-01-02' });
-  await db.doc('socialClaimLocks/NEW').set({ pendingUid:newUid,leaseUntilMs:Date.now()+120000 });
+  await db.doc('socialClaimLocks/NEW').set({ state:'pending',pendingUid:newUid,leaseUntilMs:Date.now()+120000 });
   await S.link(db,newUid,id,'NEW',{ claimUid:newUid });
   assert.equal((await db.doc('patients/NEW').get()).get('authUid'),newUid);
   assert.equal((await db.collection('socialIdentityLinks').doc(S.identityKey(id)).get()).get('uid'),newUid);
 });
 test('expired claim lease never binds or creates a mapping',async()=>{
-  await db.doc('patients/NEW').set({});await db.doc('socialClaimLocks/NEW').set({ pendingUid:'new',leaseUntilMs:Date.now()-1 });
+  await db.doc('patients/NEW').set({});await db.doc('socialClaimLocks/NEW').set({ state:'pending',pendingUid:'new',leaseUntilMs:Date.now()-1 });
   await assert.rejects(S.link(db,'new',id,'NEW',{ claimUid:'new' }),/CLAIM_LEASE_LOST/);
   assert.equal((await db.collection('socialIdentityLinks').get()).size,0);assert.equal((await db.doc('patients/NEW').get()).get('authUid'),undefined);
 });
