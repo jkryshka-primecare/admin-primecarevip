@@ -2,6 +2,18 @@
 
 Revision: PR #589, ab9341d08874b5e76c395985318603cb4d153458. Date: 2026-11-01 UTC.
 
+## Latest rerun after 19:14 UTC request
+This section supersedes prior deployment/invocation blockers below. **Full hosted gate remains NOT PASSED.**
+
+- All five Cloud Run services now have roles/run.invoker for allUsers. Browser-callable requests reach the application, without a server authorization token. Automation still cannot set service/project IAM (403), but invoker access is already installed by the owner.
+- Five callables ACTIVE; server Google audience populated and Apple audience com.primecarevip.portal.web; providers disabled; blocking triggers None.
+- 14 of 16 harness checks pass: configuration, direct disabled-provider refusal probes, fresh synthetic password, independently signed custom-token exchange, flag-off/anonymous behavior, password-provider preservation and final flags/triggers. Named staff availability and begin fail closed: availability false; begin SOCIAL_SIGNIN_DISABLED. Custom-token exchange is NOT path A evidence.
+- Confirmed root cause using a short-lived impersonated test-runtime access token: accounts:lookup for SyntheticStaffTrueCase02 returns INSUFFICIENT_PERMISSION; Firestore config/socialSignIn read returns HTTP 403 PERMISSION_DENIED. Runtime is 30073293485-compute@developer.gserviceaccount.com; the only observed project role binding for it is roles/cloudbuild.builds.builder. staffAccess deliberately masks these read failures as disabled access.
+- Attempted narrowly test-scoped IAM repair was refused HTTP 403. Owner must grant that runtime account roles/firebaseauth.admin and roles/datastore.user on pcvip-social-test. Existing deployment/signing/invoker grants do not grant the Auth and Firestore access that the application requires.
+- Genuine nonce-bound Google/Apple sessions and approved synthetic-only Elation/Twilio integration remain unavailable in the harness; no external provider sessions were fabricated, no verifier/JWKS substitutions deployed, no production credentials/charts accessed.
+- Actual socialLinkExisting A mint, B verification/claim/hydration, C resolution, mapping/replay/concurrent completion remain unexecuted on hosted callables. No A/B/C success is claimed.
+- Test master and synthetic practice flags restored false; providers disabled, triggers None, password provider preserved. Temporary automation credential removed after diagnostics. Production untouched; canary held.
+
 ## Resumed run after provisioning (18:54 UTC request)
 - Successfully deployed exactly five reviewed callables to pcvip-social-test, all ACTIVE in us-central1: socialAvailability, socialBeginAttempt, socialLinkExisting, socialStartVerification, socialConfirmVerification. No blocking exports deployed. The staging index only selects these exports; implementation modules unchanged. The generated Bun lockfile was removed from staging to preserve the reviewed npm-based Cloud Build path.
 - Google/Apple configurations remain absent; both blocking triggers remain None. Server environment metadata confirms a populated Google audience and Apple audience com.primecarevip.portal.web on all five functions.

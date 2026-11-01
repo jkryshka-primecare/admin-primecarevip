@@ -1,5 +1,12 @@
 # Roadmap
 
+## Nov 1 19:14 — rerun after owner grants
+- [x] All five test-only callable invoker policies verified allUsers; browser transport reaches application code. Five ACTIVE, audiences populated, native providers disabled, blockers None.
+- [x] Fresh synthetic password and separately signed test-project custom-token exchange preserve true-case UID/password. Flag-off/anonymous guards pass; invalid-token direct-provider probes refused. Not A/B/C completion evidence.
+- [ ] Hosted A/B/C blocked: runtime 30073293485-compute@developer.gserviceaccount.com cannot read Firebase Auth (INSUFFICIENT_PERMISSION) or Firestore (403). Only roles/cloudbuild.builds.builder observed; automation setIamPolicy repair denied 403. Needs test-project roles/firebaseauth.admin + roles/datastore.user on runtime.
+- [ ] Genuine nonce-bound provider sessions and approved synthetic Elation/Twilio integration still unavailable; no signed-fixture substitution or production integration access.
+- [x] Test master/practice flags restored off; sanitized report updated; production unchanged, canary held.
+
 ## Nov 1 18:54 — resume provisioned isolated test
 - [x] Five #589 callables deployed and verified ACTIVE in pcvip-social-test/us-central1; audiences present, no blocking exports or production changes.
 - [x] Native providers disabled, triggers None; direct refusal probes OPERATION_NOT_ALLOWED. Fresh password and independently signed test-project custom token preserve true-case synthetic UID; NOT path-A evidence.
