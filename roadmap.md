@@ -1,11 +1,13 @@
 # Roadmap
 
 ## Nov 1 13:07 — approved logical-link production PR
-- [ ] Integrate reviewed logical mapping, nonce/replay, reconciliation holds and staff gates in a real portal-functions PR with INTEGRATION-CONTRACT; run existing gate plus new emulator tests.
-- [ ] Define denied client access, named staff target/config setup and deployment that excludes blocking functions and leaves both registrations None.
-- [ ] Verify live server Google/Apple audiences and wire the explicitly public Google setting into the owning Hub project.
-- [ ] Apply/test v2 in My Health Hub and surface its native diff before publish — cross-project tools currently provide read-only snapshots only.
-- [ ] Recommend and obtain approved isolated hosted environment; providers-disabled hosted test is a required gate, not replaceable by emulators.
+- [x] Real draft portal PR #589, commit ab9341d: logical mapping/nonce/reconciliation/staff gates, exports, explicit denied client collections and INTEGRATION-CONTRACT v1.82. Exact PR-layout checks: 24 emulator + 13 signed-token/no-mutation pass; Hub 10 focused tests pass.
+- [ ] Existing social-signin-gate still requires migration from native provider-link/deletion assertions; new logical gate added, CI not certified green. No merge until both gates and hosted test pass.
+- [x] Named staff/config setup and five-callable-only deployment scope documented in PR. Existing automatic production workflow can re-arm blocking exports, so merge remains held pending safe deployment plumbing; CRM untouched.
+- [ ] Live server audience confirmation blocked by Cloud Functions metadata HTTP 403 under lovable-portal-readonly. Main env source has correct Google web audience and Apple Services ID; public Google setting wired in Hub review source only.
+- [ ] Apply/test v2 in My Health Hub and surface native diff — read-only cross-project tools cannot apply it. Refreshed patch dry-run applies to disposable cb2ef5ec copy; authenticated staff placement and browser flows remain unverified.
+- [x] Owner chose separate disposable Identity Platform project, not production tenant.
+- [ ] Hosted providers-disabled gate blocked on test project provisioning/access and genuine provider-token test sessions; not replaceable by emulators. Apple standalone return URL remains owner authorization prerequisite.
 - Deployment conditional on green PR; flags off, triggers None; no canary or flag-on authorized.
 
 ## Nov 1 12:14 — disabled-provider bypass and remaining canary gates
