@@ -359,7 +359,8 @@
 +  const response = await sdk.auth.signIn();
 +  if (response.authorization.state !== state || !response.authorization.id_token) throw new Error("INVALID_PROVIDER_RESPONSE");
 +  return { providerId: "apple.com", idToken: response.authorization.id_token, attemptId: a.attemptId, proof: a.proof };
-+}--- a/src/routes/login.tsx
++}
+--- a/src/routes/login.tsx
 +++ b/src/routes/login.tsx
 @@ -6,6 +6,8 @@
  import { Input } from "@/components/ui/input";
