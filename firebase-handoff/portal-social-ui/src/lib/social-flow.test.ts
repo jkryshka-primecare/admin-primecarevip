@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import { SocialFlow } from "./social-flow";
-const identity = { providerId: "google.com", idToken: "opaque-provider-token" } as const;
+const identity = { providerId: "google.com", idToken: "opaque-provider-token", attemptId: "test-attempt", proof: "browser-proof" } as const;
 
 describe("reviewed callable-only social flow", () => {
   it("flag off rejects before any callable or token sign-in", async () => {
@@ -29,8 +29,8 @@ describe("reviewed callable-only social flow", () => {
   });
   it("Apple relay follows server path B without decoding email or locating a patient", async () => {
     const call = vi.fn().mockResolvedValue({ path: "B" }); const signIn = vi.fn();
-    await new SocialFlow(true, call, signIn).start({ providerId: "apple.com", idToken: "opaque-relay-token" });
-    expect(call).toHaveBeenCalledWith("socialLinkExisting", { providerId: "apple.com", idToken: "opaque-relay-token" }); expect(signIn).not.toHaveBeenCalled();
+    await new SocialFlow(true, call, signIn).start({ ...identity, providerId: "apple.com", idToken: "opaque-relay-token" });
+    expect(call).toHaveBeenCalledWith("socialLinkExisting", { ...identity, providerId: "apple.com", idToken: "opaque-relay-token" }); expect(signIn).not.toHaveBeenCalled();
   });
   it("refused path C never exchanges a token", async () => {
     const call = vi.fn().mockResolvedValue({ path: "C", customToken: "must-not-use" }); const signIn = vi.fn();
