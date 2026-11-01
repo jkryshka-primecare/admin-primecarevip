@@ -63,7 +63,7 @@ async function advance(db, data, id, from, to, extra = {}) {
   });
 }
 // Atomic mapping + provider slot + roster uniqueness. Auth users are never updated.
-async function link(db, uid, id, pid, { claimUid = null } = {}) {
+async function link(db, uid, id, pid, { claimUid = null, generation = null, access = null, eligibility = null } = {}) {
   const key = identityKey(id);
   return db.runTransaction(async (tx) => {
     const mapping = db.collection('socialIdentityLinks').doc(key);
@@ -75,12 +75,20 @@ async function link(db, uid, id, pid, { claimUid = null } = {}) {
       tx.get(db.collection('patients').where('authUid', '==', uid).limit(3)),
     ]);
     if (!p.exists) fail('NO_PATIENT_RECORD');
+    if (access) {
+      const [master, practice, target] = await Promise.all([
+        tx.get(db.doc('config/socialSignIn')), tx.get(db.doc(`config/socialSignIn/practices/${access.practiceId}`)),
+        tx.get(db.collection('socialStaffTargets').doc(access.uid)),
+      ]);
+      if (!master.exists || master.get('enabled') !== true || !practice.exists || practice.get('enabled') !== true || !target.exists || target.get('enabled') !== true || target.get('practiceId') !== access.practiceId || String(p.get('practiceId') || 'default') !== access.practiceId) fail('PRACTICE_SCOPE_CHANGED');
+    }
+    if (eligibility && !eligibility({ roster:p.data() }).ok) fail('MEMBER_INELIGIBLE');
     if (m.exists && (m.get('uid') !== uid || m.get('elationPatientId') !== String(pid))) fail('IDENTITY_OWNED');
     if (s.exists && s.get('identityKey') !== key) fail('PROVIDER_SLOT_OWNED');
     if (byLc.docs.some(d => d.id !== String(pid)) || byTrue.docs.some(d => d.id !== String(pid))) fail('AMBIGUOUS_BINDING');
     if (claimUid) {
       const lock = await tx.get(db.collection('socialClaimLocks').doc(String(pid)));
-      if (claimUid !== uid || !lock.exists || lock.get('pendingUid') !== uid || lock.get('leaseUntilMs') <= Date.now()) fail('CLAIM_LEASE_LOST');
+      if (claimUid !== uid || !lock.exists || lock.get('state') !== 'pending' || lock.get('pendingUid') !== uid || (generation && lock.get('generation') !== generation) || lock.get('leaseUntilMs') <= Date.now()) fail('CLAIM_LEASE_LOST');
       if (p.get('firebaseUid') || p.get('authUid')) fail('ALREADY_BOUND');
     } else if (p.get('authUid') !== uid || p.get('firebaseUid') !== uid.toLowerCase() || byLc.size !== 1 || byTrue.size !== 1) fail('BINDING_MISMATCH');
     tx.set(mapping, { uid, issuer: issuerOf(id.providerId), providerId: id.providerId, elationPatientId: String(pid) });
@@ -102,4 +110,11 @@ async function mapped(db, auth, S, deps, id) {
     return { path: 'A', trueUid: user.uid, elationPatientId: b.elationPatientId, practiceId: S.practiceOf(b.roster) };
   } catch { return { path: 'C' }; }
 }
-module.exports = { TTL, digest, gate, checkIdentity, identityKey, staffAccess, begin, readAttempt, advance, link, mapped };
+async function settleLease(db, ref, uid, generation, fields) {
+  return db.runTransaction(async tx => {
+    const snap = await tx.get(ref);
+    if (!snap.exists || snap.get('pendingUid') !== uid || snap.get('generation') !== generation) return false;
+    tx.set(ref, fields, { merge:true }); return true;
+  });
+}
+module.exports = { TTL, digest, gate, checkIdentity, identityKey, staffAccess, begin, readAttempt, advance, link, mapped, settleLease };

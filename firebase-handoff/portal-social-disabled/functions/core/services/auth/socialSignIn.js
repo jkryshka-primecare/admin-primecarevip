@@ -139,51 +139,6 @@ async function classifySocialIdentity(identity, deps, now = new Date()) {
   return { path: 'A', trueUid: user.uid, elationPatientId: b.elationPatientId, practiceId: practiceOf(b.roster) };
 }
 
-/**
- * Attach a social provider to an EXISTING Auth user. Never creates a user.
- * deps: { getUser(uid), updateUser(uid, props) }
- */
-async function linkProvider(deps, trueUid, { providerId, providerUid, email }) {
-  const before = await deps.getUser(trueUid);
-  if (before.disabled === true) {
-    const err = new Error('auth user disabled'); err.reason = 'AUTH_DISABLED'; throw err;
-  }
-  const had = new Set((before.providerData || []).map((p) => p.providerId));
-  const already = (before.providerData || []).some(
-    (p) => p.providerId === providerId && p.uid === providerUid,
-  );
-  if (!already) {
-    if (had.has(providerId)) {
-      // A DIFFERENT Google/Apple identity is already linked. Do not replace.
-      const err = new Error('provider slot already linked to another identity');
-      err.reason = 'PROVIDER_ALREADY_LINKED';
-      throw err;
-    }
-    await deps.updateUser(trueUid, {
-      providerToLink: { providerId, uid: providerUid, ...(email ? { email } : {}) },
-    });
-  }
-  const after = await deps.getUser(trueUid);
-  const now = new Set((after.providerData || []).map((p) => p.providerId));
-  if (had.has('password') && !now.has('password')) {
-    const err = new Error('password provider lost during link');
-    err.reason = 'PASSWORD_PROVIDER_LOST';
-    throw err;
-  }
-  if (after.uid !== trueUid) {
-    const err = new Error('uid changed during link');
-    err.reason = 'UID_CHANGED';
-    throw err;
-  }
-  if (before.email && after.email !== before.email) {
-    // Linking must never change the account's login email.
-    const err = new Error('login email changed during link');
-    err.reason = 'LOGIN_EMAIL_CHANGED';
-    throw err;
-  }
-  return { linked: !already };
-}
-
 // ---- path B candidate (name + DOB; no email involved) ---------------------
 // deps.findRosterByDob(dob) -> array of { id, data }
 async function findPathBCandidate(deps, { firstName, lastName, dob }) {
@@ -336,7 +291,6 @@ module.exports = {
   eligibility,
   resolveBinding,
   classifySocialIdentity,
-  linkProvider,
   findPathBCandidate,
   normalizeUsPhone,
   chartPhoneStatus,

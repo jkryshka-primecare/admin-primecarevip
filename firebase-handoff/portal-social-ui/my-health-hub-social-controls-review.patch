@@ -1,6 +1,6 @@
 --- /dev/null
 +++ b/src/components/social-signin.tsx
-@@ -0,0 +1,87 @@
+@@ -0,0 +1,101 @@
 +import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from "react";
 +import { Apple, Loader2 } from "lucide-react";
 +import { Button } from "@/components/ui/button";
@@ -25,12 +25,25 @@
 +  const [lastName, setLastName] = useState("");
 +  const [dob, setDob] = useState("");
 +  const [code, setCode] = useState("");
++  const [available, setAvailable] = useState({ google: false, apple: false });
++  const [attemptGeneration, setAttemptGeneration] = useState(0);
++  useEffect(() => {
++    if (!socialConfig.displayEnabled) return;
++    let active = true;
++    void callSocial("socialAvailability", {}).then(value => {
++      if (active && value && typeof value === "object") {
++        const a = value as Record<string, unknown>;
++        setAvailable({ google: a.google === true, apple: a.apple === true });
++      }
++    }).catch(() => { if (active) setAvailable({ google: false, apple: false }); });
++    return () => { active = false; };
++  }, []);
 +
 +  const run = useCallback(async (action: () => Promise<void>) => {
 +    if (lock.current) return;
 +    lock.current = true; setBusy(true); setError(null);
 +    try { await action(); }
-+    catch { setError("We couldn't complete sign-in. Please try again or contact the practice."); }
++    catch { setError("We couldn't complete sign-in. Please start over or contact the practice."); setStep("contact"); }
 +    finally { lock.current = false; setBusy(false); }
 +  }, []);
 +  const start = useCallback((identity: ProviderIdentity) => {
@@ -42,17 +55,17 @@
 +  }, [flow, run]);
 +
 +  useEffect(() => {
-+    if (!socialConfig.displayEnabled || step !== "provider" || !google.current) return;
++    if (!socialConfig.displayEnabled || !available.google || step !== "provider" || !google.current) return;
 +    let cancelled = false;
 +    let cleanup: (() => void) | undefined;
 +    void mountGoogle(google.current, start).then((dispose) => {
 +      if (cancelled) dispose(); else cleanup = dispose;
 +    }).catch(() => { if (!cancelled) setError("Google sign-in isn't available right now."); });
 +    return () => { cancelled = true; cleanup?.(); };
-+  }, [step, start]);
++  }, [step, start, available.google, attemptGeneration]);
 +  useEffect(() => () => flow.clear(), [flow]);
 +
-+  if (!socialConfig.displayEnabled) return null;
++  if (!socialConfig.displayEnabled || (!available.google && !available.apple)) return null;
 +  const submit = (event: FormEvent) => {
 +    event.preventDefault();
 +    void run(async () => {
@@ -63,15 +76,16 @@
 +    });
 +  };
 +  const restart = () => {
++    setAttemptGeneration(value => value + 1);
 +    flow.clear(); setChallenge(null); setCode(""); setDob(""); setFirstName(""); setLastName(""); setError(null); setStep("provider");
 +  };
 +  return <section className="mt-6 space-y-4" aria-label="Social sign-in" aria-busy={busy}>
 +    {step === "provider" ? <>
-+      <div className={busy ? "pointer-events-none opacity-50" : ""} inert={busy ? true : undefined}><div ref={google} className="min-h-11 w-full" /></div>
-+      <Button type="button" variant="outline" className="w-full" disabled={busy || !socialConfig.appleRedirectUri}
++      {available.google ? <div className={busy ? "pointer-events-none opacity-50" : ""} inert={busy ? true : undefined}><div ref={google} className="min-h-11 w-full" /></div> : null}
++      {available.apple ? <Button type="button" variant="outline" className="w-full" disabled={busy || !socialConfig.appleRedirectUri}
 +        onClick={() => void run(async () => { const identity = await acquireApple(); const outcome = await flow.start(identity); if (outcome === "identity-required") setStep("identity"); if (outcome === "contact-practice") setStep("contact"); })}>
 +        <Apple className="mr-2 h-4 w-4" />Continue with Apple
-+      </Button>
++      </Button> : null}
 +    </> : step === "contact" ? <p role="status" className="text-sm text-muted-foreground">Please contact the practice to complete sign-in.</p> :
 +      <form onSubmit={submit} className="space-y-4">
 +        {step === "identity" ? <>
@@ -87,7 +101,8 @@
 +    {error ? <p role="alert" className="text-sm text-destructive">{error}</p> : null}
 +    {step !== "provider" ? <Button type="button" variant="ghost" disabled={busy} onClick={restart}>Back</Button> : null}
 +  </section>;
-+}--- /dev/null
++}
+--- /dev/null
 +++ b/src/lib/reset-flow.test.ts
 @@ -0,0 +1,10 @@
 +import { expect, it, vi } from "vitest";
@@ -99,7 +114,8 @@
 +});
 +it("unknown account stays neutral without leaking account existence", async () => {
 +  await expect(requestReset(vi.fn().mockRejectedValue({ code: "auth/user-not-found" }), "x@example.invalid")).resolves.toBeUndefined();
-+});--- /dev/null
++});
+--- /dev/null
 +++ b/src/lib/reset-flow.ts
 @@ -0,0 +1,9 @@
 +/** Report operational send failures truthfully without revealing account existence. */
@@ -110,7 +126,8 @@
 +    if (code === "auth/user-not-found") return;
 +    throw error;
 +  }
-+}--- /dev/null
++}
+--- /dev/null
 +++ b/src/lib/social-callable.ts
 @@ -0,0 +1,12 @@
 +import { getFirebaseApp } from "@/lib/firebase";
@@ -118,29 +135,32 @@
 +
 +/** Separate from the HTTP/PHI client; these are Firebase onCall endpoints. No automatic retries. */
 +export const callSocial: Callable = async (name, data) => {
-+  if (!["socialLinkExisting", "socialStartVerification", "socialConfirmVerification"].includes(name)) throw new Error("UNSUPPORTED_CALL");
++  if (!["socialAvailability", "socialBeginAttempt", "socialLinkExisting", "socialStartVerification", "socialConfirmVerification"].includes(name)) throw new Error("UNSUPPORTED_CALL");
 +  const app = getFirebaseApp();
 +  if (!app) throw new Error("PROVIDER_UNAVAILABLE");
 +  const { getFunctions, httpsCallable } = await import("firebase/functions");
 +  const response = await httpsCallable(getFunctions(app, "us-central1"), name, { timeout: 180000 })(data);
 +  return response.data;
-+};--- /dev/null
++};
+--- /dev/null
 +++ b/src/lib/social-config.ts
-@@ -0,0 +1,9 @@
+@@ -0,0 +1,10 @@
 +/** Review-only defaults. Enabling requires separate owner approval, never a URL parameter. */
 +export const socialConfig = {
 +  displayEnabled: false,
-+  googleClientId: "",
++  // Explicitly PUBLIC web configuration in the owning Hub project; never a server secret import.
++  googleClientId: import.meta.env.VITE_SOCIAL_GOOGLE_CLIENT_ID || "",
 +  appleClientId: "com.primecarevip.portal.web",
 +  // Owner must authorize an Apple web popup return URL for this Services ID.
 +  // Do not reuse Firebase's handler: this flow does not use Firebase OAuth.
-+  appleRedirectUri: "",
-+} as const;--- /dev/null
++  appleRedirectUri: import.meta.env.VITE_SOCIAL_APPLE_RETURN_URL || "",
++} as const;
+--- /dev/null
 +++ b/src/lib/social-flow.test.ts
 @@ -0,0 +1,56 @@
 +import { describe, expect, it, vi } from "vitest";
 +import { SocialFlow } from "./social-flow";
-+const identity = { providerId: "google.com", idToken: "opaque-provider-token" } as const;
++const identity = { providerId: "google.com", idToken: "opaque-provider-token", attemptId: "test-attempt", proof: "browser-proof" } as const;
 +
 +describe("reviewed callable-only social flow", () => {
 +  it("flag off rejects before any callable or token sign-in", async () => {
@@ -169,8 +189,8 @@
 +  });
 +  it("Apple relay follows server path B without decoding email or locating a patient", async () => {
 +    const call = vi.fn().mockResolvedValue({ path: "B" }); const signIn = vi.fn();
-+    await new SocialFlow(true, call, signIn).start({ providerId: "apple.com", idToken: "opaque-relay-token" });
-+    expect(call).toHaveBeenCalledWith("socialLinkExisting", { providerId: "apple.com", idToken: "opaque-relay-token" }); expect(signIn).not.toHaveBeenCalled();
++    await new SocialFlow(true, call, signIn).start({ ...identity, providerId: "apple.com", idToken: "opaque-relay-token" });
++    expect(call).toHaveBeenCalledWith("socialLinkExisting", { ...identity, providerId: "apple.com", idToken: "opaque-relay-token" }); expect(signIn).not.toHaveBeenCalled();
 +  });
 +  it("refused path C never exchanges a token", async () => {
 +    const call = vi.fn().mockResolvedValue({ path: "C", customToken: "must-not-use" }); const signIn = vi.fn();
@@ -193,11 +213,13 @@
 +    await flow.start(identity); await flow.verify({ firstName: "A", lastName: "B", dob: "1980-01-02" });
 +    await expect(flow.confirm("000000")).rejects.toThrow("CODE_MISMATCH"); expect(signIn).not.toHaveBeenCalled(); expect(call).toHaveBeenCalledTimes(3);
 +  });
-+});--- /dev/null
++});
+--- /dev/null
 +++ b/src/lib/social-flow.ts
-@@ -0,0 +1,80 @@
+@@ -0,0 +1,81 @@
 +/** Reviewed callable protocol only. Provider tokens never authenticate with Firebase. */
-+export type ProviderIdentity = { providerId: "google.com" | "apple.com"; idToken: string };
++export type ProviderAttempt = { attemptId: string; proof: string; nonce: string };
++export type ProviderIdentity = { providerId: "google.com" | "apple.com"; idToken: string; attemptId: string; proof: string };
 +export type Challenge = { challengeId: string; channel: "sms" | "email"; destination: string };
 +export type LinkOutcome = { path: "A" | "B" | "C"; customToken?: string };
 +export type Callable = (name: string, data: Record<string, unknown>) => Promise<unknown>;
@@ -275,11 +297,13 @@
 +      return this.finish(result);
 +    });
 +  }
-+}--- /dev/null
++}
+--- /dev/null
 +++ b/src/lib/social-providers.ts
-@@ -0,0 +1,56 @@
-+import type { ProviderIdentity } from "./social-flow";
+@@ -0,0 +1,66 @@
++import type { ProviderIdentity, ProviderAttempt } from "./social-flow";
 +import { socialConfig } from "./social-config";
++import { callSocial } from "./social-callable";
 +
 +type GoogleSdk = { accounts: { id: {
 +  initialize: (options: { client_id: string; callback: (response: { credential?: string }) => void; nonce: string; auto_select: boolean }) => void;
@@ -309,14 +333,22 @@
 +}
 +
 +/** Provider-native credential acquisition; no Firebase social SDK is imported. */
++async function attempt(providerId: ProviderIdentity["providerId"]): Promise<ProviderAttempt> {
++  const value = await callSocial("socialBeginAttempt", { providerId });
++  if (!value || typeof value !== "object") throw new Error("INVALID_ATTEMPT");
++  const a = value as Record<string, unknown>;
++  if (typeof a.attemptId !== "string" || typeof a.proof !== "string" || typeof a.nonce !== "string" || !a.attemptId || !a.proof || !a.nonce) throw new Error("INVALID_ATTEMPT");
++  return { attemptId: a.attemptId, proof: a.proof, nonce: a.nonce };
++}
 +export async function mountGoogle(element: HTMLElement, receive: (id: ProviderIdentity) => void): Promise<() => void> {
 +  if (!socialConfig.displayEnabled || !socialConfig.googleClientId) throw new Error("PROVIDER_NOT_CONFIGURED");
 +  await load("https://accounts.google.com/gsi/client");
 +  const sdk = window.google;
 +  if (!sdk) throw new Error("PROVIDER_UNAVAILABLE");
++  const a = await attempt("google.com");
 +  let active = true;
-+  sdk.accounts.id.initialize({ client_id: socialConfig.googleClientId, nonce: crypto.randomUUID(), auto_select: false,
-+    callback: ({ credential }) => { if (active && credential) receive({ providerId: "google.com", idToken: credential }); },
++  sdk.accounts.id.initialize({ client_id: socialConfig.googleClientId, nonce: a.nonce, auto_select: false,
++    callback: ({ credential }) => { if (active && credential) { active = false; receive({ providerId: "google.com", idToken: credential, attemptId: a.attemptId, proof: a.proof }); } },
 +  });
 +  sdk.accounts.id.renderButton(element, { theme: "outline", size: "large", text: "continue_with", width: Math.min(element.clientWidth || 280, 400) });
 +  return () => { active = false; sdk.accounts.id.cancel(); element.replaceChildren(); };
@@ -327,13 +359,15 @@
 +  await load("https://appleid.cdn-apple.com/appleauth/static/jsapi/appleid/1/en_US/appleid.auth.js");
 +  const sdk = window.AppleID;
 +  if (!sdk) throw new Error("PROVIDER_UNAVAILABLE");
++  const a = await attempt("apple.com");
 +  const state = crypto.randomUUID();
 +  sdk.auth.init({ clientId: socialConfig.appleClientId, scope: "name email", redirectURI: socialConfig.appleRedirectUri,
-+    state, nonce: crypto.randomUUID(), usePopup: true });
++    state, nonce: a.nonce, usePopup: true });
 +  const response = await sdk.auth.signIn();
 +  if (response.authorization.state !== state || !response.authorization.id_token) throw new Error("INVALID_PROVIDER_RESPONSE");
-+  return { providerId: "apple.com", idToken: response.authorization.id_token };
-+}--- a/src/routes/login.tsx
++  return { providerId: "apple.com", idToken: response.authorization.id_token, attemptId: a.attemptId, proof: a.proof };
++}
+--- a/src/routes/login.tsx
 +++ b/src/routes/login.tsx
 @@ -6,6 +6,8 @@
  import { Input } from "@/components/ui/input";

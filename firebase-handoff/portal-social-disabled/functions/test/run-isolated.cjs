@@ -25,4 +25,4 @@ const command=`node --test ${path.join(f,'test/callable-flow.emulator.test.cjs')
 const r=spawnSync(process.execPath,[cli,'emulators:exec','--config',path.join(stage,'firebase.json'),'--project','demo-social-callables','--only','auth,firestore,functions',command],{
  cwd:stage,stdio:'inherit',env:{...process.env,NODE_PATH:process.env.SOCIAL_TEST_NODE_MODULES,SOCIAL_TEST_KEY_FILE:keyFile}
 });
-fs.rmSync(stage,{recursive:true,force:true});process.exit(r.status || 0);
+fs.rmSync(stage,{recursive:true,force:true});process.exit(r.status === null ? 1 : r.status);
