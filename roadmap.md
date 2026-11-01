@@ -1,5 +1,13 @@
 # Roadmap
 
+## Nov 1 13:07 — approved logical-link production PR
+- [ ] Integrate reviewed logical mapping, nonce/replay, reconciliation holds and staff gates in a real portal-functions PR with INTEGRATION-CONTRACT; run existing gate plus new emulator tests.
+- [ ] Define denied client access, named staff target/config setup and deployment that excludes blocking functions and leaves both registrations None.
+- [ ] Verify live server Google/Apple audiences and wire the explicitly public Google setting into the owning Hub project.
+- [ ] Apply/test v2 in My Health Hub and surface its native diff before publish — cross-project tools currently provide read-only snapshots only.
+- [ ] Recommend and obtain approved isolated hosted environment; providers-disabled hosted test is a required gate, not replaceable by emulators.
+- Deployment conditional on green PR; flags off, triggers None; no canary or flag-on authorized.
+
 ## Nov 1 12:14 — disabled-provider bypass and remaining canary gates
 - [x] Documented distinction: custom auth supports logical mapping with native providers disabled; current build performs native providerToLink whose disabled-provider production acceptance is unverified. Review in firebase-handoff/portal-social-ui/PROVIDERS-DISABLED-REVIEW.md. No provider/config/account changes.
 - [x] Live us-central1 check: all three social callables return SOCIAL_SIGNIN_DISABLED; reviewed frontend tests 10/10 pass.
