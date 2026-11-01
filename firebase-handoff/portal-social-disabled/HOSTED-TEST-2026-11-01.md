@@ -2,6 +2,18 @@
 
 Revision: PR #589, ab9341d08874b5e76c395985318603cb4d153458. Date: 2026-11-01 UTC.
 
+## Latest rerun after runtime grants (19:49 UTC)
+This section supersedes all prior permission blockers below. **18/18 hosted harness checks PASS; full A/B/C gate remains NOT PASSED.**
+
+- Runtime Auth/Firestore access now works: named synthetic staff availability returns both providers available and socialBeginAttempt successfully creates a server-bound attempt. No further runtime permission grant is requested.
+- Five deployed callables ACTIVE; server audiences populated; native Google/Apple disabled; blocking triggers None before and after.
+- Fresh synthetic password sign-in and separately test-runtime-signed custom-token exchange preserve the exact true-case UID; password provider remains unchanged. The independent custom-token exchange is not a socialLinkExisting success.
+- Direct Google/Apple endpoint probes return OPERATION_NOT_ALLOWED using intentionally invalid synthetic tokens; genuine provider-session bypass testing remains unexecuted.
+- Flag-off availability and attempt refusal, anonymous hiding, invalid provider-token refusal, and non-consumption of the attempt after invalid token all PASS.
+- Actual path A logical mapping/custom token, path B classification/verification/claim/hydration, path C classification, and valid-session replay/concurrent completion remain UNEXECUTED. No genuine nonce-bound Google/Apple test sessions are available. Approved synthetic Elation/Twilio test integrations are also unavailable; six deployed inert sentinel secrets cannot supply them, and the reviewed Elation client still targets the production host.
+- No provider tokens were fabricated, no verifier/JWKS override was deployed, and no production charts or integration credentials were used. Temporary master/practice enablement was confined to the synthetic test project and restored false in finally. Production unchanged; canary held.
+- Evidence: sanitized /tmp/pcvip-social-test/hosted-results.json, 18 PASS checks. The hosted gate requires a controlled genuine provider-authenticated nonce session for A/B/C plus an approved synthetic-only second-factor/chart integration for full B. Do not paste provider tokens or passwords in chat.
+
 ## Latest rerun after 19:14 UTC request
 This section supersedes prior deployment/invocation blockers below. **Full hosted gate remains NOT PASSED.**
 
