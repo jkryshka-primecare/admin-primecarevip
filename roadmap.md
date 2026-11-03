@@ -1,5 +1,10 @@
 # Roadmap
 
+## Nov 3 — mobile iOS Firestore certificate security patch
+- [ ] Inspect artifacts/mobile and open an issue + PR for an iOS-only patched Firebase SDK pin compatible with Expo SDK 54; no Android/web/portal/backend changes.
+- [ ] Test pin persistence and fail-closed Podfile.lock acceptance (FirebaseFirestore 12.19.3 or >=13.1.1).
+- [ ] Run EAS iOS rebuild, inspect its actual Podfile.lock, and redistribute; report credential or release blockers explicitly.
+
 ## Nov 1 19:54 — genuine Google session setup
 - [x] Owner clarified scope: real Google audience/nonce/signature; Apple deferred to synthetic/unit; Elation/Twilio synthetic/stubbed only, no production credentials.
 - [ ] Obtain owner-operated Google test account and approved test web OAuth client; capture credentials through an interactive test-only browser session, never chat.
