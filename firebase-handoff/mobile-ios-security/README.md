@@ -2,6 +2,8 @@
 
 Target: primecarevip/prime-care-vip-app-v2, artifacts/mobile; base 081627b3bae85e3ab71e6098faff5a4c16378e58.
 
+Draft PR: https://github.com/primecarevip/prime-care-vip-app-v2/pull/590 ; commit f8a34d5065007be1b9bcd9a3812016b8b21b8027. Exact committed checker blob verified (9599523b5dd8b85b0ba113bb734f88a4c60fb1b8), 13 tests PASS; syntax and Android no-op PASS. Tree comparison confirms only six artifacts/mobile files changed. No native build acceptance is claimed.
+
 Keep Expo SDK 54, React Native 0.81.5 and all RNFirebase v24 dependencies unchanged. Pin FIREBASE_SDK_VERSION=12.19.3 only in each EAS profile's ios.env. RNFBApp v24 reads this environment variable during CocoaPods evaluation and shares the FirebaseSDKVersion across native modules. Do not hand-edit a generated Podfile or upgrade RNFirebase to v26.
 
 Add the post-install gate to the mobile package scripts. EAS runs that hook after iOS pod install, so it reads the actual remote build lockfile, rejects unpatched/missing/pre-release/conflicting FirebaseFirestore resolutions, and logs the exact lockfile plus SHA256. Android skips the hook; Android configuration/dependencies are unchanged. Collect ios/Podfile.lock as an additional iOS build artifact.

@@ -1,9 +1,10 @@
 # Roadmap
 
 ## Nov 3 — mobile iOS Firestore certificate security patch
-- [ ] Inspect artifacts/mobile and open an issue + PR for an iOS-only patched Firebase SDK pin compatible with Expo SDK 54; no Android/web/portal/backend changes.
-- [ ] Test pin persistence and fail-closed Podfile.lock acceptance (FirebaseFirestore 12.19.3 or >=13.1.1).
-- [ ] Run EAS iOS rebuild, inspect its actual Podfile.lock, and redistribute; report credential or release blockers explicitly.
+- [x] Inspected artifacts/mobile; opened draft PR #590 (f8a34d5): ios.env Firebase SDK 12.19.3 pin on all EAS profiles, post-pod-install lockfile gate/artifact, unchanged Expo54/RNFirebase24 dependencies. Only six mobile files changed.
+- [x] Exact committed checker blob verified; 13 acceptance/rejection tests PASS, syntax PASS, Android no-op PASS. RNFBApp24 env override and EAS post-install ordering verified upstream; native compatibility still requires actual build.
+- [ ] Open/link security issue — BLOCKED: GitHub connected token Issues write denied HTTP403 (PR creation worked).
+- [ ] Run EAS iOS rebuild, inspect its actual Podfile.lock, and redistribute — BLOCKED: no Expo/EAS authentication available; current App Store build number/signing/release access unverified. No accepted remote lockfile or distribution yet.
 
 ## Nov 1 19:54 — genuine Google session setup
 - [x] Owner clarified scope: real Google audience/nonce/signature; Apple deferred to synthetic/unit; Elation/Twilio synthetic/stubbed only, no production credentials.
