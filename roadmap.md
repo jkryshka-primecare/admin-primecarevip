@@ -1,5 +1,11 @@
 # Roadmap
 
+## Nov 4 — genuine Google hosted verification
+- [x] Saved Google audience verified on all five ACTIVE isolated callables; test page published and browser-checked on both Firebase Hosting origins. Project-guarded testGoogleHarness ACTIVE; 12 nonce and 3 isolation tests pass.
+- [ ] Test page invocation BLOCKED: testgoogleharness lacks roles/run.invoker for allUsers; browser request HTTP403. Needs owner-scoped grant/approval on this test-only service before Google session.
+- [ ] Owner completes genuine Google sessions A/B/C; sanitized hosted outcomes remain unexecuted. B adapters synthetic; no new-claim/hydration certification.
+- [x] Native providers disabled and triggers None verified; production unchanged. Harness prepare never enables flags; completion enables test-only flags after genuine designated identity verification and restores off in finally.
+
 ## Nov 3 — mobile iOS Firestore certificate security patch
 - [x] Inspected artifacts/mobile; opened draft PR #590 (f8a34d5): ios.env Firebase SDK 12.19.3 pin on all EAS profiles, post-pod-install lockfile gate/artifact, unchanged Expo54/RNFirebase24 dependencies. Only six mobile files changed.
 - [x] Exact committed checker blob verified; 13 acceptance/rejection tests PASS, syntax PASS, Android no-op PASS. RNFBApp24 env override and EAS post-install ordering verified upstream; native compatibility still requires actual build.
