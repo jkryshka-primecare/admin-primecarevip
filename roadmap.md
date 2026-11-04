@@ -2,7 +2,7 @@
 
 ## Nov 4 — genuine Google hosted verification
 - [x] Saved Google audience verified on all five ACTIVE isolated callables; test page published and browser-checked on both Firebase Hosting origins. Project-guarded testGoogleHarness ACTIVE; 12 nonce and 3 isolation tests pass.
-- [ ] Test page invocation BLOCKED: testgoogleharness lacks roles/run.invoker for allUsers; browser request HTTP403. Needs owner-scoped grant/approval on this test-only service before Google session.
+- [x] Owner granted testgoogleharness public invoker. Corrected inherited FUNCTION_TARGET from socialLinkExisting to testGoogleHarness on disposable service only; live Prepare succeeds and Google button renders. Browser-check lease released. No genuine sessions/results yet.
 - [ ] Owner completes genuine Google sessions A/B/C; sanitized hosted outcomes remain unexecuted. B adapters synthetic; no new-claim/hydration certification.
 - [x] Native providers disabled and triggers None verified; production unchanged. Harness prepare never enables flags; completion enables test-only flags after genuine designated identity verification and restores off in finally.
 
