@@ -3,7 +3,7 @@
 ## Nov 4 — genuine Google hosted verification
 - [x] Saved Google audience verified on all five ACTIVE isolated callables; test page published and browser-checked on both Firebase Hosting origins. Project-guarded testGoogleHarness ACTIVE; 12 nonce and 3 isolation tests pass.
 - [x] Owner granted testgoogleharness public invoker. Corrected inherited FUNCTION_TARGET from socialLinkExisting to testGoogleHarness on disposable service only; live Prepare succeeds and Google button renders. Browser-check lease released. No genuine sessions/results yet.
-- [ ] Owner completes genuine Google sessions A/B/C; sanitized hosted outcomes remain unexecuted. B adapters synthetic; no new-claim/hydration certification.
+- [ ] Owner A session failed after mapping/attempt completion; no success report. Deployed safe stage diagnostics to test harness; awaiting fresh A to isolate failure, then B/C. Test flags restored false. B adapters synthetic; no new-claim/hydration certification.
 - [x] Native providers disabled and triggers None verified; production unchanged. Harness prepare never enables flags; completion enables test-only flags after genuine designated identity verification and restores off in finally.
 
 ## Nov 3 — mobile iOS Firestore certificate security patch
