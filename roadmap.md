@@ -1,5 +1,8 @@
 # Roadmap
 
+## Nov 5 — PR #589 required gate migration
+- [x] Preserved social-signin-gate / social-signin-emulator; logical nonce/no-mutation (13) + Auth/Firestore/Functions (24) PASS locally and GitHub run 41944661028 SUCCESS. Removed duplicate workflow and two obsolete native-link files. #589 Ready for review at 5d1394a9; no merge/deploy, flags off, triggers None.
+
 ## Nov 4 — genuine Google hosted verification
 - [x] Saved Google audience verified on all five ACTIVE isolated callables; test page published and browser-checked on both Firebase Hosting origins. Project-guarded testGoogleHarness ACTIVE; 12 nonce and 3 isolation tests pass.
 - [x] Owner granted testgoogleharness public invoker. Corrected inherited FUNCTION_TARGET from socialLinkExisting to testGoogleHarness on disposable service only; live Prepare succeeds and Google button renders. Browser-check lease released. No genuine sessions/results yet.
