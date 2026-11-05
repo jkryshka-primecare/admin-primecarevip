@@ -1,0 +1,23 @@
+--- a/.github/workflows/deploy-production.yml
++++ b/.github/workflows/deploy-production.yml
+@@ -94,6 +94,7 @@
+       - name: Deploy to Firebase Production
+         env:
+           GOOGLE_APPLICATION_CREDENTIALS_JSON: ${{ secrets.GOOGLE_APPLICATION_CREDENTIALS_JSON_PRODUCTION }}
++          SOCIAL_GOOGLE_CLIENT_IDS: ${{ secrets.GOOGLE_OAUTH_CLIENT_ID }}
+           ENFORCE_AUTH: ${{ secrets.ENFORCE_AUTH_PRODUCTION }}
+           ELATION_READ_ALLOWLIST: ${{ secrets.ELATION_READ_ALLOWLIST_PRODUCTION }}
+           ELATION_INGEST_EXTRA: ${{ secrets.ELATION_INGEST_EXTRA_PRODUCTION }}
+@@ -110,10 +111,12 @@
+         run: |
+           printf '%s' "$GOOGLE_APPLICATION_CREDENTIALS_JSON" > /tmp/production-sa.json
+           export GOOGLE_APPLICATION_CREDENTIALS=/tmp/production-sa.json
++          test -n "$SOCIAL_GOOGLE_CLIENT_IDS" || { echo "Google web client ID is not configured"; exit 1; }
+           pnpm add -g firebase-tools
+           # #219 / D-070: write the project-scoped env file (.env.<projectId>) that Firebase
+           # actually loads for this project — matches the local deploy mechanism exactly.
+           echo "ENFORCE_AUTH=${ENFORCE_AUTH:-true}" > functions/.env.prive-care-vip
++          printf 'SOCIAL_GOOGLE_CLIENT_IDS=%s\n' "$SOCIAL_GOOGLE_CLIENT_IDS" >> functions/.env.prive-care-vip
+           echo "ELATION_READ_ALLOWLIST=${ELATION_READ_ALLOWLIST:-}" >> functions/.env.prive-care-vip
+           # Ingest gate: DELTA only (ids ingest-allowed but NOT read-allowed). Writing the
+           # full second list pushed the env past the ~32KB Cloud Functions cap. Unset -> ingest = read.

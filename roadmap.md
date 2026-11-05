@@ -1,5 +1,10 @@
 # Roadmap
 
+## Nov 5 18:31 — production Google audience and Hub applied review
+- [ ] Configure production social callable Google audience — BLOCKED: production metadata/update permissions unavailable (403); GitHub Actions secret listing also 403. Verified main workflow omits audience wiring; saved review-only durable wiring patch. No deployment or live config verification.
+- [ ] Apply reviewed callable-only Google frontend in My Health Hub — BLOCKED: owning-project chat required; snapshot still cb2ef5ec, read-only. Patch dry-run against current source and 10 focused tests PASS; no applied native diff or live verification.
+- No flag-on, trigger registration or canary authorized.
+
 ## Nov 5 — PR #589 callable-only deployment split
 - [x] #589 amended at 3b6c8390: blocker require/exports removed, all five callables retained, contract/rollout updated. Required-check regression fails before/passes after; 15 nonce/no-mutation/deploy + 24 emulator PASS locally. Published entrypoint verified; owner review comment posted. No merge/deploy; flags off, triggers None.
 - [x] Amended-head required CI run 41948865662 / social-signin-emulator SUCCESS. Owner re-verifies before Michael merges; no agent merge/deploy. Blocking audience repair/registered-hosted gate remains separate #588 work, not authorized by this amendment.
