@@ -1,5 +1,9 @@
 # Roadmap
 
+## Nov 5 — PR #589 callable-only deployment split
+- [x] #589 amended at 3b6c8390: blocker require/exports removed, all five callables retained, contract/rollout updated. Required-check regression fails before/passes after; 15 nonce/no-mutation/deploy + 24 emulator PASS locally. Published entrypoint verified; owner review comment posted. No merge/deploy; flags off, triggers None.
+- [x] Amended-head required CI run 41948865662 / social-signin-emulator SUCCESS. Owner re-verifies before Michael merges; no agent merge/deploy. Blocking audience repair/registered-hosted gate remains separate #588 work, not authorized by this amendment.
+
 ## Nov 5 — PR #589 required gate migration
 - [x] Preserved social-signin-gate / social-signin-emulator; logical nonce/no-mutation (13) + Auth/Firestore/Functions (24) PASS locally and GitHub run 41944661028 SUCCESS. Removed duplicate workflow and two obsolete native-link files. #589 Ready for review at 5d1394a9; no merge/deploy, flags off, triggers None.
 
