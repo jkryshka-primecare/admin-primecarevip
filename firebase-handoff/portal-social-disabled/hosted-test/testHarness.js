@@ -65,7 +65,9 @@ exports.testGoogleHarness=onRequest({region:'us-central1',timeoutSeconds:180,mem
  if(scenario!=='C'){
   stage='CUSTOM_TOKEN_EXCHANGE';
   if(!done.result?.customToken)throw Error('NO_CUSTOM_TOKEN');
-  const r=await fetch(`https://identitytoolkit.googleapis.com/v1/accounts:signInWithCustomToken?key=${process.env.TEST_FIREBASE_API_KEY}`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({token:done.result.customToken,returnSecureToken:true})});const j=await r.json();preserved=j.localId===UID;if(!preserved)throw Error('UID_NOT_PRESERVED');
+  const r=await fetch(`https://identitytoolkit.googleapis.com/v1/accounts:signInWithCustomToken?key=${process.env.TEST_FIREBASE_API_KEY}`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({token:done.result.customToken,returnSecureToken:true})});const j=await r.json();
+  // signInWithCustomToken returns idToken/refreshToken only (no localId); read the signed-in UID from the verified ID token.
+  const signedIn=j.idToken?await admin.auth().verifyIdToken(j.idToken).catch(()=>null):null;preserved=signedIn?.uid===UID;if(!preserved)throw Error('UID_NOT_PRESERVED');
  }else if(done.result?.customToken)throw Error('C_MINTED_TOKEN');
  stage='REPLAY';
  const replay=await call('socialLinkExisting',data,b);
