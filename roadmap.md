@@ -1,5 +1,8 @@
 # Roadmap
 
+## Nov 6 — D-070 production Google audience wiring
+- [x] PR #592 (e0bc4b89): exactly two additions in deploy-production.yml using SOCIAL_GOOGLE_CLIENT_IDS_PRODUCTION and project-scoped env output; references #585 because GitHub Issues read/create denied HTTP403. YAML, populated/empty env smoke checks and published PR one-file/two-addition scope PASS. No merge/deploy; Apple omitted, flags and triggers untouched.
+
 ## Nov 5 18:31 — production Google audience and Hub applied review
 - [ ] Configure production social callable Google audience — BLOCKED: production metadata/update permissions unavailable (403); GitHub Actions secret listing also 403. Verified main workflow omits audience wiring; saved review-only durable wiring patch. No deployment or live config verification.
 - [ ] Apply reviewed callable-only Google frontend in My Health Hub — BLOCKED: owning-project chat required; snapshot still cb2ef5ec, read-only. Patch dry-run against current source and 10 focused tests PASS; no applied native diff or live verification.
