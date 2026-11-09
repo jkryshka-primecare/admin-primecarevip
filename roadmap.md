@@ -1,5 +1,12 @@
 # Roadmap
 
+## Nov 9 — B4 / #593 red-team stateful failures
+- [ ] Seed true-case authUid on red-team caller fixtures (positive reads 200)
+- [ ] Denials return 404 RECORD_NOT_AVAILABLE, no PHI
+- [ ] guardian-uid-case-d068 asserts exact-case contract (drift denied)
+- [ ] Prod count: active members whose authUid does not exactly resolve to live Auth user
+- [ ] Push to #593, red-team stateful green, paste diff + count
+
 ## Nov 9 — B4 Elation read-side allowlist retirement
 - [x] Audited all nine reads plus shared artifact helper; preserved Bearer verification and added original token.uid exact patient.authUid validation after existing index lookup. No membership gate; guardian controls unchanged.
 - [x] Removed read call-site containment only; shared accessGate and all non-read/provisioning/deploy/rules sources byte-unchanged. Exact committed CI runner 40 emulator + 15 focused tests PASS; existing guardian/no-blocker/discovery/roster/auto-invite/refill suites PASS.
