@@ -1,0 +1,967 @@
+diff --git a/.github/workflows/portal-enforcement-test.yml b/.github/workflows/portal-enforcement-test.yml
+--- a/.github/workflows/portal-enforcement-test.yml
++++ b/.github/workflows/portal-enforcement-test.yml
+@@ -37,3 +37,6 @@
+       - name: Run portal enforcement matrix
+         working-directory: functions
+         run: npm run test:enforcement
++
++      - name: B4 read identity and unchanged non-read containment
++        run: node --test functions/test/unit/read-access-b4.test.cjs functions/test/unit/read-artifact-b4.test.cjs
+
+diff --git a/AGENTS.md b/AGENTS.md
+--- a/AGENTS.md
++++ b/AGENTS.md
+@@ -43,6 +43,8 @@
+ ---
+ 
+ ## OPERATING RULES
++
++- B4 patient chart reads omit Elation containment gates and pass the verified true-case token UID for an exact patient authUid check after the existing firebaseUid index lookup; leave shared containment and non-read callers unchanged because provisioning scope is independent of own-chart authorization.
+ 
+ 1. Do not ask for confirmation during execution unless blocked.
+ 2. Never use Firebase Auth displayName as the source of truth for user names. Always read from the Firestore users collection.
+
+diff --git a/functions/core/services/artifacts/readArtifact.js b/functions/core/services/artifacts/readArtifact.js
+--- a/functions/core/services/artifacts/readArtifact.js
++++ b/functions/core/services/artifacts/readArtifact.js
+@@ -16,7 +16,7 @@
+  *   1. verifyPatientToken(req.headers.authorization)  -> uid (+ Guard B)
+  *   2. resolveReadSubject(uid, selfDoc, childElationId) -> elationPatientId, mode
+  *      (self or authorized-guardian; server-derived, shared with the list handlers)
+- *   3. D-068 allowlist gate                           -> 403 NOT_IN_ALLOWLIST
++ *   3. exact token authUid must match the resolved self binding
+  *   4. assertNotSuspended(elationPatientId)           -> fails CLOSED (403 / 503)
+  *   5. reference ownership: patients/<id>/labs/<reportId> exists & not deleted
+  *   5b. effective module from stored `category` must match the wrapper
+@@ -125,14 +125,7 @@
+   return Math.min(Math.floor(n), MAX_TTL_SECONDS);
+ }
+ 
+-// #403 / D-312 read gate, mirrored from the handlers so the shared path keeps
+-// the same fail-closed behavior when it is called directly. Claim-based union;
+-// evaluated on the SUBJECT record.
+-const { isReadAllowedFor } = require('../patient/accessGate');
+-
+-function isReadAllowed(elationPatientId, patientData) {
+-  return isReadAllowedFor(elationPatientId, patientData);
+-}
++// B4: subject authorization is the read boundary; provisioning gates are unchanged.
+ 
+ // Storage paths now come from `core/services/patient/internalUid` — the object
+ // is keyed on the RECORD's internalUid, never on the caller's token uid. See
+@@ -178,7 +171,7 @@
+   //    fine — resolveReadSubject's guardian check is what authorizes the read.
+   let doc = null;
+   try {
+-    doc = await resolvePatientForCaller(uid);
++    doc = await resolvePatientForCaller(uid, { authUid: user.token.uid });
+   } catch (err) {
+     const status = err.httpErrorCode?.status || 500;
+     if (status !== 404) {
+@@ -224,12 +217,6 @@
+     });
+   }
+ 
+-
+-  // 3. Containment gate (#403 / D-312) — fail closed, on the SUBJECT's record.
+-  if (!isReadAllowed(elationPatientId, subject && subject.data)) {
+-    throw fail(403, 'PERMISSION_DENIED', 'NOT_IN_ALLOWLIST',
+-      'Records access is not enabled for this account yet.');
+-  }
+ 
+   // 4. Suspension fails CLOSED — evaluated on the CHILD's record for a proxy
+   //    read (enforcement rule 2), never on the guardian's.
+
+diff --git a/functions/core/services/elation/resolvePatientForCaller.js b/functions/core/services/elation/resolvePatientForCaller.js
+--- a/functions/core/services/elation/resolvePatientForCaller.js
++++ b/functions/core/services/elation/resolvePatientForCaller.js
+@@ -12,7 +12,9 @@
+ const functions = require('firebase-functions');
+ const admin = require('firebase-admin');
+ 
+-async function resolvePatientForCaller(rawUid) {
++// B4 read callers supply the verified true-case Auth UID. Non-read callers keep
++// their existing binding lookup; no provisioning, ingest or refill gate changes.
++async function resolvePatientForCaller(rawUid, { authUid } = {}) {
+   const uid = String(rawUid || '').toLowerCase();
+   if (!uid || uid === 'unauthenticated') {
+     throw new functions.https.HttpsError('unauthenticated', 'Authentication required', { reason: 'NO_TOKEN', metadata: {} });
+@@ -28,7 +30,11 @@
+   if (snap.size > 1) {
+     throw new functions.https.HttpsError('internal', 'Account linkage error.', { reason: 'AMBIGUOUS_BINDING', metadata: { uid, matches: snap.size } });
+   }
+-  return snap.docs[0]; // id === elationPatientId
++  const doc = snap.docs[0];
++  if (authUid !== undefined && (!authUid || doc.get('authUid') !== authUid || String(authUid).toLowerCase() !== uid)) {
++    throw new functions.https.HttpsError('permission-denied', 'Account linkage requires review.', { reason: 'AUTH_UID_MISMATCH', metadata: {} });
++  }
++  return doc; // id === elationPatientId
+ }
+ 
+ module.exports = { resolvePatientForCaller };
+
+diff --git a/functions/getAllergies.js b/functions/getAllergies.js
+--- a/functions/getAllergies.js
++++ b/functions/getAllergies.js
+@@ -4,7 +4,7 @@
+ // Elation endpoint, labels.
+ // Flow: verifyPatientToken -> Guard B (reject 'unauthenticated' sentinel) ->
+ //   resolvePatientForCaller(uid) [ownership IS the query; never a client id] ->
+-//   D-068 pre-G9 allowlist gate (fail closed) ->
++//   own-patient authorization ->
+ //   phi_access_log fail-fast BEFORE any PHI read, WITH elationPatientId ->
+ //   Elation GET /allergies?patient=<id> -> whitelist normalize -> return.
+ // Scope: /allergies only. drug_intolerances is a separate endpoint (post-MVP).
+@@ -22,20 +22,9 @@
+ const { elationGetAll } = require('./core/services/elation/client');
+ const { normalizeAllergies } = require('./core/services/elation/normalizers/allergies');
+ const { setCors } = require('./core/config/allowedOrigins');
+-const { isReadAllowedFor } = require('./core/services/patient/accessGate');
+ 
+-// D-068 — pre-G9 read gate. A patient may read Elation data only if we're live
+-// (ELATION_FULL_SYNC_ENABLED) OR their resolved elationPatientId is explicitly
+-// allowlisted (ELATION_READ_ALLOWLIST, comma-separated). Self-retires when the
+-// flag flips post-G9. This is the pre-real-member backstop; D-064 ownership
+-// remains the permanent control.
+-// #403 / D-312 — the read gate is the shared claim-based union:
+-//   FULL_SYNC || subject.status === 'active' || legacy ELATION_READ_ALLOWLIST.
+-// Enforced on the SUBJECT record (the child on a guardian proxy read), never on
+-// the caller. D-064 ownership remains the permanent control.
+-function isReadAllowed(elationPatientId, patientData) {
+-  return isReadAllowedFor(elationPatientId, patientData);
+-}
++// B4: authenticated own-patient authorization replaces read-side containment.
++// Provisioning/ingest allowlists and membership status do not authorize reads.
+ 
+ function jsonError(res, status, code, reason, message) {
+   return res.status(status).json({
+@@ -77,7 +66,7 @@
+     // 1) Resolve caller's own bound patient doc (never a client-supplied id).
+     let doc;
+     try {
+-      doc = await resolvePatientForCaller(uid);
++      doc = await resolvePatientForCaller(uid, { authUid: user.token.uid });
+     } catch (err) {
+       const status = err.httpErrorCode?.status || 500;
+       const reason = err.details?.reason || 'INTERNAL';
+@@ -86,13 +75,6 @@
+       return jsonError(res, status, code, reason, err.message);
+     }
+     const elationPatientId = doc.id;
+-    const d = doc.data() || {};
+-
+-    // D-068 pre-G9 read gate — fail closed if not live and not allowlisted.
+-    if (!isReadAllowed(elationPatientId, d)) {
+-      log('getAllergies', 'not-allowlisted', { uid });
+-      return jsonError(res, 403, 'PERMISSION_DENIED', 'NOT_IN_ALLOWLIST', 'Records access is not enabled for this account yet.');
+-    }
+ 
+     // 3) AUDIT FIRST — fail-fast BEFORE any PHI read; captures which record.
+     try {
+
+diff --git a/functions/getAppointments.js b/functions/getAppointments.js
+--- a/functions/getAppointments.js
++++ b/functions/getAppointments.js
+@@ -5,7 +5,7 @@
+ //   Elation GET /appointments, normalize to upcoming + last 3 past (now passed in).
+ // Flow: verifyPatientToken -> Guard B -> resolvePatientForCaller(uid) [ownership IS
+ //   the query; never a client id] ->
+-//   D-068 allowlist gate -> phi_access_log fail-fast BEFORE any PHI read ->
++//   own-patient authorization -> phi_access_log fail-fast BEFORE any PHI read ->
+ //   Elation GET /appointments?patient=<id> -> whitelist normalize (upcoming + last 3 past) -> return.
+ // Secrets: ELATION_CLIENT_ID, ELATION_CLIENT_SECRET (pre-bind secretAccessor per D-055).
+ 
+@@ -20,16 +20,9 @@
+ const { elationGetAll } = require('./core/services/elation/client');
+ const { normalizeAppointments } = require('./core/services/elation/normalizers/appointments');
+ const { setCors } = require('./core/config/allowedOrigins');
+-const { isReadAllowedFor } = require('./core/services/patient/accessGate');
+ 
+-// D-068 — pre-G9 read gate (see getProblems for rationale). Self-retires post-G9.
+-// #403 / D-312 — the read gate is the shared claim-based union:
+-//   FULL_SYNC || subject.status === 'active' || legacy ELATION_READ_ALLOWLIST.
+-// Enforced on the SUBJECT record (the child on a guardian proxy read), never on
+-// the caller. D-064 ownership remains the permanent control.
+-function isReadAllowed(elationPatientId, patientData) {
+-  return isReadAllowedFor(elationPatientId, patientData);
+-}
++// B4: authenticated own-patient authorization replaces read-side containment.
++// Provisioning/ingest allowlists and membership status do not authorize reads.
+ 
+ function jsonError(res, status, code, reason, message) {
+   return res.status(status).json({
+@@ -71,7 +64,7 @@
+     // 1) Resolve caller's own bound patient doc (never a client-supplied id).
+     let doc;
+     try {
+-      doc = await resolvePatientForCaller(uid);
++      doc = await resolvePatientForCaller(uid, { authUid: user.token.uid });
+     } catch (err) {
+       const status = err.httpErrorCode?.status || 500;
+       const reason = err.details?.reason || 'INTERNAL';
+@@ -80,13 +73,6 @@
+       return jsonError(res, status, code, reason, err.message);
+     }
+     const elationPatientId = doc.id;
+-    const d = doc.data() || {};
+-
+-    // D-068 pre-G9 read gate — fail closed if not live and not allowlisted.
+-    if (!isReadAllowed(elationPatientId, d)) {
+-      log('getAppointments', 'not-allowlisted', { uid });
+-      return jsonError(res, 403, 'PERMISSION_DENIED', 'NOT_IN_ALLOWLIST', 'Records access is not enabled for this account yet.');
+-    }
+ 
+     // 3) AUDIT FIRST — fail-fast BEFORE any PHI read; captures which record.
+     try {
+
+diff --git a/functions/getImaging.js b/functions/getImaging.js
+--- a/functions/getImaging.js
++++ b/functions/getImaging.js
+@@ -3,7 +3,7 @@
+ // Twin of getLabs, minus artifact mode and the Elation call. Reads the poller's
+ // stored imaging docs, never live Elation, so no secrets binding.
+ // Flow: verifyPatientToken -> Guard B -> resolvePatientForCaller(uid) ->
+-//   D-068 allowlist gate ->
++//   own-patient authorization ->
+ //   phi_access_log fail-fast (own_imaging_viewed) BEFORE any PHI read ->
+ //   Firestore read: this patient's labs subcollection, category == 'imaging',
+ //   not tombstoned -> reshape to the list contract -> return.
+@@ -23,19 +23,9 @@
+ const { handleArtifactRead } = require('./core/services/artifacts/readArtifact');
+ const { resolveReadSubject } = require('./core/services/patient/readSubject');
+ const { setCors } = require('./core/config/allowedOrigins');
+-const { isReadAllowedFor } = require('./core/services/patient/accessGate');
+ 
+-// D-068 — pre-G9 read gate. A patient may read Elation data only if we're live
+-// (ELATION_FULL_SYNC_ENABLED) OR their resolved elationPatientId is explicitly
+-// allowlisted (ELATION_READ_ALLOWLIST, comma-separated). Self-retires post-G9.
+-// D-064 ownership remains the permanent control.
+-// #403 / D-312 — the read gate is the shared claim-based union:
+-//   FULL_SYNC || subject.status === 'active' || legacy ELATION_READ_ALLOWLIST.
+-// Enforced on the SUBJECT record (the child on a guardian proxy read), never on
+-// the caller. D-064 ownership remains the permanent control.
+-function isReadAllowed(elationPatientId, patientData) {
+-  return isReadAllowedFor(elationPatientId, patientData);
+-}
++// B4: authenticated own-patient authorization replaces read-side containment.
++// Provisioning/ingest allowlists and membership status do not authorize reads.
+ 
+ function jsonError(res, status, code, reason, message) {
+   return res.status(status).json({
+@@ -83,7 +73,7 @@
+     // 1) Resolve caller's own bound patient doc (never a client-supplied id).
+     let doc;
+     try {
+-      doc = await resolvePatientForCaller(uid);
++      doc = await resolvePatientForCaller(uid, { authUid: user.token.uid });
+     } catch (err) {
+       const status = err.httpErrorCode?.status || 500;
+       const reason = err.details?.reason || 'INTERNAL';
+@@ -107,13 +97,6 @@
+     }
+     const elationPatientId = subject.elationPatientId;
+     const readMode = subject.mode;
+-    const d = subject.data;
+-
+-    // D-068 pre-G9 read gate — fail closed if not live and not allowlisted.
+-    if (!isReadAllowed(elationPatientId, d)) {
+-      log('getImaging', 'not-allowlisted', { uid });
+-      return jsonError(res, 403, 'PERMISSION_DENIED', 'NOT_IN_ALLOWLIST', 'Records access is not enabled for this account yet.');
+-    }
+ 
+     // 3) AUDIT FIRST — fail-fast BEFORE any PHI read; captures which record.
+     try {
+
+diff --git a/functions/getLabs.js b/functions/getLabs.js
+--- a/functions/getLabs.js
++++ b/functions/getLabs.js
+@@ -7,7 +7,7 @@
+ // already ran mapLabReport at ingest, so stored docs carry the patient-safe
+ // shape and there is no re-normalize on the request path.
+ // Flow: verifyPatientToken -> Guard B -> resolvePatientForCaller(uid) ->
+-//   D-068 allowlist gate ->
++//   own-patient authorization ->
+ //   phi_access_log fail-fast (own_labs_viewed) BEFORE any PHI read ->
+ //   portalAccess: assertNotSuspended (fails CLOSED, 403 ACCESS_SUSPENDED) ->
+ //   isModuleVisible('labs') (fails OPEN; hidden -> 200 { items: [], moduleUnavailable: true }) ->
+@@ -38,19 +38,9 @@
+ const { handleArtifactRead } = require('./core/services/artifacts/readArtifact');
+ const { resolveReadSubject } = require('./core/services/patient/readSubject');
+ const { setCors } = require('./core/config/allowedOrigins');
+-const { isReadAllowedFor } = require('./core/services/patient/accessGate');
+-
+-// D-068 — pre-G9 read gate. A patient may read Elation data only if we're live
+-// (ELATION_FULL_SYNC_ENABLED) OR their resolved elationPatientId is explicitly
+-// allowlisted (ELATION_READ_ALLOWLIST, comma-separated). Self-retires post-G9.
+-// D-064 ownership remains the permanent control.
+-// #403 / D-312 — the read gate is the shared claim-based union:
+-//   FULL_SYNC || subject.status === 'active' || legacy ELATION_READ_ALLOWLIST.
+-// Enforced on the SUBJECT record (the child on a guardian proxy read), never on
+-// the caller. D-064 ownership remains the permanent control.
+-function isReadAllowed(elationPatientId, patientData) {
+-  return isReadAllowedFor(elationPatientId, patientData);
+-}
++
++// B4: authenticated own-patient authorization replaces read-side containment.
++// Provisioning/ingest allowlists and membership status do not authorize reads.
+ 
+ function jsonError(res, status, code, reason, message) {
+   return res.status(status).json({
+@@ -99,7 +89,7 @@
+     // 1) Resolve caller's own bound patient doc (never a client-supplied id).
+     let doc;
+     try {
+-      doc = await resolvePatientForCaller(uid);
++      doc = await resolvePatientForCaller(uid, { authUid: user.token.uid });
+     } catch (err) {
+       const status = err.httpErrorCode?.status || 500;
+       const reason = err.details?.reason || 'INTERNAL';
+@@ -123,13 +113,6 @@
+     }
+     const elationPatientId = subject.elationPatientId;
+     const readMode = subject.mode;
+-    const d = subject.data;
+-
+-    // D-068 pre-G9 read gate — fail closed if not live and not allowlisted.
+-    if (!isReadAllowed(elationPatientId, d)) {
+-      log('getLabs', 'not-allowlisted', { uid });
+-      return jsonError(res, 403, 'PERMISSION_DENIED', 'NOT_IN_ALLOWLIST', 'Records access is not enabled for this account yet.');
+-    }
+ 
+     // 3) AUDIT FIRST — fail-fast BEFORE any PHI read; captures which record.
+     try {
+
+diff --git a/functions/getLetters.js b/functions/getLetters.js
+--- a/functions/getLetters.js
++++ b/functions/getLetters.js
+@@ -14,7 +14,7 @@
+ //   (guardian proxy, Release 2b): childElationId, when present in the POST body, selects
+ //   the CHILD's chart; unauthorized or flag-off fails CLOSED as absence, NEVER falling back
+ //   to the caller's own chart. elationPatientId + mode are echoed on every response ->
+-//   D-068 allowlist gate ->
++//   own-patient authorization ->
+ //   phi_access_log fail-fast (own_letters_viewed) BEFORE any PHI read ->
+ //   Firestore read letters/patientVisible==true/deleted==false -> reshape -> return.
+ // Errors use the jsonError envelope (raw onRequest — no HttpsError).
+@@ -29,15 +29,9 @@
+   getPortalAccess, assertNotSuspended, isModuleVisible, filterHidden,
+ } = require('./core/services/patient/portalAccess');
+ const { resolveReadSubject } = require('./core/services/patient/readSubject');
+-const { isReadAllowedFor } = require('./core/services/patient/accessGate');
+ 
+-// #403 / D-312 — the read gate is the shared claim-based union:
+-//   FULL_SYNC || subject.status === 'active' || legacy ELATION_READ_ALLOWLIST.
+-// Enforced on the SUBJECT record (the child on a guardian proxy read), never on
+-// the caller. D-064 ownership remains the permanent control.
+-function isReadAllowed(elationPatientId, patientData) {
+-  return isReadAllowedFor(elationPatientId, patientData);
+-}
++// B4: authenticated own-patient authorization replaces read-side containment.
++// Provisioning/ingest allowlists and membership status do not authorize reads.
+ 
+ function jsonError(res, status, code, reason, message) {
+   return res.status(status).json({
+@@ -75,7 +69,7 @@
+ 
+     let doc;
+     try {
+-      doc = await resolvePatientForCaller(uid);
++      doc = await resolvePatientForCaller(uid, { authUid: user.token.uid });
+     } catch (err) {
+       const status = err.httpErrorCode?.status || 500;
+       const reason = err.details?.reason || 'INTERNAL';
+@@ -99,12 +93,6 @@
+     }
+     const elationPatientId = subject.elationPatientId;
+     const readMode = subject.mode;
+-    const d = subject.data;
+-
+-    if (!isReadAllowed(elationPatientId, d)) {
+-      log('getLetters', 'not-allowlisted', { uid });
+-      return jsonError(res, 403, 'PERMISSION_DENIED', 'NOT_IN_ALLOWLIST', 'Letters access is not enabled for this account yet.');
+-    }
+ 
+     try {
+       await admin.firestore().collection('phi_access_log').add({
+
+diff --git a/functions/getMedicalRecords.js b/functions/getMedicalRecords.js
+--- a/functions/getMedicalRecords.js
++++ b/functions/getMedicalRecords.js
+@@ -4,7 +4,7 @@
+ // never live Elation, no secrets. Medical records carry NO structured results (metadata + PDF only),
+ // so the response omits `results` entirely. No `resultedDate` on these docs — sort/display by documentDate.
+ // Flow: verifyPatientToken -> Guard B -> resolvePatientForCaller(uid) ->
+-//   D-068 allowlist gate ->
++//   own-patient authorization ->
+ //   phi_access_log fail-fast (own_medical_records_viewed | own_medical_record_artifact_viewed) BEFORE any PHI read ->
+ //   artifact mode (reportId present): storage-only 30-min v4 signed URL (D-072 keyless) ->
+ //   list mode: Firestore read labs/category=='medical_records', not tombstoned -> reshape -> return.
+@@ -21,15 +21,9 @@
+ const { handleArtifactRead } = require('./core/services/artifacts/readArtifact');
+ const { resolveReadSubject } = require('./core/services/patient/readSubject');
+ const { setCors } = require('./core/config/allowedOrigins');
+-const { isReadAllowedFor } = require('./core/services/patient/accessGate');
+ 
+-// #403 / D-312 — the read gate is the shared claim-based union:
+-//   FULL_SYNC || subject.status === 'active' || legacy ELATION_READ_ALLOWLIST.
+-// Enforced on the SUBJECT record (the child on a guardian proxy read), never on
+-// the caller. D-064 ownership remains the permanent control.
+-function isReadAllowed(elationPatientId, patientData) {
+-  return isReadAllowedFor(elationPatientId, patientData);
+-}
++// B4: authenticated own-patient authorization replaces read-side containment.
++// Provisioning/ingest allowlists and membership status do not authorize reads.
+ 
+ function jsonError(res, status, code, reason, message) {
+   return res.status(status).json({
+@@ -72,7 +66,7 @@
+ 
+     let doc;
+     try {
+-      doc = await resolvePatientForCaller(uid);
++      doc = await resolvePatientForCaller(uid, { authUid: user.token.uid });
+     } catch (err) {
+       const status = err.httpErrorCode?.status || 500;
+       const reason = err.details?.reason || 'INTERNAL';
+@@ -96,12 +90,6 @@
+     }
+     const elationPatientId = subject.elationPatientId;
+     const readMode = subject.mode;
+-    const d = subject.data;
+-
+-    if (!isReadAllowed(elationPatientId, d)) {
+-      log('getMedicalRecords', 'not-allowlisted', { uid });
+-      return jsonError(res, 403, 'PERMISSION_DENIED', 'NOT_IN_ALLOWLIST', 'Records access is not enabled for this account yet.');
+-    }
+ 
+     try {
+       await admin.firestore().collection('phi_access_log').add({
+
+diff --git a/functions/getMedications.js b/functions/getMedications.js
+--- a/functions/getMedications.js
++++ b/functions/getMedications.js
+@@ -5,7 +5,7 @@
+ //   Elation GET /medications, whitelist normalize (segment + safe fields).
+ // Flow: verifyPatientToken -> Guard B -> resolvePatientForCaller(uid) [ownership IS
+ //   the query; never a client id] ->
+-//   D-068 allowlist gate -> phi_access_log fail-fast BEFORE any PHI read ->
++//   own-patient authorization -> phi_access_log fail-fast BEFORE any PHI read ->
+ //   Elation GET /medications?patient=<id> -> whitelist normalize -> return.
+ // Secrets: ELATION_CLIENT_ID, ELATION_CLIENT_SECRET (pre-bind secretAccessor per D-055).
+ 
+@@ -20,16 +20,9 @@
+ const { elationGetAll } = require('./core/services/elation/client');
+ const { normalizeMedications } = require('./core/services/elation/normalizers/medications');
+ const { setCors } = require('./core/config/allowedOrigins');
+-const { isReadAllowedFor } = require('./core/services/patient/accessGate');
+ 
+-// D-068 — pre-G9 read gate (see getProblems for rationale). Self-retires post-G9.
+-// #403 / D-312 — the read gate is the shared claim-based union:
+-//   FULL_SYNC || subject.status === 'active' || legacy ELATION_READ_ALLOWLIST.
+-// Enforced on the SUBJECT record (the child on a guardian proxy read), never on
+-// the caller. D-064 ownership remains the permanent control.
+-function isReadAllowed(elationPatientId, patientData) {
+-  return isReadAllowedFor(elationPatientId, patientData);
+-}
++// B4: authenticated own-patient authorization replaces read-side containment.
++// Provisioning/ingest allowlists and membership status do not authorize reads.
+ 
+ function jsonError(res, status, code, reason, message) {
+   return res.status(status).json({
+@@ -71,7 +64,7 @@
+     // 1) Resolve caller's own bound patient doc (never a client-supplied id).
+     let doc;
+     try {
+-      doc = await resolvePatientForCaller(uid);
++      doc = await resolvePatientForCaller(uid, { authUid: user.token.uid });
+     } catch (err) {
+       const status = err.httpErrorCode?.status || 500;
+       const reason = err.details?.reason || 'INTERNAL';
+@@ -80,13 +73,6 @@
+       return jsonError(res, status, code, reason, err.message);
+     }
+     const elationPatientId = doc.id;
+-    const d = doc.data() || {};
+-
+-    // D-068 pre-G9 read gate — fail closed if not live and not allowlisted.
+-    if (!isReadAllowed(elationPatientId, d)) {
+-      log('getMedications', 'not-allowlisted', { uid });
+-      return jsonError(res, 403, 'PERMISSION_DENIED', 'NOT_IN_ALLOWLIST', 'Records access is not enabled for this account yet.');
+-    }
+ 
+     // 3) AUDIT FIRST — fail-fast BEFORE any PHI read; captures which record.
+     try {
+
+diff --git a/functions/getMyPatientRecord.js b/functions/getMyPatientRecord.js
+--- a/functions/getMyPatientRecord.js
++++ b/functions/getMyPatientRecord.js
+@@ -118,7 +118,7 @@
+   //    Mapper is byte-identical to getProblems so all read CFs behave the same.
+   let doc;
+   try {
+-    doc = await resolvePatientForCaller(uid);
++    doc = await resolvePatientForCaller(uid, { authUid: user.token.uid });
+   } catch (err) {
+     const status = err.httpErrorCode?.status || 500;
+     const reason = err.details?.reason || 'INTERNAL';
+
+diff --git a/functions/getProblems.js b/functions/getProblems.js
+--- a/functions/getProblems.js
++++ b/functions/getProblems.js
+@@ -21,20 +21,9 @@
+ const { elationGetAll } = require('./core/services/elation/client');
+ const { normalizeProblems } = require('./core/services/elation/normalizers/problems');
+ const { setCors } = require('./core/config/allowedOrigins');
+-const { isReadAllowedFor } = require('./core/services/patient/accessGate');
+ 
+-// D-068 — pre-G9 read gate. A patient may read Elation data only if we're live
+-// (ELATION_FULL_SYNC_ENABLED) OR their resolved elationPatientId is explicitly
+-// allowlisted (ELATION_READ_ALLOWLIST, comma-separated). Self-retires when the
+-// flag flips post-G9. This is the pre-real-member backstop; D-064 ownership
+-// remains the permanent control.
+-// #403 / D-312 — the read gate is the shared claim-based union:
+-//   FULL_SYNC || subject.status === 'active' || legacy ELATION_READ_ALLOWLIST.
+-// Enforced on the SUBJECT record (the child on a guardian proxy read), never on
+-// the caller. D-064 ownership remains the permanent control.
+-function isReadAllowed(elationPatientId, patientData) {
+-  return isReadAllowedFor(elationPatientId, patientData);
+-}
++// B4: authenticated own-patient authorization replaces read-side containment.
++// Provisioning/ingest allowlists and membership status do not authorize reads.
+ 
+ function jsonError(res, status, code, reason, message) {
+   return res.status(status).json({
+@@ -76,7 +65,7 @@
+     // 1) Resolve caller's own bound patient doc (never a client-supplied id).
+     let doc;
+     try {
+-      doc = await resolvePatientForCaller(uid);
++      doc = await resolvePatientForCaller(uid, { authUid: user.token.uid });
+     } catch (err) {
+       const status = err.httpErrorCode?.status || 500;
+       const reason = err.details?.reason || 'INTERNAL';
+@@ -85,13 +74,6 @@
+       return jsonError(res, status, code, reason, err.message);
+     }
+     const elationPatientId = doc.id;
+-    const d = doc.data() || {};
+-
+-    // D-068 pre-G9 read gate — fail closed if not live and not allowlisted.
+-    if (!isReadAllowed(elationPatientId, d)) {
+-      log('getProblems', 'not-allowlisted', { uid });
+-      return jsonError(res, 403, 'PERMISSION_DENIED', 'NOT_IN_ALLOWLIST', 'Records access is not enabled for this account yet.');
+-    }
+ 
+     // 3) AUDIT FIRST — fail-fast BEFORE any PHI read; captures which record.
+     try {
+
+diff --git a/functions/test/portal-enforcement.emulator.test.js b/functions/test/portal-enforcement.emulator.test.js
+--- a/functions/test/portal-enforcement.emulator.test.js
++++ b/functions/test/portal-enforcement.emulator.test.js
+@@ -21,7 +21,7 @@
+ const assert = require('node:assert/strict');
+ 
+ const {
+-  PROJECT_ID, PATIENT_ID,
++  PROJECT_ID, PATIENT_ID, UID,
+   LAB_IDS, IMAGING_IDS, RECORD_IDS, LETTER_IDS,
+   MEDICATION_IDS, APPOINTMENT_IDS, PROBLEM_IDS, ALLERGY_IDS,
+   seed, setPortalAccessDoc, clearPortalAccess, mintIdToken,
+@@ -256,3 +256,95 @@
+   assert.equal(PATIENT_ID, '999845');
+   assert.ok(PROJECT_ID.startsWith('demo-'), 'must run on a demo- project id (emulator only)');
+ });
++
++// B4: exercise real exported HTTP handlers, verified tokens and stored binding.
++const admin = require('firebase-admin');
++const READS = ENDPOINTS.concat([{ fn: 'getMyPatientRecord' }]);
++const SCOPED = ['getMyPatientRecord', 'getLabs', 'getImaging', 'getMedicalRecords', 'getLetters'];
++const IDENTITY_CASES = READS.map(({ fn }) => ({ fn, body: {} })).concat(
++  ['getLabs', 'getImaging', 'getMedicalRecords'].map(fn => ({ fn, body: { reportId: 'lab-1' } })),
++);
++test('B4: every read works with Hint inactive and non-active lifecycle, no allowlist', async () => {
++  const ref = admin.firestore().collection('patients').doc(PATIENT_ID);
++  await ref.update({ status: 'inactive', membershipStatus: 'inactive' });
++  try {
++    for (const { fn } of READS) assert.equal((await call(fn)).status, 200, fn);
++  } finally { await ref.update({ status: 'active' }); }
++});
++test('B4: forged client patient/UID selectors never select another chart', async () => {
++  for (const ep of READS) {
++    const r = await call(ep.fn, { body: { patientId: '999846', elationPatientId: '999846', firebaseUid: 'other', authUid: 'Other' } });
++    assert.equal(r.status, 200, ep.fn);
++    if (ep.key) assert.deepEqual(idsOf(r.body[ep.key]).sort(), ep.ids.map(String).sort(), ep.fn);
++    else assert.equal(r.body.patient.elationPatientId, PATIENT_ID);
++  }
++});
++test('B4: malformed and invalid Bearer tokens expose no chart on all reads', async () => {
++  for (const { fn, body } of IDENTITY_CASES) {
++    for (const authorization of ['Basic invalid', 'Bearer invalid']) {
++      const res = await fetch(`${BASE}/${fn}`, { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: authorization }, body: JSON.stringify(body) });
++      assert.equal(res.status, 401, fn);
++    }
++  }
++});
++test('B4: missing exact authUid denies every read even when firebaseUid matches', async () => {
++  const ref = admin.firestore().collection('patients').doc(PATIENT_ID);
++  await ref.update({ authUid: admin.firestore.FieldValue.delete() });
++  try {
++    for (const { fn, body } of IDENTITY_CASES) {
++      const r = await call(fn, { body }); assert.equal(r.status, 403, fn);
++      assert.equal(r.body.error.details.reason, 'AUTH_UID_MISMATCH');
++    }
++  } finally { await ref.update({ authUid: UID }); }
++});
++test('B4: case-conflicting Auth binding denies every read', async () => {
++  const ref = admin.firestore().collection('patients').doc(PATIENT_ID);
++  await ref.update({ authUid: UID.toLowerCase() });
++  try {
++    for (const { fn, body } of IDENTITY_CASES) assert.equal((await call(fn, { body })).status, 403, fn);
++  } finally { await ref.update({ authUid: UID }); }
++});
++test('B4: duplicate binding denies every read; no arbitrary first match', async () => {
++  const ref = admin.firestore().collection('patients').doc('999846');
++  await ref.set({ firebaseUid: UID.toLowerCase(), authUid: UID });
++  try {
++    for (const { fn, body } of IDENTITY_CASES) {
++      const r = await call(fn, { body }); assert.equal(r.status, 500, fn);
++      assert.equal(r.body.error.details.reason, 'AMBIGUOUS_BINDING');
++    }
++  } finally { await ref.delete(); }
++});
++test('B4: unbound authenticated caller cannot read any chart', async () => {
++  const ref = admin.firestore().collection('patients').doc(PATIENT_ID);
++  await ref.update({ firebaseUid: 'other' });
++  try {
++    for (const { fn, body } of IDENTITY_CASES) assert.equal((await call(fn, { body })).status, 404, fn);
++  } finally { await ref.update({ firebaseUid: UID.toLowerCase() }); }
++});
++test('B4: guardian controls remain closed on scoped reads, no self fallback', async () => {
++  for (const fn of SCOPED) {
++    const r = await call(fn, { body: { childElationId: '999846' } });
++    assert.equal(r.status, 404, fn); assert.equal(r.body.error.details.reason, 'RECORD_NOT_AVAILABLE');
++  }
++  for (const fn of ['getLabs', 'getImaging', 'getMedicalRecords']) {
++    const r = await call(fn, { body: { childElationId: '999846', reportId: 'lab-1' } });
++    assert.equal(r.status, 404, fn); assert.equal(r.body.error.details.reason, 'RECORD_NOT_AVAILABLE');
++  }
++});
++test('B4: all artifact wrappers deny cross-patient report IDs before signing or repair', async () => {
++  const other = admin.firestore().collection('patients').doc('999846').collection('labs').doc('other-report');
++  await other.set({ category: 'lab', deleted: false });
++  try {
++    for (const fn of ['getLabs', 'getImaging', 'getMedicalRecords']) {
++      const r = await call(fn, { body: { reportId: 'other-report', patientId: '999846' } });
++      assert.equal(r.status, 404, fn); assert.equal(r.body.error.details.reason, 'ARTIFACT_NOT_SYNCED');
++      assert.equal(r.body.signedUrl, undefined);
++    }
++  } finally { await other.delete(); }
++});
++test('B4: stored category cannot be bypassed through another artifact wrapper', async () => {
++  for (const fn of ['getImaging', 'getMedicalRecords']) {
++    const r = await call(fn, { body: { reportId: LAB_IDS[0] } });
++    assert.equal(r.status, 404, fn); assert.equal(r.body.error.details.reason, 'ARTIFACT_NOT_SYNCED');
++  }
++});
+
+diff --git a/functions/test/run-enforcement.js b/functions/test/run-enforcement.js
+--- a/functions/test/run-enforcement.js
++++ b/functions/test/run-enforcement.js
+@@ -1,48 +1,38 @@
+-// functions/test/run-enforcement.js
+-// Orchestrates the portal enforcement matrix on the Firebase emulators.
+-//
+-// Why a runner instead of a bare npm script: the functions runtime must come up
+-// with production posture (ENFORCE_AUTH=true), the Elation stub must be preloaded
+-// into that runtime, and both have to be set on a demo- project so no committed
+-// .env.<project> file (staging's ENFORCE_AUTH=false in particular) can be picked
+-// up and quietly weaken the test.
+-
++// Real patient-read handlers on Auth/Firestore/Functions emulators only.
++// Isolate the harness from deployed env files, unrelated triggers and secrets;
++// stub only Elation transport, never token verification or patient authorization.
+ const path = require('node:path');
++const fs = require('node:fs');
++const os = require('node:os');
+ const { spawn } = require('node:child_process');
+-
+ const PROJECT_ID = 'demo-portal-enforcement';
+-const STUB = path.join(__dirname, 'stub-elation.js');
+-// Repairs admin.firestore's statics, which the emulator's admin proxy drops.
+-const ADMIN_SHIM = path.join(__dirname, 'emulator-admin-shim.js');
+-const TEST = path.join(__dirname, 'portal-enforcement.emulator.test.js');
+-
+-const env = {
+-  ...process.env,
+-  GCLOUD_PROJECT: PROJECT_ID,
+-  GOOGLE_CLOUD_PROJECT: PROJECT_ID,
+-  // Production posture — the whole point of the exercise.
+-  ENFORCE_AUTH: 'true',
+-  // D-068 read gate: satisfied without touching a real allowlist.
+-  ELATION_FULL_SYNC_ENABLED: 'true',
+-  // Never reach live Elation from a test.
+-  PORTAL_TEST_STUB_ELATION: '1',
+-  ELATION_CLIENT_ID: 'emulator-stub',
+-  ELATION_CLIENT_SECRET: 'emulator-stub',
+-  NODE_OPTIONS: `${process.env.NODE_OPTIONS || ''} --require ${ADMIN_SHIM} --require ${STUB}`.trim(),
++const source = path.resolve(__dirname, '..');
++const stage = fs.mkdtempSync(path.join(os.tmpdir(), 'portal-read-enforcement-'));
++const functionsDir = path.join(stage, 'functions');
++fs.cpSync(source, functionsDir, {
++  recursive: true,
++  filter: p => !p.split(path.sep).includes('node_modules') && !path.basename(p).startsWith('.env') && path.basename(p) !== '.secret.local',
++});
++fs.symlinkSync(path.join(source, 'node_modules'), path.join(functionsDir, 'node_modules'), 'dir');
++const reads = ['MyPatientRecord', 'Appointments', 'Allergies', 'Problems', 'Medications', 'Labs', 'Imaging', 'MedicalRecords', 'Letters'];
++fs.writeFileSync(path.join(functionsDir, 'index.js'), `const admin=require('firebase-admin');admin.initializeApp();\n${reads.map(n => `exports.get${n}=require('./get${n}').get${n};`).join('\n')}\n`);
++fs.writeFileSync(path.join(functionsDir, '.secret.local'), 'ELATION_CLIENT_ID=fixture\nELATION_CLIENT_SECRET=fixture\n');
++fs.writeFileSync(path.join(functionsDir, '.env'), 'ENFORCE_AUTH=true\nELATION_FULL_SYNC_ENABLED=false\nELATION_READ_ALLOWLIST=\nELATION_INGEST_EXTRA=\nGUARDIAN_READS_ENABLED=false\n');
++const config = path.join(stage, 'firebase.json');
++fs.writeFileSync(config, JSON.stringify({ functions: [{ source: 'functions', codebase: 'portal-functions' }], emulators: {
++  auth: { port: 9099 }, firestore: { port: 8085 }, functions: { port: 5001 }, ui: { enabled: false },
++} }));
++const testDir = path.join(functionsDir, 'test');
++const env = { ...process.env, GCLOUD_PROJECT: PROJECT_ID, GOOGLE_CLOUD_PROJECT: PROJECT_ID,
++  ENFORCE_AUTH: 'true', ELATION_FULL_SYNC_ENABLED: 'false', ELATION_READ_ALLOWLIST: '', ELATION_INGEST_EXTRA: '',
++  GUARDIAN_READS_ENABLED: 'false', PORTAL_TEST_STUB_ELATION: '1',
++  NODE_OPTIONS: `--require ${path.join(testDir, 'emulator-admin-shim.js')} --require ${path.join(testDir, 'stub-elation.js')}`,
+ };
+-
+-const args = [
+-  '--yes', 'firebase-tools@13',
+-  'emulators:exec',
+-  '--project', PROJECT_ID,
+-  '--only', 'auth,firestore,functions',
+-  `node --test ${JSON.stringify(TEST)}`,
++const cli = process.env.PORTAL_TEST_CLI;
++const args = [...(cli ? [cli] : ['--yes', 'firebase-tools@13']), 'emulators:exec', '--config', config,
++  '--project', PROJECT_ID, '--only', 'auth,firestore,functions',
++  `node --test ${JSON.stringify(path.join(testDir, 'portal-enforcement.emulator.test.js'))}`,
+ ];
+-
+-const child = spawn('npx', args, {
+-  cwd: path.join(__dirname, '..', '..'), // repo root: firebase.json lives here
+-  env,
+-  stdio: 'inherit',
+-});
+-
+-child.on('exit', (code) => process.exit(code == null ? 1 : code));
++const child = spawn(cli ? process.execPath : 'npx', args, { cwd: stage, env, stdio: 'inherit' });
++child.on('error', err => { console.error(err.message); fs.rmSync(stage, { recursive: true, force: true }); process.exit(1); });
++child.on('exit', code => { fs.rmSync(stage, { recursive: true, force: true }); process.exit(code == null ? 1 : code); });
+
+diff --git a/functions/test/seed-portal-enforcement.js b/functions/test/seed-portal-enforcement.js
+--- a/functions/test/seed-portal-enforcement.js
++++ b/functions/test/seed-portal-enforcement.js
+@@ -14,7 +14,7 @@
+ 
+ const PROJECT_ID = process.env.GCLOUD_PROJECT || 'demo-portal-enforcement';
+ const PATIENT_ID = '999845';           // synthetic elationPatientId (doc id)
+-const UID = 'emu-patient-uid';         // lowercase — resolver lowercases the uid
++const UID = 'Emu-Patient-UID';         // true-case Auth UID; storage index is lowercase
+ const EMAIL = 'emu.patient@example.invalid';
+ 
+ // Store-backed fixtures (D-079: labs/imaging/records list mode reads Firestore,
+@@ -62,7 +62,10 @@
+ 
+   const patientRef = firestore.collection('patients').doc(PATIENT_ID);
+   await patientRef.set({
+-    firebaseUid: UID,
++    firebaseUid: UID.toLowerCase(),
++    authUid: UID,
++    status: 'active',
++    membershipStatus: 'inactive',
+     firstName: 'Emulator',
+     lastName: 'Patient',
+     dob: '1980-02-03',
+
+diff --git a/functions/test/stub-elation.js b/functions/test/stub-elation.js
+--- a/functions/test/stub-elation.js
++++ b/functions/test/stub-elation.js
+@@ -13,6 +13,7 @@
+ // keys on are produced by production code — exactly as in prod.
+ 
+ const Module = require('module');
++const assert = require('node:assert/strict');
+ 
+ if (process.env.PORTAL_TEST_STUB_ELATION === '1') {
+   const CLIENT_SUFFIX = ['core', 'services', 'elation', 'client'].join('/');
+@@ -99,7 +100,9 @@
+ 
+   const stub = {
+     ELATION_BASE: 'https://elation.test.invalid/api/2.0',
+-    async elationGetAll(path) {
++    async elationGetAll(path, query) {
++      // Prevent tests from passing if a handler loses its own-patient filter.
++      assert.equal(String(query && query.patient), '999845', 'Elation read must use the server-resolved synthetic patient');
+       return FIXTURES[path] ? JSON.parse(JSON.stringify(FIXTURES[path])) : [];
+     },
+     async elationGet(path) {
+
+diff --git a/plans/INTEGRATION-CONTRACT.md b/plans/INTEGRATION-CONTRACT.md
+--- a/plans/INTEGRATION-CONTRACT.md
++++ b/plans/INTEGRATION-CONTRACT.md
+@@ -1,4 +1,18 @@
+ # Prime Care VIP — Integration Contract
++
++# B4 read-side containment retirement — 2026-11-09 (Refs / Closes #403)
++
++Michael’s 2026-10-19 decision: patient chart reads no longer evaluate `ELATION_READ_ALLOWLIST`, `ELATION_FULL_SYNC_ENABLED`, claim-lifecycle `status`, or Hint/membership status. This amendment supersedes historical read-gate descriptions below ONLY for patient read functions; history remains intact. No merge/deploy authorized.
++
++- Every read requires `Authorization: Bearer <Firebase ID token>` verified by `verifyPatientToken`, rejects its permissive sentinel, then resolves exactly one patient via the existing lowercased `firebaseUid` index. Each read additionally passes the token’s ORIGINAL `token.uid` to `resolvePatientForCaller`; the resolved document’s `authUid` must match exactly, including case. Missing/conflicting exact binding returns no chart (`AUTH_UID_MISMATCH`, 403; existing wrappers may label error status INTERNAL). No email lookup, new membership gate or client-selected self chart.
++- `getMyPatientRecord`: bound patient only, explicit demographic projection; existing suspension response preserved. Already had no Elation allowlist gate.
++- `getAppointments`, `getAllergies`, `getProblems` (conditions), `getMedications`: own resolved document ID is the ONLY Elation patient filter. Existing client chart selectors are ignored, not accepted as authorization; these remain self-only.
++- `getLabs`, `getImaging`, `getMedicalRecords`: subject-scoped `patients/{id}/labs` queries, fixed category and deleted=false. `getLetters`: subject-scoped letters with patientVisible=true and deleted=false. Existing guardian subject resolver, separate GUARDIAN_READS_ENABLED/ALLOWLIST, chart-backed delegation, fail-closed denial/no self fallback and subject echoes are unchanged; guardian reads remain off.
++- All three artifact modes independently reverify token + exact self binding + authorized subject, then require a nondeleted report reference under that subject and matching stored category before Storage, signing or repair. New/internalUid and legacy fallback paths stay subject-derived; hidden/module-disabled artifacts remain absent; TTL unchanged.
++- Existing audit-first behavior, explicit portal suspension and module/item visibility are preserved; billing inactivity does not suspend portal access. No new response fields. Retirement removes read-side NOT_IN_ALLOWLIST denials, including the shared artifact path.
++- Shared accessGate.js is BYTE-UNCHANGED. Discovery, auto-invite, provisioning, ingest, claim/hydration, backfill and refill/write callers retain their original gates and resolver behavior. Deploy workflow/env wiring, Firestore/Storage rules, CRM, Auth triggers and social flags unchanged. This change removes the read denial, not missing-cache hydration or provisioning containment; do not promise data that was never ingested.
++- CI: portal-enforcement-test exercises real Auth/Firestore/Functions using synthetic fixtures with full-sync false and empty read/ingest allowlists; per-path owner/forged-selector/UID mismatch/duplicate/unbound/token tests plus artifact reference/category isolation. B4 unit gate checks exact-case binding and unchanged non-read gate behavior.
++
+ 
+ # Portal SendGrid receiver review amendment — 2026-11-09 (#559 / Closes #362)
+ 
+
+diff --git a/functions/test/unit/read-access-b4.test.cjs b/functions/test/unit/read-access-b4.test.cjs
+--- /dev/null
++++ b/functions/test/unit/read-access-b4.test.cjs
+@@ -0,0 +1,49 @@
++const { test } = require('node:test');
++const assert = require('node:assert/strict');
++const Module = require('node:module');
++let rows = [];
++let queried;
++const load = Module._load;
++Module._load = function(request, ...rest) {
++  if (request === 'firebase-admin') return { firestore: () => ({ collection: () => ({
++    where(field, op, value) { queried = { field, op, value }; return this; },
++    limit: () => ({ get: async () => ({ empty: !rows.length, size: rows.length, docs: rows }) }),
++  }) }) };
++  return load.call(this, request, ...rest);
++};
++const { resolvePatientForCaller } = require('../../core/services/elation/resolvePatientForCaller');
++Module._load = load;
++const doc = (authUid) => ({ id: '999845', get: k => k === 'authUid' ? authUid : null });
++test('verified true-case owner resolves using the existing lowercase index plus exact authUid', async () => {
++  rows = [doc('OwnerUID')];
++  assert.equal((await resolvePatientForCaller('owneruid', { authUid: 'OwnerUID' })).id, '999845');
++  assert.deepEqual(queried, { field: 'firebaseUid', op: '==', value: 'owneruid' });
++});
++test('same lowercase UID but different exact Auth identity cannot read the chart', async () => {
++  rows = [doc('OwnerUID')];
++  await assert.rejects(resolvePatientForCaller('owneruid', { authUid: 'owneruid' }), e => e.details.reason === 'AUTH_UID_MISMATCH');
++});
++test('missing authUid cannot authorize a read', async () => {
++  rows = [doc(undefined)];
++  await assert.rejects(resolvePatientForCaller('owneruid', { authUid: 'OwnerUID' }), e => e.details.reason === 'AUTH_UID_MISMATCH');
++});
++test('duplicate binding refuses to select a chart', async () => {
++  rows = [doc('OwnerUID'), doc('OwnerUID')];
++  await assert.rejects(resolvePatientForCaller('owneruid', { authUid: 'OwnerUID' }), e => e.details.reason === 'AMBIGUOUS_BINDING');
++});
++test('non-read resolver callers retain their pre-B4 behavior', async () => {
++  rows = [doc(undefined)];
++  assert.equal((await resolvePatientForCaller('owneruid')).id, '999845');
++});
++test('shared non-read containment retains closed-list and explicit-list behavior', () => {
++  const gate = require('../../core/services/patient/accessGate');
++  process.env.ELATION_FULL_SYNC_ENABLED = 'false';
++  process.env.ELATION_READ_ALLOWLIST = '';
++  process.env.ELATION_INGEST_EXTRA = '';
++  assert.equal(gate.isIngestAllowedFor('999845', { status: 'invited' }), false);
++  assert.equal(gate.isReadAllowedFor('999845', { status: 'invited' }), false);
++  process.env.ELATION_READ_ALLOWLIST = '999845';
++  assert.equal(gate.isIngestAllowedFor('999845', { status: 'invited' }), true);
++  assert.equal(gate.isReadAllowedFor('999845', { status: 'invited' }), true);
++  assert.equal(gate.isIngestAllowedFor('999846', { status: 'invited' }), false);
++});
+diff --git a/functions/test/unit/read-artifact-b4.test.cjs b/functions/test/unit/read-artifact-b4.test.cjs
+--- /dev/null
++++ b/functions/test/unit/read-artifact-b4.test.cjs
+@@ -0,0 +1,86 @@
++const { test } = require('node:test');
++const assert = require('node:assert/strict');
++const Module = require('node:module');
++let category = 'lab', reportExists = true, hidden = false, suspended = false;
++let signed = [], repairs = [], references = [], storage = [], legacy = false;
++const real = Module._load;
++const firestore = () => ({ collection: name => ({
++  add: async () => ({}),
++  doc: patient => ({ collection: () => ({ doc: report => ({ get: async () => {
++    references.push([patient, report]);
++    return { exists: reportExists, get: key => key === 'category' ? category : false };
++  } }) }) }),
++}) });
++const mocks = {
++  'firebase-admin': { firestore, storage: () => ({ bucket: () => ({ file: path => ({
++    exists: async () => { storage.push(path); return [legacy ? path.startsWith('legacy/') : true]; },
++    getSignedUrl: async () => { signed.push(path); return ['https://synthetic.invalid/signed']; },
++  }) }) }) },
++  '../../../middleware/verifyAuth': { verifyPatientToken: async header => {
++    if (header !== 'Bearer owner') throw new Error('Invalid token');
++    return { uid: 'owneruid', token: { uid: 'OwnerUID' } };
++  } },
++  '../elation/resolvePatientForCaller': { resolvePatientForCaller: async (uid, opts) => {
++    assert.equal(uid, 'owneruid'); assert.equal(opts.authUid, 'OwnerUID');
++    return { id: '999845', data: () => ({ authUid: 'OwnerUID', status: 'inactive', membershipStatus: 'inactive' }) };
++  } },
++  '../patient/readSubject': { resolveReadSubject: async ({ selfDoc, childElationId }) => {
++    if (childElationId && childElationId !== selfDoc.id) throw Object.assign(new Error('Not available'), { status: 404 });
++    return { elationPatientId: selfDoc.id, mode: 'self', data: selfDoc.data() };
++  } },
++  '../patient/portalAccess': {
++    getPortalAccess: async () => ({}), assertNotSuspended: async () => { if (suspended) throw Object.assign(new Error('Suspended'), { portalReason: 'ACCESS_SUSPENDED' }); },
++    isModuleVisible: () => !hidden, filterHidden: (access, module, list) => list,
++  },
++  '../patient/internalUid': {
++    getInternalUid: async id => { assert.equal(id, '999845'); return { internalUid: 'internal-owner', legacyUid: 'legacy-owner' }; },
++    objectPathFor: (uid, report) => `internal/${uid}/${report}`,
++    legacyObjectPathFor: (uid, report) => `legacy/${uid}/${report}`,
++    legacyFallbackEnabled: () => legacy,
++  },
++  './repairQueue': { enqueueRepair: async (...args) => repairs.push(args), PREPARING: { state: 'preparing' } },
++};
++Module._load = function(request, ...args) { return mocks[request] || real.call(this, request, ...args); };
++const { handleArtifactRead } = require('../../core/services/artifacts/readArtifact');
++Module._load = real;
++function reset() { category = 'lab'; reportExists = true; hidden = false; suspended = false; signed = []; repairs = []; references = []; storage = []; legacy = false; }
++const req = { headers: { authorization: 'Bearer owner' }, body: { patientId: '999846', authUid: 'StrangerUID' } };
++for (const [module, stored] of [['labs','lab'],['imaging','imaging'],['records','medical_records']]) {
++  test(`B4 ${module}: authorized artifact succeeds with allowlist/full-sync off and inactive Hint`, async () => {
++    reset(); category = stored;
++    process.env.ELATION_READ_ALLOWLIST = ''; process.env.ELATION_FULL_SYNC_ENABLED = 'false';
++    const out = await handleArtifactRead(req, { reportId: 'own-report', module });
++    assert.equal(out.elationPatientId, '999845'); assert.equal(out.signedUrl, 'https://synthetic.invalid/signed');
++    assert.deepEqual(references, [['999845','own-report']]); assert.deepEqual(signed, ['internal/internal-owner/own-report']); assert.equal(repairs.length, 0);
++  });
++}
++test('B4 artifact: legacy fallback remains derived from authorized subject', async () => {
++  reset(); legacy = true;
++  await handleArtifactRead(req, { reportId: 'own-report', module: 'labs' });
++  assert.deepEqual(signed, ['legacy/legacy-owner/own-report']);
++});
++test('B4 artifact: cross-patient reference signs and repairs nothing', async () => {
++  reset(); reportExists = false;
++  await assert.rejects(handleArtifactRead(req, { reportId: 'other-report', module: 'labs' }), e => e.reason === 'ARTIFACT_NOT_SYNCED');
++  assert.equal(signed.length, 0); assert.equal(repairs.length, 0); assert.equal(storage.length, 0);
++});
++test('B4 artifact: hidden module signs and repairs nothing', async () => {
++  reset(); hidden = true;
++  await assert.rejects(handleArtifactRead(req, { reportId: 'own-report', module: 'labs' }), e => e.reason === 'ARTIFACT_NOT_SYNCED');
++  assert.equal(signed.length, 0); assert.equal(repairs.length, 0);
++});
++test('B4 artifact: no token reaches neither reference nor Storage', async () => {
++  reset();
++  await assert.rejects(handleArtifactRead({ headers: {} }, { reportId: 'own-report', module: 'labs' }), e => e.status === 401);
++  assert.equal(references.length, 0); assert.equal(storage.length, 0);
++});
++test('B4 artifact: stranger child selector never falls through to self', async () => {
++  reset();
++  await assert.rejects(handleArtifactRead({ ...req, body: { childElationId: '999846' } }, { reportId: 'own-report', module: 'labs' }), e => e.status === 404);
++  assert.equal(references.length, 0); assert.equal(storage.length, 0);
++});
++test('B4 artifact: explicit suspension remains enforced', async () => {
++  reset(); suspended = true;
++  await assert.rejects(handleArtifactRead(req, { reportId: 'own-report', module: 'labs' }), e => e.reason === 'ACCESS_SUSPENDED');
++  assert.equal(references.length, 0); assert.equal(storage.length, 0);
++});

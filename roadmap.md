@@ -1,5 +1,10 @@
 # Roadmap
 
+## Nov 9 — B4 Elation read-side allowlist retirement
+- [x] Audited all nine reads plus shared artifact helper; preserved Bearer verification and added original token.uid exact patient.authUid validation after existing index lookup. No membership gate; guardian controls unchanged.
+- [x] Removed read call-site containment only; shared accessGate and all non-read/provisioning/deploy/rules sources byte-unchanged. Exact committed CI runner 40 emulator + 15 focused tests PASS; existing guardian/no-blocker/discovery/roster/auto-invite/refill suites PASS.
+- [x] Opened PR #593 at 8b6c4926 (Closes documented #403; Issues create/read 403). Published 20-file scope and critical source verified, complete review patch delivered; no merge/deploy. GitHub checks read 403; Actions status queried separately.
+
 ## Nov 9 — portal SendGrid receiver PR #559 / issue #362
 - [x] Key correction published at 00e2b930: SENDGRID_PORTAL_WEBHOOK_SIGNING_KEY only, no CRM fallback. Recorded main-account portal vs CRM-subuser topology documented; 33 receiver + 29 real Firestore + 2 no-blocker tests PASS. No merge/deploy, secrets/settings unchanged.
 - [x] #559 amended at 48dc6830 against current callable-only main; Closes #362. Existing SENDGRID_WEBHOOK_SIGNING_KEY reference, signed raw bytes, atomic event+suppression, admin-read/client-write-denied collections; CRM unchanged.
