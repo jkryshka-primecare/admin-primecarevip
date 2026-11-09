@@ -4,7 +4,8 @@
 - [x] Red-team fixtures seed true-case authUid (bindMember shape); positives 200; denials 404 RECORD_NOT_AVAILABLE no PHI
 - [x] guardian-uid-case-d068 asserts exact-case caller contract + retired allowlist; mutation check red; pushed fbf2bb6c, Red-team CI green
 - [x] Firestore-side prod audit: 0 drift / 0 duplicate across 305 login-bound; 2 active have authUid but no firebaseUid (pre-existing lockout)
-- [ ] BLOCKED ON OWNER: temporary roles/firebaseauth.viewer on lovable-portal-readonly to verify live Auth exact resolution; backfill the 2 before deploy
+- [x] Nov 9 17:36 UTC read-only live Auth rerun succeeded: 1,036 active Hint members, 269 login-bound; 0 stored authUids fail exact live Auth resolution. Broader audit flags 3 active records: 2 missing firebaseUid and 1 multiple live Auth UIDs sharing lowercase form. All 305 login-bound portal records have live exact authUid resolution.
+- [ ] BLOCKED ON OWNER: authorize repair of 2 missing firebaseUid bindings and review the active lowercase-UID collision before release; no merge/deploy or production mutation performed.
 
 ## Nov 9 — B4 Elation read-side allowlist retirement
 - [x] Audited all nine reads plus shared artifact helper; preserved Bearer verification and added original token.uid exact patient.authUid validation after existing index lookup. No membership gate; guardian controls unchanged.
