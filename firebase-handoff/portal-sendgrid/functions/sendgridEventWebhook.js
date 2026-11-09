@@ -36,7 +36,9 @@ const {
 } = require('./core/services/email/suppression');
 
 const PROJECT_ID = process.env.GCLOUD_PROJECT || 'prive-care-vip';
-const SECRET_NAME = 'SENDGRID_WEBHOOK_SIGNING_KEY';
+// Main-account PORTAL Event Webhook key only. The CRM subuser's
+// SENDGRID_WEBHOOK_SIGNING_KEY is independent; never fall back to it.
+const SECRET_NAME = 'SENDGRID_PORTAL_WEBHOOK_SIGNING_KEY';
 const EVENTS_COLLECTION = 'emailEvents';
 /** SendGrid batches; anything larger than this is not a real batch. */
 const MAX_EVENTS_PER_REQUEST = 5000;

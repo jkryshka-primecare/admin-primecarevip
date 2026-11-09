@@ -78,7 +78,7 @@ diff --git a/functions/index.js b/functions/index.js
 diff --git a/functions/sendgridEventWebhook.js b/functions/sendgridEventWebhook.js
 --- a/functions/sendgridEventWebhook.js
 +++ b/functions/sendgridEventWebhook.js
-@@ -0,0 +1,196 @@
+@@ -0,0 +1,198 @@
 +// functions/sendgridEventWebhook.js
 +// #362 / D-408 — SendGrid Event Webhook receiver.
 +//
@@ -117,7 +117,9 @@ diff --git a/functions/sendgridEventWebhook.js b/functions/sendgridEventWebhook.
 +} = require('./core/services/email/suppression');
 +
 +const PROJECT_ID = process.env.GCLOUD_PROJECT || 'prive-care-vip';
-+const SECRET_NAME = 'SENDGRID_WEBHOOK_SIGNING_KEY';
++// Main-account PORTAL Event Webhook key only. The CRM subuser's
++// SENDGRID_WEBHOOK_SIGNING_KEY is independent; never fall back to it.
++const SECRET_NAME = 'SENDGRID_PORTAL_WEBHOOK_SIGNING_KEY';
 +const EVENTS_COLLECTION = 'emailEvents';
 +/** SendGrid batches; anything larger than this is not a real batch. */
 +const MAX_EVENTS_PER_REQUEST = 5000;
@@ -530,7 +532,7 @@ diff --git a/functions/core/services/email/suppression.js b/functions/core/servi
 diff --git a/functions/test/unit/sendgrid-event-webhook-d408.test.cjs b/functions/test/unit/sendgrid-event-webhook-d408.test.cjs
 --- a/functions/test/unit/sendgrid-event-webhook-d408.test.cjs
 +++ b/functions/test/unit/sendgrid-event-webhook-d408.test.cjs
-@@ -0,0 +1,456 @@
+@@ -0,0 +1,472 @@
 +// #362 / D-408 — SendGrid Event Webhook receiver + emailEvents + suppression.
 +//   node functions/test/unit/sendgrid-event-webhook-d408.test.cjs
 +
@@ -548,6 +550,8 @@ diff --git a/functions/test/unit/sendgrid-event-webhook-d408.test.cjs b/function
 +adminStub.firestore.FieldValue = { serverTimestamp: () => ({ __sv: true }) };
 +
 +const origLoad = Module._load;
++const secretRequests = [];
++let fixtureSecret = null;
 +Module._load = function (request) {
 +  if (request === 'firebase-admin') return adminStub;
 +  if (request === 'firebase-functions') {
@@ -557,13 +561,17 @@ diff --git a/functions/test/unit/sendgrid-event-webhook-d408.test.cjs b/function
 +  }
 +  if (request === 'firebase-functions/v2/scheduler') return { onSchedule: () => ({}) };
 +  if (request === '@google-cloud/secret-manager') {
-+    return { SecretManagerServiceClient: class { async accessSecretVersion() { throw new Error('no secret manager in tests'); } } };
++    return { SecretManagerServiceClient: class { async accessSecretVersion(request) {
++      secretRequests.push(request.name);
++      if (!fixtureSecret) throw new Error('no secret manager in tests');
++      return [{ payload: { data: Buffer.from(fixtureSecret) } }];
++    } } };
 +  }
 +  return origLoad.apply(this, arguments);
 +};
 +
 +const sg = require(path.join(fnDir, 'core/services/email/sendgridEvents.js'));
-+const { handleEventWebhook, EVENTS_COLLECTION, SUPPRESSION_COLLECTION, getVerificationKey, SECRET_NAME } = require(path.join(fnDir, 'sendgridEventWebhook.js'));
++const { handleEventWebhook, EVENTS_COLLECTION, SUPPRESSION_COLLECTION, getVerificationKey, SECRET_NAME, _setCachedKeyForTest } = require(path.join(fnDir, 'sendgridEventWebhook.js'));
 +// The D-407 autosender reads suppression through this SHARED module; driving
 +// the same reader over rows this receiver wrote is the alignment proof.
 +const { loadSuppressedEmails } = require(path.join(fnDir, 'core/services/email/suppression.js'));
@@ -695,11 +703,21 @@ diff --git a/functions/test/unit/sendgrid-event-webhook-d408.test.cjs b/function
 +}
 +
 +(async () => {
-+  await t('portal signing-key name matches the existing Secret Manager secret', () => {
-+    assert.strictEqual(SECRET_NAME, 'SENDGRID_WEBHOOK_SIGNING_KEY');
++  await t('portal signing-key name is distinct from the CRM subuser secret', () => {
++    assert.strictEqual(SECRET_NAME, 'SENDGRID_PORTAL_WEBHOOK_SIGNING_KEY');
 +  });
-+  await t('unavailable Secret Manager key never falls back to unsigned access', async () => {
++  await t('missing portal key fails closed and never fetches the CRM key', async () => {
++    secretRequests.length = 0;
 +    await assert.rejects(getVerificationKey(), /no secret manager in tests/);
++    assert.deepStrictEqual(secretRequests, [`projects/${process.env.GCLOUD_PROJECT || 'prive-care-vip'}/secrets/SENDGRID_PORTAL_WEBHOOK_SIGNING_KEY/versions/latest`]);
++  });
++  await t('configured portal key is fetched only from its dedicated secret', async () => {
++    secretRequests.length = 0;
++    fixtureSecret = PUBLIC_B64;
++    assert.strictEqual(await getVerificationKey(NOW), PUBLIC_B64);
++    assert.deepStrictEqual(secretRequests, [`projects/${process.env.GCLOUD_PROJECT || 'prive-care-vip'}/secrets/SENDGRID_PORTAL_WEBHOOK_SIGNING_KEY/versions/latest`]);
++    fixtureSecret = null;
++    _setCachedKeyForTest(null);
 +  });
 +  // ---------- signature verification ----------
 +  await t('valid signature verifies', () => {
@@ -718,7 +736,7 @@ diff --git a/functions/test/unit/sendgrid-event-webhook-d408.test.cjs b/function
 +    assert.strictEqual(r.reason, 'BAD_SIGNATURE');
 +  });
 +
-+  await t('signature from a different key fails', () => {
++  await t('CRM-subuser fixture signature fails verification with the portal key', () => {
 +    const other = crypto.generateKeyPairSync('ec', { namedCurve: 'prime256v1' }).privateKey;
 +    const raw = Buffer.from('[]');
 +    const r = sg.verifyEventSignature({ publicKey: PUBLIC_B64, signature: sign(TS_SECONDS, raw, other), timestamp: TS_SECONDS, rawBody: raw, nowMs: NOW });
@@ -1094,7 +1112,7 @@ diff --git a/functions/test/unit/sendgrid-rules.emulator.test.cjs b/functions/te
 +}diff --git a/plans/DECISION-LOG.md b/plans/DECISION-LOG.md
 --- a/plans/DECISION-LOG.md
 +++ b/plans/DECISION-LOG.md
-@@ -2250,3 +2250,82 @@
+@@ -2250,3 +2250,85 @@
  4. Invites then flow through D-407 unchanged: at most 10 per run, pacing, a kill switch check before each send, auto-stop after 2 failures in a row, a live suppression feed, and a send-time address check.
  
  **Tests:** `pnpm test:roster-backfill` (Auth + Firestore emulators, CI `roster-backfill-test`), 5/5 passing: the gate; report-only and dry-run write nothing outside the report; shared, owned and duplicate charts are skipped, and created docs are invisible to the queue; the cap holds and re-runs never double-create; release respects its cap, skips claimed and stale-email docs, and never re-releases.
@@ -1177,6 +1195,9 @@ diff --git a/functions/test/unit/sendgrid-rules.emulator.test.cjs b/functions/te
 +
 +### D-408 amendment — 2026-11-09 (#559 / #362)
 +Use existing SENDGRID_WEBHOOK_SIGNING_KEY for the portal signing key; confirm it belongs to the portal webhook (CRM remains independent). Event and suppression writes now commit atomically, so a suppression failure cannot silently escape on retry. Both collections deny all client writes and allow admin reads only, verified using real Firestore rules tests. Receiver remains review-only: no merge/deploy, no sends, no flag or trigger changes. Older early-deploy language above is historical, not current authorization.
++
++### D-408 signing-key correction — 2026-11-09 (#559 / #362)
++Supersedes the preceding amendment's key-name instruction: recorded portal feed uses the SendGrid MAIN account; CRM uses the independent primecarevip-crm subuser and SENDGRID_WEBHOOK_SIGNING_KEY. Portal receiver reads NEW SENDGRID_PORTAL_WEBHOOK_SIGNING_KEY only, with no CRM-key fallback; populate it with the main account PORTAL Event Webhook public verification key at configuration time and grant receiver runtime access. Until available, fail closed with 503. Separate webhook/keypairs prevent cross-delivery. Live settings and secret values were not inspected; no secrets created/changed, no merge/deploy, no sends or flag/trigger changes. Historical entries preserved.
 diff --git a/plans/INTEGRATION-CONTRACT.md b/plans/INTEGRATION-CONTRACT.md
 --- a/plans/INTEGRATION-CONTRACT.md
 +++ b/plans/INTEGRATION-CONTRACT.md
@@ -1186,7 +1207,7 @@ diff --git a/plans/INTEGRATION-CONTRACT.md b/plans/INTEGRATION-CONTRACT.md
 +# Portal SendGrid receiver review amendment — 2026-11-09 (#559 / Closes #362)
 +
 +- `sendgridEventWebhook` is a separate gen-1 HTTPS receiver in us-central1, in portal-functions. It uses `admin.firestore()` (default portal database); no CRM code/database or CRM webhook changes.
-+- Secret Manager `SENDGRID_WEBHOOK_SIGNING_KEY` supplies the SendGrid public ECDSA verification key, fetched through runtime ADC. The older proposed `SENDGRID_EVENT_WEBHOOK_VERIFICATION_KEY` name is superseded. The existing key must correspond to the PORTAL Event Webhook, not the CRM subuser's webhook; separate keypairs prevent cross-delivery. No secret values are read or changed in this review.
++- Recorded topology: portal feed is on the SendGrid MAIN account; CRM is the independent `primecarevip-crm` subuser with its own signed webhook/key. Runtime ADC fetches NEW `SENDGRID_PORTAL_WEBHOOK_SIGNING_KEY` ONLY; populate it at configuration time with the main account's PORTAL Event Webhook public verification key and grant receiver runtime access. CRM `SENDGRID_WEBHOOK_SIGNING_KEY` stays unchanged; no fallback/reuse. This supersedes older proposed secret names. Missing/unreadable portal key returns 503, never accepts unsigned requests. No secret values read/created/changed; live SendGrid settings not audited in this review.
 +- Verify timestamp + exact `req.rawBody` using SHA-256 / DER ECDSA P-256 before parsing/writing. Missing/invalid signature or skew beyond 10 minutes: 403; inaccessible key: 503; bad JSON: 400; no sends, Auth mutations or patient writes.
 +- Event IDs deduplicate atomically: `emailEvents` creation and any `emailSuppression` upsert share ONE transaction. Suppression failure rolls back the event, returns 500, and permits safe retry; duplicates never reapply suppression. The existing #558 suppression reader remains unchanged.
 +- Both collections: admin/super_admin reads only; ALL client create/update/delete denied (including admin clients). Real Firestore emulator rules matrix is in CI alongside signed-event/retry tests.

@@ -15,6 +15,8 @@ adminStub.firestore.Timestamp = TS;
 adminStub.firestore.FieldValue = { serverTimestamp: () => ({ __sv: true }) };
 
 const origLoad = Module._load;
+const secretRequests = [];
+let fixtureSecret = null;
 Module._load = function (request) {
   if (request === 'firebase-admin') return adminStub;
   if (request === 'firebase-functions') {
@@ -24,13 +26,17 @@ Module._load = function (request) {
   }
   if (request === 'firebase-functions/v2/scheduler') return { onSchedule: () => ({}) };
   if (request === '@google-cloud/secret-manager') {
-    return { SecretManagerServiceClient: class { async accessSecretVersion() { throw new Error('no secret manager in tests'); } } };
+    return { SecretManagerServiceClient: class { async accessSecretVersion(request) {
+      secretRequests.push(request.name);
+      if (!fixtureSecret) throw new Error('no secret manager in tests');
+      return [{ payload: { data: Buffer.from(fixtureSecret) } }];
+    } } };
   }
   return origLoad.apply(this, arguments);
 };
 
 const sg = require(path.join(fnDir, 'core/services/email/sendgridEvents.js'));
-const { handleEventWebhook, EVENTS_COLLECTION, SUPPRESSION_COLLECTION, getVerificationKey, SECRET_NAME } = require(path.join(fnDir, 'sendgridEventWebhook.js'));
+const { handleEventWebhook, EVENTS_COLLECTION, SUPPRESSION_COLLECTION, getVerificationKey, SECRET_NAME, _setCachedKeyForTest } = require(path.join(fnDir, 'sendgridEventWebhook.js'));
 // The D-407 autosender reads suppression through this SHARED module; driving
 // the same reader over rows this receiver wrote is the alignment proof.
 const { loadSuppressedEmails } = require(path.join(fnDir, 'core/services/email/suppression.js'));
@@ -162,11 +168,21 @@ async function post(db, events, opts) {
 }
 
 (async () => {
-  await t('portal signing-key name matches the existing Secret Manager secret', () => {
-    assert.strictEqual(SECRET_NAME, 'SENDGRID_WEBHOOK_SIGNING_KEY');
+  await t('portal signing-key name is distinct from the CRM subuser secret', () => {
+    assert.strictEqual(SECRET_NAME, 'SENDGRID_PORTAL_WEBHOOK_SIGNING_KEY');
   });
-  await t('unavailable Secret Manager key never falls back to unsigned access', async () => {
+  await t('missing portal key fails closed and never fetches the CRM key', async () => {
+    secretRequests.length = 0;
     await assert.rejects(getVerificationKey(), /no secret manager in tests/);
+    assert.deepStrictEqual(secretRequests, [`projects/${process.env.GCLOUD_PROJECT || 'prive-care-vip'}/secrets/SENDGRID_PORTAL_WEBHOOK_SIGNING_KEY/versions/latest`]);
+  });
+  await t('configured portal key is fetched only from its dedicated secret', async () => {
+    secretRequests.length = 0;
+    fixtureSecret = PUBLIC_B64;
+    assert.strictEqual(await getVerificationKey(NOW), PUBLIC_B64);
+    assert.deepStrictEqual(secretRequests, [`projects/${process.env.GCLOUD_PROJECT || 'prive-care-vip'}/secrets/SENDGRID_PORTAL_WEBHOOK_SIGNING_KEY/versions/latest`]);
+    fixtureSecret = null;
+    _setCachedKeyForTest(null);
   });
   // ---------- signature verification ----------
   await t('valid signature verifies', () => {
@@ -185,7 +201,7 @@ async function post(db, events, opts) {
     assert.strictEqual(r.reason, 'BAD_SIGNATURE');
   });
 
-  await t('signature from a different key fails', () => {
+  await t('CRM-subuser fixture signature fails verification with the portal key', () => {
     const other = crypto.generateKeyPairSync('ec', { namedCurve: 'prime256v1' }).privateKey;
     const raw = Buffer.from('[]');
     const r = sg.verifyEventSignature({ publicKey: PUBLIC_B64, signature: sign(TS_SECONDS, raw, other), timestamp: TS_SECONDS, rawBody: raw, nowMs: NOW });

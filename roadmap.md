@@ -1,9 +1,10 @@
 # Roadmap
 
 ## Nov 9 — portal SendGrid receiver PR #559 / issue #362
+- [x] Key correction published at 00e2b930: SENDGRID_PORTAL_WEBHOOK_SIGNING_KEY only, no CRM fallback. Recorded main-account portal vs CRM-subuser topology documented; 33 receiver + 29 real Firestore + 2 no-blocker tests PASS. No merge/deploy, secrets/settings unchanged.
 - [x] #559 amended at 48dc6830 against current callable-only main; Closes #362. Existing SENDGRID_WEBHOOK_SIGNING_KEY reference, signed raw bytes, atomic event+suppression, admin-read/client-write-denied collections; CRM unchanged.
 - [x] 32 receiver/retry + 29 real Firestore + 2 no-blocker entrypoint checks PASS; existing autosender suite PASS. Full review patch saved; PR body/comment updated; no merge/deploy or flag/trigger changes.
-- Release prerequisite (not authorized): confirm existing named key is for PORTAL webhook, not historical CRM subuser; configure distinct webhook and verify recent authentic feed only after separate release approval.
+- Release prerequisite (not authorized): populate NEW SENDGRID_PORTAL_WEBHOOK_SIGNING_KEY with main-account portal Event Webhook public verification key and grant portal runtime access; leave CRM key unchanged, configure distinct webhook and verify recent authentic feed only after separate release approval. Live SendGrid settings not audited.
 
 ## Nov 6 — D-070 production Google audience wiring
 - [x] PR #592 (e0bc4b89): exactly two additions in deploy-production.yml using SOCIAL_GOOGLE_CLIENT_IDS_PRODUCTION and project-scoped env output; references #585 because GitHub Issues read/create denied HTTP403. YAML, populated/empty env smoke checks and published PR one-file/two-addition scope PASS. No merge/deploy; Apple omitted, flags and triggers untouched.
