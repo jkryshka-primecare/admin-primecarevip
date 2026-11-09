@@ -1,0 +1,1196 @@
+diff --git a/.github/workflows/sendgrid-event-webhook-gate.yml b/.github/workflows/sendgrid-event-webhook-gate.yml
+--- a/.github/workflows/sendgrid-event-webhook-gate.yml
++++ b/.github/workflows/sendgrid-event-webhook-gate.yml
+@@ -0,0 +1,34 @@
++name: sendgrid-event-webhook-gate
++on:
++  pull_request:
++    paths:
++      - 'functions/**'
++      - 'firestore.rules'
++      - '.github/workflows/sendgrid-event-webhook-gate.yml'
++  workflow_dispatch:
++permissions:
++  contents: read
++jobs:
++  portal-sendgrid:
++    runs-on: ubuntu-latest
++    timeout-minutes: 15
++    steps:
++      - uses: actions/checkout@v4
++      - uses: actions/setup-node@v4
++        with:
++          node-version: '22'
++      - uses: actions/setup-java@v4
++        with:
++          distribution: temurin
++          java-version: '17'
++      - name: Signed events, retries, portal isolation
++        run: node functions/test/unit/sendgrid-event-webhook-d408.test.cjs
++      - name: Install isolated test tooling (no production credentials)
++        run: npm install --prefix /tmp/sendgrid-test --no-save firebase-tools@13.29.2 @firebase/rules-unit-testing@3.0.4 firebase@10.14.1 firebase-admin@12.7.0
++      - name: Real portal collection security rules
++        env:
++          NODE_PATH: /tmp/sendgrid-test/node_modules
++          GCLOUD_PROJECT: demo-portal-sendgrid
++        run: |
++          printf '%s' '{"firestore":{"rules":"firestore.rules"},"emulators":{"firestore":{"port":8085},"ui":{"enabled":false}}}' > sendgrid-test.firebase.json
++          node /tmp/sendgrid-test/node_modules/firebase-tools/lib/bin/firebase.js emulators:exec --config sendgrid-test.firebase.json --project demo-portal-sendgrid --only firestore 'node --test functions/test/unit/sendgrid-rules.emulator.test.cjs'diff --git a/firestore.rules b/firestore.rules
+--- a/firestore.rules
++++ b/firestore.rules
+@@ -492,6 +492,16 @@
+       allow write: if false;
+     }
+ 
++    // Portal event/suppression records: server writes only, admin client reads.
++    match /emailEvents/{docId} {
++      allow read: if isAdmin();
++      allow write: if false;
++    }
++    match /emailSuppression/{docId} {
++      allow read: if isAdmin();
++      allow write: if false;
++    }
++
+     match /config/{docId} {
+       allow read: if isAdmin();
+       allow write: if false;
+diff --git a/functions/index.js b/functions/index.js
+--- a/functions/index.js
++++ b/functions/index.js
+@@ -65,6 +65,8 @@
+ const { socialAvailability, socialBeginAttempt, socialLinkExisting, socialStartVerification, socialConfirmVerification } = require('./socialSignIn');
+ // D-316 / #527 — roster provisioner (resurrects live claim links for doc-less patients).
+ const { provisionRosterDocs } = require('./provisionRosterDocs');
++// #362 / D-408 — portal-only signed event receiver.
++const { sendgridEventWebhook } = require('./sendgridEventWebhook');
+ const { adminRosterBackfill } = require('./adminRosterBackfill');
+ const { memberSetGuardianConsent } = require('./memberSetGuardianConsent');
+ const { dependentBirthdaySweep } = require('./dependentBirthdaySweep');
+@@ -141,6 +143,7 @@
+   socialStartVerification,
+   socialConfirmVerification,
+   provisionRosterDocs,
++  sendgridEventWebhook,
+   adminRosterBackfill,
+   memberSetGuardianConsent,
+   dependentBirthdaySweep,
+diff --git a/functions/sendgridEventWebhook.js b/functions/sendgridEventWebhook.js
+--- a/functions/sendgridEventWebhook.js
++++ b/functions/sendgridEventWebhook.js
+@@ -0,0 +1,196 @@
++// functions/sendgridEventWebhook.js
++// #362 / D-408 — SendGrid Event Webhook receiver.
++//
++// Public HTTPS endpoint (SendGrid must be able to reach it, so the invoker
++// binding is allUsers, same as twilioWebhook). Open invocation is NOT open
++// access: the gate is in-function ECDSA signature verification against the
++// webhook's verification key, held in Secret Manager. Unverified request ->
++// 403 and NOTHING is written.
++//
++// What it maintains:
++//   emailEvents/{sg_event_id}    every event, idempotent by sg_event_id
++//   emailSuppression/{email}     the suppression source the Phase 2
++//                                autosender (#558 / D-407) fail-closes without
++//
++// Review only: no merge/deploy authorized. Portal default Firestore only;
++// never import CRM handlers or select the named `crm` database.
++
++const functions = require('firebase-functions');
++const admin = require('firebase-admin');
++const { SecretManagerServiceClient } = require('@google-cloud/secret-manager');
++const { log, logError } = require('./middleware/logger');
++
++const {
++  SIGNATURE_HEADER,
++  TIMESTAMP_HEADER,
++  verifyEventSignature,
++  parseEventBatch,
++  classifyEvent,
++  buildEventRecord,
++} = require('./core/services/email/sendgridEvents');
++// The suppression collection, row shape and upsert live in the SHARED module
++// that the D-407 autosender reads from — see core/services/email/suppression.js.
++const {
++  SUPPRESSION_COLLECTION,
++  writeSuppressionInTransaction,
++} = require('./core/services/email/suppression');
++
++const PROJECT_ID = process.env.GCLOUD_PROJECT || 'prive-care-vip';
++const SECRET_NAME = 'SENDGRID_WEBHOOK_SIGNING_KEY';
++const EVENTS_COLLECTION = 'emailEvents';
++/** SendGrid batches; anything larger than this is not a real batch. */
++const MAX_EVENTS_PER_REQUEST = 5000;
++
++let cachedKey = null;
++let cachedKeyAtMs = 0;
++const KEY_TTL_MS = 10 * 60 * 1000;
++
++/** The verification key lives in Secret Manager — never in code, never in env. */
++async function getVerificationKey(nowMs = Date.now()) {
++  if (cachedKey && nowMs - cachedKeyAtMs < KEY_TTL_MS) return cachedKey;
++  const client = new SecretManagerServiceClient();
++  const [version] = await client.accessSecretVersion({
++    name: `projects/${PROJECT_ID}/secrets/${SECRET_NAME}/versions/latest`,
++  });
++  cachedKey = version.payload.data.toString('utf8').trim();
++  cachedKeyAtMs = nowMs;
++  return cachedKey;
++}
++
++/** Test seam — lets the unit suite inject a key without Secret Manager. */
++function _setCachedKeyForTest(key, nowMs = Date.now()) {
++  cachedKey = key;
++  cachedKeyAtMs = nowMs;
++}
++
++/**
++ * Atomically commit the event and suppression row. A failed suppression
++ * write must not leave an event that makes its retry look already processed.
++ */
++async function storeEvent(db, classified, record, nowMs) {
++  const ref = db.collection(EVENTS_COLLECTION).doc(classified.sgEventId);
++  return db.runTransaction(async (tx) => {
++    const existing = await tx.get(ref);
++    if (existing.exists) return { stored: false, duplicate: true };
++    if (classified.suppression) {
++      await writeSuppressionInTransaction(db, tx, classified, record, nowMs);
++    }
++    tx.create(ref, record);
++    return { stored: true, duplicate: false };
++  });
++}
++
++/**
++ * Core handler, exported so tests can drive it with a fake db/req/res.
++ */
++async function handleEventWebhook({ db, req, res, publicKey, nowMs = Date.now() }) {
++  if (req.method !== 'POST') {
++    res.status(405).json({ error: 'method_not_allowed' });
++    return { rejected: 'METHOD' };
++  }
++
++  const signature = req.headers[SIGNATURE_HEADER] || req.headers[SIGNATURE_HEADER.toUpperCase()];
++  const timestamp = req.headers[TIMESTAMP_HEADER] || req.headers[TIMESTAMP_HEADER.toUpperCase()];
++
++  const verified = verifyEventSignature({
++    publicKey,
++    signature,
++    timestamp,
++    rawBody: req.rawBody,
++    nowMs,
++  });
++  if (!verified.ok) {
++    // Nothing is parsed, nothing is stored. The reason is logged, never the body.
++    logError('sendgridEventWebhook', 'signature_rejected', new Error(verified.reason), {
++      reason: verified.reason,
++    });
++    res.status(403).json({ error: 'forbidden' });
++    return { rejected: verified.reason };
++  }
++
++  const batch = parseEventBatch(req.rawBody);
++  if (!batch.ok) {
++    res.status(400).json({ error: batch.reason.toLowerCase() });
++    return { rejected: batch.reason };
++  }
++  if (batch.events.length > MAX_EVENTS_PER_REQUEST) {
++    res.status(413).json({ error: 'batch_too_large' });
++    return { rejected: 'BATCH_TOO_LARGE' };
++  }
++
++  const stats = {
++    received: batch.events.length,
++    stored: 0,
++    duplicates: 0,
++    suppressed: 0,
++    funnel: 0,
++    invalid: 0,
++    failed: 0,
++  };
++
++  for (const evt of batch.events) {
++    const classified = classifyEvent(evt);
++    if (!classified.valid) {
++      stats.invalid += 1;
++      continue;
++    }
++    const record = buildEventRecord(evt, classified, nowMs);
++    try {
++      const outcome = await storeEvent(db, classified, record, nowMs);
++      if (outcome.duplicate) {
++        stats.duplicates += 1;
++        continue; // a re-delivery re-applies nothing
++      }
++      stats.stored += 1;
++      if (classified.suppression) {
++        stats.suppressed += 1;
++      } else if (classified.funnel) {
++        stats.funnel += 1;
++      }
++    } catch (e) {
++      stats.failed += 1;
++      logError('sendgridEventWebhook', 'event_write_failed', e, { event: classified.eventType });
++    }
++  }
++
++  log('sendgridEventWebhook', 'batch_processed', stats);
++
++  if (stats.failed > 0) {
++    // Non-2xx makes SendGrid retry the batch; stores are idempotent.
++    res.status(500).json({ ok: false, ...stats });
++    return stats;
++  }
++  res.status(200).json({ ok: true, ...stats });
++  return stats;
++}
++
++const sendgridEventWebhook = functions
++  .region('us-central1')
++  .runWith({ memory: '256MB', timeoutSeconds: 120 })
++  .https.onRequest(async (req, res) => {
++    let publicKey = null;
++    try {
++      publicKey = await getVerificationKey();
++    } catch (e) {
++      logError('sendgridEventWebhook', 'verification_key_unavailable', e, {});
++      // Fail CLOSED: no key means we cannot prove the caller is SendGrid.
++      res.status(503).json({ error: 'verification_unavailable' });
++      return;
++    }
++    try {
++      await handleEventWebhook({ db: admin.firestore(), req, res, publicKey });
++    } catch (e) {
++      logError('sendgridEventWebhook', 'unhandled', e, {});
++      if (!res.headersSent) res.status(500).json({ error: 'internal' });
++    }
++  });
++
++module.exports = {
++  sendgridEventWebhook,
++  handleEventWebhook,
++  getVerificationKey,
++  _setCachedKeyForTest,
++  EVENTS_COLLECTION,
++  SUPPRESSION_COLLECTION,
++  SECRET_NAME,
++};
+diff --git a/functions/core/services/email/sendgridEvents.js b/functions/core/services/email/sendgridEvents.js
+--- a/functions/core/services/email/sendgridEvents.js
++++ b/functions/core/services/email/sendgridEvents.js
+@@ -0,0 +1,208 @@
++// functions/core/services/email/sendgridEvents.js
++// #362 / D-408 — pure decision + verification layer for the SendGrid Event
++// Webhook receiver. No Firestore, no network, no secrets: everything here is
++// deterministic and unit-testable. The driver (sendgridEventWebhook.js) owns
++// I/O only.
++//
++// Signature scheme verified against live SendGrid docs at build time (D-079):
++//   https://www.twilio.com/docs/sendgrid/for-developers/tracking-events/getting-started-event-webhook-security-features
++//   - signature header:  X-Twilio-Email-Event-Webhook-Signature   (base64 ASN.1/DER ECDSA)
++//   - timestamp header:  X-Twilio-Email-Event-Webhook-Timestamp
++//   - digest:            SHA-256 over the RAW request bytes, prefixed by the
++//                        timestamp string: sha256(timestamp || rawBody)
++//   - key:               the webhook's public verification key, base64 DER
++//                        SubjectPublicKeyInfo (ECDSA, prime256v1)
++// The docs warn the payload MUST be used in raw-byte form — re-serializing
++// parsed JSON changes bytes and breaks verification. We never touch req.body.
++//
++// Event payload shape verified against:
++//   https://www.twilio.com/docs/sendgrid/for-developers/tracking-events/event
++// A POST body is a JSON ARRAY of event objects; the fields we persist are
++// email, event, timestamp, sg_event_id, sg_message_id, reason, status, type,
++// bounce_classification. Nothing else is stored — no PHI, no categories.
++
++const crypto = require('crypto');
++
++/** Reject signed requests older/newer than this. Replay fence. */
++const MAX_TIMESTAMP_SKEW_MS = 10 * 60 * 1000;
++
++const SIGNATURE_HEADER = 'x-twilio-email-event-webhook-signature';
++const TIMESTAMP_HEADER = 'x-twilio-email-event-webhook-timestamp';
++
++/** Events that must stop us ever emailing that address again. */
++const SUPPRESSION_EVENTS = new Set(['bounce', 'dropped', 'spamreport', 'unsubscribe', 'group_unsubscribe']);
++
++/** Events that feed the invited -> opened onboarding funnel (D-116). Never suppression. */
++const FUNNEL_EVENTS = new Set(['processed', 'delivered', 'open', 'click', 'deferred', 'group_resubscribe']);
++
++function normalizeEmail(value) {
++  if (typeof value !== 'string') return '';
++  return value.trim().toLowerCase();
++}
++
++/**
++ * Firestore doc IDs cannot contain '/'. sg_event_id is standard base64, which
++ * can. base64url-ify it — still collision-free, still 1:1 with the event.
++ */
++function eventDocId(sgEventId) {
++  const raw = typeof sgEventId === 'string' ? sgEventId.trim() : '';
++  if (!raw) return '';
++  return raw.replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
++}
++
++/**
++ * Verify a SendGrid signed Event Webhook request.
++ * Fails CLOSED on every missing input — no key, no signature, no timestamp,
++ * no body all mean "not verified", never "skip verification".
++ *
++ * @returns {{ok: true} | {ok: false, reason: string}}
++ */
++function verifyEventSignature({ publicKey, signature, timestamp, rawBody, nowMs = Date.now(), maxSkewMs = MAX_TIMESTAMP_SKEW_MS }) {
++  if (!publicKey || typeof publicKey !== 'string') return { ok: false, reason: 'NO_VERIFICATION_KEY' };
++  if (!signature || typeof signature !== 'string') return { ok: false, reason: 'MISSING_SIGNATURE' };
++  if (!timestamp || typeof timestamp !== 'string') return { ok: false, reason: 'MISSING_TIMESTAMP' };
++  if (!Buffer.isBuffer(rawBody)) return { ok: false, reason: 'MISSING_RAW_BODY' };
++
++  const tsSeconds = Number(timestamp);
++  if (!Number.isFinite(tsSeconds)) return { ok: false, reason: 'BAD_TIMESTAMP' };
++  if (Math.abs(nowMs - tsSeconds * 1000) > maxSkewMs) return { ok: false, reason: 'TIMESTAMP_OUT_OF_WINDOW' };
++
++  let key;
++  try {
++    key = crypto.createPublicKey({
++      key: Buffer.from(publicKey.replace(/\s+/g, ''), 'base64'),
++      format: 'der',
++      type: 'spki',
++    });
++  } catch (e) {
++    return { ok: false, reason: 'BAD_VERIFICATION_KEY' };
++  }
++
++  let valid = false;
++  try {
++    const verifier = crypto.createVerify('sha256');
++    verifier.update(Buffer.from(timestamp, 'utf8'));
++    verifier.update(rawBody);
++    verifier.end();
++    // SendGrid emits ASN.1/DER-encoded ECDSA signatures — Node's default
++    // dsaEncoding is 'der', which matches.
++    valid = verifier.verify(key, Buffer.from(signature, 'base64'));
++  } catch (e) {
++    valid = false;
++  }
++  return valid ? { ok: true } : { ok: false, reason: 'BAD_SIGNATURE' };
++}
++
++/** Parse the POST body. SendGrid always posts a JSON array of events. */
++function parseEventBatch(rawBody) {
++  let text;
++  try {
++    text = Buffer.isBuffer(rawBody) ? rawBody.toString('utf8') : String(rawBody || '');
++  } catch (e) {
++    return { ok: false, reason: 'UNREADABLE_BODY', events: [] };
++  }
++  let parsed;
++  try {
++    parsed = JSON.parse(text);
++  } catch (e) {
++    return { ok: false, reason: 'INVALID_JSON', events: [] };
++  }
++  if (!Array.isArray(parsed)) return { ok: false, reason: 'NOT_AN_ARRAY', events: [] };
++  return { ok: true, events: parsed };
++}
++
++/**
++ * Classify one event: is it suppression, funnel, or neither?
++ *
++ * Mapping (verified against the Event Webhook Reference):
++ *   bounce + type 'bounce'   -> hard bounce, permanent denial  -> SUPPRESS
++ *   bounce + type 'blocked'  -> temporary denial               -> SUPPRESS (soft)
++ *   dropped                  -> SendGrid refused to send it    -> SUPPRESS
++ *   spamreport               -> complaint                      -> SUPPRESS
++ *   unsubscribe / group_unsubscribe                            -> SUPPRESS
++ *   processed/delivered/open/click/deferred/group_resubscribe  -> FUNNEL only
++ */
++function classifyEvent(evt) {
++  if (!evt || typeof evt !== 'object') return { valid: false, reason: 'NOT_AN_OBJECT' };
++
++  const email = normalizeEmail(evt.email);
++  const eventType = typeof evt.event === 'string' ? evt.event.trim().toLowerCase() : '';
++  const sgEventId = eventDocId(evt.sg_event_id);
++
++  if (!email) return { valid: false, reason: 'NO_EMAIL' };
++  if (!eventType) return { valid: false, reason: 'NO_EVENT_TYPE' };
++  if (!sgEventId) return { valid: false, reason: 'NO_SG_EVENT_ID' };
++
++  const bounceType = typeof evt.type === 'string' ? evt.type.trim().toLowerCase() : '';
++  let suppression = null;
++
++  if (SUPPRESSION_EVENTS.has(eventType)) {
++    let reason = eventType;
++    let severity = 'hard';
++    if (eventType === 'bounce') {
++      if (bounceType === 'blocked') { reason = 'blocked'; severity = 'soft'; }
++      else { reason = 'hard_bounce'; }
++    } else if (eventType === 'spamreport') {
++      reason = 'spam_complaint';
++    } else if (eventType === 'group_unsubscribe') {
++      reason = 'unsubscribe';
++    }
++    suppression = {
++      reason,
++      severity,
++      detail: typeof evt.reason === 'string' ? evt.reason.slice(0, 500) : null,
++      classification: typeof evt.bounce_classification === 'string' ? evt.bounce_classification : null,
++    };
++  }
++
++  return {
++    valid: true,
++    email,
++    eventType,
++    sgEventId,
++    suppression,
++    funnel: !suppression && FUNNEL_EVENTS.has(eventType),
++  };
++}
++
++/**
++ * The stored event record. PII discipline: email + event metadata only.
++ * No categories, no unique args, no message body, no PHI.
++ */
++function buildEventRecord(evt, classified, receivedAtMs) {
++  const tsSeconds = Number(evt.timestamp);
++  return {
++    email: classified.email,
++    event: classified.eventType,
++    sgEventId: classified.sgEventId,
++    sgMessageId: typeof evt.sg_message_id === 'string' ? evt.sg_message_id : null,
++    eventAtMs: Number.isFinite(tsSeconds) ? tsSeconds * 1000 : null,
++    reason: typeof evt.reason === 'string' ? evt.reason.slice(0, 500) : null,
++    status: typeof evt.status === 'string' ? evt.status : null,
++    type: typeof evt.type === 'string' ? evt.type : null,
++    bounceClassification: typeof evt.bounce_classification === 'string' ? evt.bounce_classification : null,
++    suppressing: !!classified.suppression,
++    funnel: !!classified.funnel,
++    source: 'sendgrid_event_webhook',
++    receivedAtMs,
++  };
++}
++
++// The suppression row shape lives in the SHARED module so the D-407 reader and
++// this writer cannot drift apart. Re-exported here for the receiver's callers.
++const { buildSuppressionRow } = require('./suppression');
++
++module.exports = {
++  MAX_TIMESTAMP_SKEW_MS,
++  SIGNATURE_HEADER,
++  TIMESTAMP_HEADER,
++  SUPPRESSION_EVENTS,
++  FUNNEL_EVENTS,
++  normalizeEmail,
++  eventDocId,
++  verifyEventSignature,
++  parseEventBatch,
++  classifyEvent,
++  buildEventRecord,
++  buildSuppressionRow,
++};
+diff --git a/functions/core/services/email/suppression.js b/functions/core/services/email/suppression.js
+--- a/functions/core/services/email/suppression.js
++++ b/functions/core/services/email/suppression.js
+@@ -45,18 +45,21 @@
+  * the latest event detail wins on every other field.
+  */
+ async function applySuppression(db, classified, record, nowMs) {
++  return db.runTransaction((tx) => writeSuppressionInTransaction(db, tx, classified, record, nowMs));
++}
++
++/** Shared writer for the receiver's atomic event + suppression transaction. */
++async function writeSuppressionInTransaction(db, tx, classified, record, nowMs) {
+   const email = normalizeEmail(classified.email);
+   if (!email) return false;
+   const ref = db.collection(SUPPRESSION_COLLECTION).doc(email);
+   const row = buildSuppressionRow(classified, record, nowMs);
+-  await db.runTransaction(async (tx) => {
+-    const snap = await tx.get(ref);
+-    const existing = (snap && snap.exists && snap.data()) || {};
+-    const firstSuppressedAtMs = Number.isFinite(existing.firstSuppressedAtMs)
+-      ? existing.firstSuppressedAtMs
+-      : nowMs;
+-    tx.set(ref, { ...row, firstSuppressedAtMs }, { merge: true });
+-  });
++  const snap = await tx.get(ref);
++  const existing = (snap && snap.exists && snap.data()) || {};
++  const firstSuppressedAtMs = Number.isFinite(existing.firstSuppressedAtMs)
++    ? existing.firstSuppressedAtMs
++    : nowMs;
++  tx.set(ref, { ...row, firstSuppressedAtMs }, { merge: true });
+   return true;
+ }
+ 
+@@ -88,5 +91,6 @@
+   normalizeEmail,
+   buildSuppressionRow,
+   applySuppression,
++  writeSuppressionInTransaction,
+   loadSuppressedEmails,
+ };
+diff --git a/functions/test/unit/sendgrid-event-webhook-d408.test.cjs b/functions/test/unit/sendgrid-event-webhook-d408.test.cjs
+--- a/functions/test/unit/sendgrid-event-webhook-d408.test.cjs
++++ b/functions/test/unit/sendgrid-event-webhook-d408.test.cjs
+@@ -0,0 +1,456 @@
++// #362 / D-408 — SendGrid Event Webhook receiver + emailEvents + suppression.
++//   node functions/test/unit/sendgrid-event-webhook-d408.test.cjs
++
++const assert = require('assert');
++const crypto = require('crypto');
++const path = require('path');
++const Module = require('module');
++
++const fnDir = path.join(__dirname, '..', '..');
++
++// ---- stub firebase-admin / functions / secret-manager --------------------
++const TS = { now: () => ({ __ts: true }) };
++const adminStub = { firestore: () => ({}) };
++adminStub.firestore.Timestamp = TS;
++adminStub.firestore.FieldValue = { serverTimestamp: () => ({ __sv: true }) };
++
++const origLoad = Module._load;
++Module._load = function (request) {
++  if (request === 'firebase-admin') return adminStub;
++  if (request === 'firebase-functions') {
++    const https = { onRequest: () => ({}), onCall: () => ({}) };
++    const runWith = () => ({ https });
++    return { params: { defineSecret: () => ({ value: () => 'x' }) }, runWith, https, region: () => ({ runWith, https }), config: () => ({}) };
++  }
++  if (request === 'firebase-functions/v2/scheduler') return { onSchedule: () => ({}) };
++  if (request === '@google-cloud/secret-manager') {
++    return { SecretManagerServiceClient: class { async accessSecretVersion() { throw new Error('no secret manager in tests'); } } };
++  }
++  return origLoad.apply(this, arguments);
++};
++
++const sg = require(path.join(fnDir, 'core/services/email/sendgridEvents.js'));
++const { handleEventWebhook, EVENTS_COLLECTION, SUPPRESSION_COLLECTION, getVerificationKey, SECRET_NAME } = require(path.join(fnDir, 'sendgridEventWebhook.js'));
++// The D-407 autosender reads suppression through this SHARED module; driving
++// the same reader over rows this receiver wrote is the alignment proof.
++const { loadSuppressedEmails } = require(path.join(fnDir, 'core/services/email/suppression.js'));
++
++let failures = 0;
++function t(name, fn) {
++  const done = (e) => {
++    if (e) { failures += 1; console.log(`FAIL  ${name}\n      ${e.message}`); }
++    else console.log(`  ok  ${name}`);
++  };
++  try {
++    const r = fn();
++    if (r && typeof r.then === 'function') return r.then(() => done(), done);
++    done();
++  } catch (e) { done(e); }
++}
++
++// ---- a real ECDSA P-256 key pair, exactly like SendGrid's ----------------
++const { publicKey, privateKey } = crypto.generateKeyPairSync('ec', { namedCurve: 'prime256v1' });
++const PUBLIC_B64 = publicKey.export({ type: 'spki', format: 'der' }).toString('base64');
++
++function sign(timestamp, rawBody, key = privateKey) {
++  const s = crypto.createSign('sha256');
++  s.update(Buffer.from(String(timestamp), 'utf8'));
++  s.update(rawBody);
++  s.end();
++  return s.sign(key).toString('base64');
++}
++
++const NOW = 1_764_000_000_000; // fixed clock
++const TS_SECONDS = String(Math.floor(NOW / 1000));
++
++function makeReq(events, { signature, timestamp = TS_SECONDS, method = 'POST', rawOverride } = {}) {
++  const rawBody = rawOverride !== undefined ? rawOverride : Buffer.from(JSON.stringify(events), 'utf8');
++  const headers = {};
++  const sigValue = signature === undefined ? sign(timestamp, rawBody) : signature;
++  if (sigValue !== null) headers[sg.SIGNATURE_HEADER] = sigValue;
++  if (timestamp !== null) headers[sg.TIMESTAMP_HEADER] = timestamp;
++  return { method, headers, rawBody };
++}
++
++function makeRes() {
++  const out = { statusCode: null, body: null };
++  out.status = (c) => { out.statusCode = c; return out; };
++  out.json = (b) => { out.body = b; return out; };
++  out.headersSent = false;
++  return out;
++}
++
++// ---- minimal in-memory Firestore ----------------------------------------
++function fakeDb() {
++  const data = new Map(); // "col/id" -> object
++  const key = (c, i) => `${c}/${i}`;
++  const docRef = (c, i) => ({
++    __c: c,
++    __i: i,
++    async create(v) {
++      if (data.has(key(c, i))) { const e = new Error('already exists'); e.code = 6; throw e; }
++      data.set(key(c, i), { ...v });
++    },
++    async set(v, opts) {
++      const prev = (opts && opts.merge && data.get(key(c, i))) || {};
++      data.set(key(c, i), { ...prev, ...v });
++    },
++    async get() {
++      const v = data.get(key(c, i));
++      return { exists: !!v, id: i, data: () => v };
++    },
++  });
++  return {
++    __data: data,
++    collection(c) {
++      return {
++        doc: (i) => docRef(c, i),
++        select() { return this; },
++        async get() {
++          const docs = [];
++          for (const [k, v] of data.entries()) {
++            if (k.startsWith(`${c}/`)) docs.push({ id: k.slice(c.length + 1), data: () => v });
++          }
++          return { size: docs.length, docs, forEach: (f) => docs.forEach(f) };
++        },
++      };
++    },
++    async runTransaction(fn) {
++      const pending = [];
++      const result = await fn({
++        get: (ref) => ref.get(),
++        set: (ref, v, opts) => { pending.push(() => ref.set(v, opts)); },
++        create: (ref, v) => { pending.push(() => ref.create(v)); },
++      });
++      const before = new Map(data);
++      try { for (const write of pending) await write(); }
++      catch (e) { data.clear(); for (const [k, v] of before) data.set(k, v); throw e; }
++      return result;
++    },
++  };
++}
++
++const bounceEvt = (over = {}) => ({
++  email: 'Bouncy@Example.com',
++  timestamp: Math.floor(NOW / 1000),
++  'smtp-id': '<14c5d75ce93.dfd.64b469@ismtpd-555>',
++  bounce_classification: 'Invalid Address',
++  event: 'bounce',
++  category: 'invite',
++  sg_event_id: 'a+b/c==',
++  sg_message_id: '14c5.filter0001',
++  reason: '550 unknown recipient',
++  status: '5.0.0',
++  type: 'bounce',
++  ...over,
++});
++
++const deliveredEvt = (over = {}) => ({
++  email: 'happy@example.com',
++  timestamp: Math.floor(NOW / 1000),
++  event: 'delivered',
++  sg_event_id: 'deliv-1',
++  sg_message_id: '14c5.filter0002',
++  response: '250 OK',
++  ...over,
++});
++
++async function post(db, events, opts) {
++  const res = makeRes();
++  const stats = await handleEventWebhook({ db, req: makeReq(events, opts), res, publicKey: PUBLIC_B64, nowMs: NOW });
++  return { res, stats };
++}
++
++(async () => {
++  await t('portal signing-key name matches the existing Secret Manager secret', () => {
++    assert.strictEqual(SECRET_NAME, 'SENDGRID_WEBHOOK_SIGNING_KEY');
++  });
++  await t('unavailable Secret Manager key never falls back to unsigned access', async () => {
++    await assert.rejects(getVerificationKey(), /no secret manager in tests/);
++  });
++  // ---------- signature verification ----------
++  await t('valid signature verifies', () => {
++    const raw = Buffer.from('[{"a":1}]');
++    assert.deepStrictEqual(
++      sg.verifyEventSignature({ publicKey: PUBLIC_B64, signature: sign(TS_SECONDS, raw), timestamp: TS_SECONDS, rawBody: raw, nowMs: NOW }),
++      { ok: true },
++    );
++  });
++
++  await t('tampered body fails verification', () => {
++    const raw = Buffer.from('[{"a":1}]');
++    const sig = sign(TS_SECONDS, raw);
++    const r = sg.verifyEventSignature({ publicKey: PUBLIC_B64, signature: sig, timestamp: TS_SECONDS, rawBody: Buffer.from('[{"a":2}]'), nowMs: NOW });
++    assert.strictEqual(r.ok, false);
++    assert.strictEqual(r.reason, 'BAD_SIGNATURE');
++  });
++
++  await t('signature from a different key fails', () => {
++    const other = crypto.generateKeyPairSync('ec', { namedCurve: 'prime256v1' }).privateKey;
++    const raw = Buffer.from('[]');
++    const r = sg.verifyEventSignature({ publicKey: PUBLIC_B64, signature: sign(TS_SECONDS, raw, other), timestamp: TS_SECONDS, rawBody: raw, nowMs: NOW });
++    assert.strictEqual(r.reason, 'BAD_SIGNATURE');
++  });
++
++  await t('timestamp is part of the digest (replayed timestamp fails)', () => {
++    const raw = Buffer.from('[]');
++    const sig = sign(TS_SECONDS, raw);
++    const skewed = String(Number(TS_SECONDS) - 60);
++    const r = sg.verifyEventSignature({ publicKey: PUBLIC_B64, signature: sig, timestamp: skewed, rawBody: raw, nowMs: NOW });
++    assert.strictEqual(r.reason, 'BAD_SIGNATURE');
++  });
++
++  await t('stale timestamp rejected before crypto', () => {
++    const old = String(Math.floor(NOW / 1000) - 3600);
++    const raw = Buffer.from('[]');
++    const r = sg.verifyEventSignature({ publicKey: PUBLIC_B64, signature: sign(old, raw), timestamp: old, rawBody: raw, nowMs: NOW });
++    assert.strictEqual(r.reason, 'TIMESTAMP_OUT_OF_WINDOW');
++  });
++
++  await t('fails closed with no key / no signature / no timestamp / no body', () => {
++    const raw = Buffer.from('[]');
++    assert.strictEqual(sg.verifyEventSignature({ publicKey: '', signature: 'x', timestamp: TS_SECONDS, rawBody: raw }).reason, 'NO_VERIFICATION_KEY');
++    assert.strictEqual(sg.verifyEventSignature({ publicKey: PUBLIC_B64, signature: '', timestamp: TS_SECONDS, rawBody: raw }).reason, 'MISSING_SIGNATURE');
++    assert.strictEqual(sg.verifyEventSignature({ publicKey: PUBLIC_B64, signature: 'x', timestamp: '', rawBody: raw }).reason, 'MISSING_TIMESTAMP');
++    assert.strictEqual(sg.verifyEventSignature({ publicKey: PUBLIC_B64, signature: 'x', timestamp: TS_SECONDS, rawBody: undefined }).reason, 'MISSING_RAW_BODY');
++  });
++
++  await t('garbage verification key is rejected, not thrown', () => {
++    const r = sg.verifyEventSignature({ publicKey: 'not-a-key', signature: 'x', timestamp: TS_SECONDS, rawBody: Buffer.from('[]'), nowMs: NOW });
++    assert.strictEqual(r.ok, false);
++    assert.ok(['BAD_VERIFICATION_KEY', 'BAD_SIGNATURE'].includes(r.reason));
++  });
++
++  // ---------- classification ----------
++  await t('hard bounce -> suppression', () => {
++    const c = sg.classifyEvent(bounceEvt());
++    assert.strictEqual(c.suppression.reason, 'hard_bounce');
++    assert.strictEqual(c.suppression.severity, 'hard');
++    assert.strictEqual(c.funnel, false);
++    assert.strictEqual(c.email, 'bouncy@example.com'); // normalized
++  });
++
++  await t('blocked bounce -> suppression, marked soft', () => {
++    const c = sg.classifyEvent(bounceEvt({ type: 'blocked' }));
++    assert.strictEqual(c.suppression.reason, 'blocked');
++    assert.strictEqual(c.suppression.severity, 'soft');
++  });
++
++  await t('dropped / spamreport / unsubscribe / group_unsubscribe -> suppression', () => {
++    const map = {
++      dropped: 'dropped',
++      spamreport: 'spam_complaint',
++      unsubscribe: 'unsubscribe',
++      group_unsubscribe: 'unsubscribe',
++    };
++    for (const [event, reason] of Object.entries(map)) {
++      const c = sg.classifyEvent(bounceEvt({ event, type: undefined, sg_event_id: `e-${event}` }));
++      assert.ok(c.suppression, `${event} must suppress`);
++      assert.strictEqual(c.suppression.reason, reason);
++    }
++  });
++
++  await t('delivered / open / click / processed / deferred -> funnel only', () => {
++    for (const event of ['delivered', 'open', 'click', 'processed', 'deferred']) {
++      const c = sg.classifyEvent(deliveredEvt({ event, sg_event_id: `f-${event}` }));
++      assert.strictEqual(c.suppression, null, `${event} must not suppress`);
++      assert.strictEqual(c.funnel, true);
++    }
++  });
++
++  await t('events without email / type / sg_event_id are invalid', () => {
++    assert.strictEqual(sg.classifyEvent({ event: 'bounce', sg_event_id: 'x' }).reason, 'NO_EMAIL');
++    assert.strictEqual(sg.classifyEvent({ email: 'a@b.c', sg_event_id: 'x' }).reason, 'NO_EVENT_TYPE');
++    assert.strictEqual(sg.classifyEvent({ email: 'a@b.c', event: 'open' }).reason, 'NO_SG_EVENT_ID');
++    assert.strictEqual(sg.classifyEvent(null).valid, false);
++  });
++
++  await t('sg_event_id is made Firestore-safe without collisions', () => {
++    assert.strictEqual(sg.eventDocId('a+b/c=='), 'a-b_c');
++    assert.notStrictEqual(sg.eventDocId('a+b/c=='), sg.eventDocId('a+b+c=='));
++  });
++
++  await t('stored record carries no categories or custom args (PII discipline)', () => {
++    const evt = bounceEvt({ category: 'cat facts', unique_args: { mrn: '123' }, marketing_campaign_name: 'x' });
++    const rec = sg.buildEventRecord(evt, sg.classifyEvent(evt), NOW);
++    assert.ok(!('category' in rec));
++    assert.ok(!('unique_args' in rec));
++    assert.ok(!('marketing_campaign_name' in rec));
++    assert.ok(!('smtp-id' in rec));
++  });
++
++  // ---------- endpoint behaviour ----------
++  await t('valid signed payload -> 200 and stored', async () => {
++    const db = fakeDb();
++    const { res, stats } = await post(db, [bounceEvt()]);
++    assert.strictEqual(res.statusCode, 200);
++    assert.strictEqual(stats.stored, 1);
++    assert.ok(db.__data.has(`${EVENTS_COLLECTION}/a-b_c`));
++  });
++
++  await t('invalid signature -> 403 and NOTHING stored', async () => {
++    const db = fakeDb();
++    const { res } = await post(db, [bounceEvt()], { signature: Buffer.from('nope').toString('base64') });
++    assert.strictEqual(res.statusCode, 403);
++    assert.strictEqual(db.__data.size, 0);
++  });
++
++  await t('missing signature -> 403 and NOTHING stored', async () => {
++    const db = fakeDb();
++    const { res } = await post(db, [bounceEvt()], { signature: null });
++    assert.strictEqual(res.statusCode, 403);
++    assert.strictEqual(db.__data.size, 0);
++  });
++
++  await t('missing timestamp -> 403 and NOTHING stored', async () => {
++    const db = fakeDb();
++    const { res } = await post(db, [bounceEvt()], { timestamp: null });
++    assert.strictEqual(res.statusCode, 403);
++    assert.strictEqual(db.__data.size, 0);
++  });
++
++  await t('GET is refused', async () => {
++    const db = fakeDb();
++    const { res } = await post(db, [], { method: 'GET' });
++    assert.strictEqual(res.statusCode, 405);
++    assert.strictEqual(db.__data.size, 0);
++  });
++
++  await t('non-JSON body with a valid signature -> 400, nothing stored', async () => {
++    const db = fakeDb();
++    const { res } = await post(db, null, { rawOverride: Buffer.from('not json') });
++    assert.strictEqual(res.statusCode, 400);
++    assert.strictEqual(db.__data.size, 0);
++  });
++
++  await t('bounce -> emailEvents AND emailSuppression', async () => {
++    const db = fakeDb();
++    const { stats } = await post(db, [bounceEvt()]);
++    assert.strictEqual(stats.suppressed, 1);
++    const row = db.__data.get(`${SUPPRESSION_COLLECTION}/bouncy@example.com`);
++    assert.ok(row, 'suppression row written keyed by normalized email');
++    assert.strictEqual(row.email, 'bouncy@example.com');
++    assert.strictEqual(row.reason, 'hard_bounce');
++    assert.strictEqual(row.firstSuppressedAtMs, NOW);
++  });
++
++  await t('delivered/open -> funnel only, no suppression row', async () => {
++    const db = fakeDb();
++    const { stats } = await post(db, [deliveredEvt(), deliveredEvt({ event: 'open', sg_event_id: 'open-1' })]);
++    assert.strictEqual(stats.funnel, 2);
++    assert.strictEqual(stats.suppressed, 0);
++    const keys = [...db.__data.keys()];
++    assert.ok(keys.every((k) => !k.startsWith(`${SUPPRESSION_COLLECTION}/`)));
++    assert.strictEqual(keys.length, 2);
++  });
++
++  await t('duplicate sg_event_id -> one record, nothing re-applied', async () => {
++    const db = fakeDb();
++    await post(db, [bounceEvt()]);
++    const first = db.__data.get(`${SUPPRESSION_COLLECTION}/bouncy@example.com`);
++    const { stats } = await post(db, [bounceEvt()]);
++    assert.strictEqual(stats.stored, 0);
++    assert.strictEqual(stats.duplicates, 1);
++    assert.strictEqual(stats.suppressed, 0);
++    assert.strictEqual([...db.__data.keys()].filter((k) => k.startsWith(`${EVENTS_COLLECTION}/`)).length, 1);
++    assert.deepStrictEqual(db.__data.get(`${SUPPRESSION_COLLECTION}/bouncy@example.com`), first);
++  });
++
++  await t('later event for an already-suppressed address keeps firstSuppressedAtMs', async () => {
++    const db = fakeDb();
++    await post(db, [bounceEvt()]);
++    const res2 = makeRes();
++    await handleEventWebhook({
++      db,
++      req: makeReq([bounceEvt({ sg_event_id: 'second', event: 'spamreport', type: undefined })], { timestamp: String(Math.floor((NOW + 60000) / 1000)) }),
++      res: res2,
++      publicKey: PUBLIC_B64,
++      nowMs: NOW + 60000,
++    });
++    const row = db.__data.get(`${SUPPRESSION_COLLECTION}/bouncy@example.com`);
++    assert.strictEqual(row.firstSuppressedAtMs, NOW);
++    assert.strictEqual(row.reason, 'spam_complaint');
++    assert.strictEqual(row.suppressedAtMs, NOW + 60000);
++  });
++
++  await t('mixed batch: suppression + funnel + invalid counted separately', async () => {
++    const db = fakeDb();
++    const { res, stats } = await post(db, [
++      bounceEvt(),
++      deliveredEvt(),
++      { event: 'open' }, // invalid — no email, no id
++    ]);
++    assert.strictEqual(res.statusCode, 200);
++    assert.deepStrictEqual(
++      { received: stats.received, stored: stats.stored, suppressed: stats.suppressed, funnel: stats.funnel, invalid: stats.invalid },
++      { received: 3, stored: 2, suppressed: 1, funnel: 1, invalid: 1 },
++    );
++  });
++
++  await t('a write failure returns 500 so SendGrid retries', async () => {
++    const db = fakeDb();
++    const orig = db.collection.bind(db);
++    db.collection = (c) => {
++      const col = orig(c);
++      if (c === EVENTS_COLLECTION) return { ...col, doc: () => ({ create: async () => { throw new Error('firestore down'); } }) };
++      return col;
++    };
++    const { res } = await post(db, [bounceEvt()]);
++    assert.strictEqual(res.statusCode, 500);
++    assert.strictEqual(db.__data.size, 0, 'event and suppression must roll back together');
++  });
++
++  await t('suppression failure rolls back the event; retry restores both exactly once', async () => {
++    const db = fakeDb();
++    const original = db.collection.bind(db);
++    let fail = true;
++    db.collection = (name) => {
++      const col = original(name);
++      if (name !== SUPPRESSION_COLLECTION) return col;
++      return { ...col, doc: (id) => {
++        const ref = col.doc(id);
++        return { ...ref, set: async (...args) => {
++          if (fail) throw new Error('suppression unavailable');
++          return ref.set(...args);
++        } };
++      } };
++    };
++    const first = await post(db, [bounceEvt()]);
++    assert.strictEqual(first.res.statusCode, 500);
++    assert.strictEqual(db.__data.size, 0);
++    fail = false;
++    const retry = await post(db, [bounceEvt()]);
++    assert.strictEqual(retry.res.statusCode, 200);
++    assert.strictEqual(retry.stats.stored, 1);
++    assert.strictEqual(retry.stats.suppressed, 1);
++    const duplicate = await post(db, [bounceEvt()]);
++    assert.strictEqual(duplicate.stats.duplicates, 1);
++    assert.strictEqual(db.__data.size, 2);
++  });
++
++  await t('portal receiver writes only emailEvents and emailSuppression, never CRM or patient records', async () => {
++    const db = fakeDb();
++    await post(db, [bounceEvt(), deliveredEvt(), bounceEvt({event:'spamreport',sg_event_id:'spam-1'}), bounceEvt({event:'dropped',sg_event_id:'drop-1'})]);
++    assert.strictEqual([...db.__data.keys()].filter(k => k.startsWith('emailEvents/')).length, 4);
++    assert.ok([...db.__data.keys()].every(k => k.startsWith('emailEvents/') || k.startsWith('emailSuppression/')));
++  });
++
++  // ---------- the shared surface with #558 / D-407 ----------
++  await t('the autosender suppression read finds an address suppressed here', async () => {
++    const db = fakeDb();
++    await post(db, [bounceEvt()]);
++    const loaded = await loadSuppressedEmails(db);
++    assert.strictEqual(loaded.ok, true);
++    assert.ok(loaded.emails.has('bouncy@example.com'), 'D-407 reader must see the D-408 row');
++  });
++
++  await t('a funnel-only address is NOT suppressed for the autosender', async () => {
++    const db = fakeDb();
++    await post(db, [deliveredEvt()]);
++    const loaded = await loadSuppressedEmails(db);
++    assert.strictEqual(loaded.emails.size, 0);
++  });
++
++  console.log(failures === 0 ? '\nALL PASS' : `\n${failures} FAILURE(S)`);
++  process.exit(failures === 0 ? 0 : 1);
++})();
+diff --git a/functions/test/unit/sendgrid-rules.emulator.test.cjs b/functions/test/unit/sendgrid-rules.emulator.test.cjs
+--- a/functions/test/unit/sendgrid-rules.emulator.test.cjs
++++ b/functions/test/unit/sendgrid-rules.emulator.test.cjs
+@@ -0,0 +1,101 @@
++const { test, before, after } = require('node:test');
++const assert = require('node:assert/strict');
++const fs = require('node:fs');
++const path = require('node:path');
++const { initializeTestEnvironment, assertSucceeds, assertFails } = require('@firebase/rules-unit-testing');
++const { doc, getDoc, getDocs, collection, setDoc, updateDoc, deleteDoc } = require('firebase/firestore');
++const crypto = require('node:crypto');
++const Module = require('node:module');
++const admin = require('firebase-admin');
++const originalLoad = Module._load;
++Module._load = function (name) {
++  if (name === 'firebase-functions') return { region: () => ({ runWith: () => ({ https: { onRequest: fn => fn } }) }) };
++  if (name === '@google-cloud/secret-manager') return { SecretManagerServiceClient: class {} };
++  return originalLoad.apply(this, arguments);
++};
++const { handleEventWebhook } = require('../../sendgridEventWebhook');
++Module._load = originalLoad;
++let server;
++
++let env;
++before(async () => {
++  assert.equal(process.env.GCLOUD_PROJECT, 'demo-portal-sendgrid');
++  assert.ok(process.env.FIRESTORE_EMULATOR_HOST, 'real emulator required');
++  env = await initializeTestEnvironment({
++    projectId: 'demo-portal-sendgrid',
++    firestore: { rules: fs.readFileSync(path.resolve(__dirname, '../../../firestore.rules'), 'utf8') },
++  });
++  admin.initializeApp({ projectId: 'demo-portal-sendgrid' });
++  server = admin.firestore();
++  await env.withSecurityRulesDisabled(async context => {
++    const db = context.firestore();
++    for (const name of ['emailEvents', 'emailSuppression']) {
++      await setDoc(doc(db, name, 'fixture'), { event: 'bounce' });
++    }
++  });
++});
++after(async () => {
++  if (env) await env.cleanup();
++  if (server) await server.terminate();
++  await Promise.all(admin.apps.map(app => app.delete()));
++});
++
++test('signed bounce/spam/delivered/dropped batch persists in real portal Firestore; duplicate concurrency is idempotent', async () => {
++  const pair = crypto.generateKeyPairSync('ec', { namedCurve: 'prime256v1' });
++  const nowMs = Date.now();
++  const timestamp = String(Math.floor(nowMs / 1000));
++  const rawBody = Buffer.from(JSON.stringify(['bounce', 'spamreport', 'delivered', 'dropped'].map(event => ({
++    email: `fixture-${event}@example.test`, event, sg_event_id: `real-${event}`, timestamp: Number(timestamp), type: 'bounce',
++  }))));
++  const signer = crypto.createSign('sha256'); signer.update(timestamp); signer.update(rawBody); signer.end();
++  const signature = signer.sign(pair.privateKey).toString('base64');
++  const request = { method: 'POST', rawBody, headers: {
++    'x-twilio-email-event-webhook-signature': signature,
++    'x-twilio-email-event-webhook-timestamp': timestamp,
++  } };
++  const publicKey = pair.publicKey.export({ type: 'spki', format: 'der' }).toString('base64');
++  const post = async req => {
++    const res = { status(code) { this.statusCode = code; return this; }, json(body) { this.body = body; return this; } };
++    await handleEventWebhook({ db: server, req, res, publicKey, nowMs });
++    return res;
++  };
++  const result = await post(request);
++  assert.equal(result.statusCode, 200);
++  assert.equal(result.body.stored, 4);
++  assert.equal(result.body.suppressed, 3);
++  for (const event of ['bounce', 'spamreport', 'delivered', 'dropped']) {
++    assert.equal((await server.doc(`emailEvents/real-${event}`).get()).data().event, event);
++    assert.equal((await server.doc(`emailSuppression/fixture-${event}@example.test`).get()).exists, event !== 'delivered');
++  }
++  const duplicates = await Promise.all([post(request), post(request)]);
++  assert.ok(duplicates.every(res => res.statusCode === 200 && res.body.duplicates === 4 && res.body.suppressed === 0));
++  const tampered = await post({ ...request, rawBody: Buffer.from('[]') });
++  assert.equal(tampered.statusCode, 403);
++});
++
++for (const name of ['emailEvents', 'emailSuppression']) {
++  for (const role of ['admin', 'super_admin']) {
++    test(`${name}: ${role} can read and list`, async () => {
++      const db = env.authenticatedContext(`fixture-${role}`, { role }).firestore();
++      await assertSucceeds(getDoc(doc(db, name, 'fixture')));
++      await assertSucceeds(getDocs(collection(db, name)));
++    });
++  }
++  for (const role of [null, 'patient', 'staff', 'clinical', 'pharmacy', 'billing', 'hr']) {
++    test(`${name}: ${role || 'anonymous'} cannot read or list`, async () => {
++      const db = role === null ? env.unauthenticatedContext().firestore()
++        : env.authenticatedContext(`fixture-${role}`, role === 'patient' ? {} : { role }).firestore();
++      await assertFails(getDoc(doc(db, name, 'fixture')));
++      await assertFails(getDocs(collection(db, name)));
++    });
++  }
++  for (const role of [null, 'patient', 'staff', 'admin', 'super_admin']) {
++    test(`${name}: ${role || 'anonymous'} client cannot create, update or delete`, async () => {
++      const db = role === null ? env.unauthenticatedContext().firestore()
++        : env.authenticatedContext(`fixture-${role}`, role === 'patient' ? {} : { role }).firestore();
++      await assertFails(setDoc(doc(db, name, `new-${role}`), { event: 'delivered' }));
++      await assertFails(updateDoc(doc(db, name, 'fixture'), { event: 'delivered' }));
++      await assertFails(deleteDoc(doc(db, name, 'fixture')));
++    });
++  }
++}diff --git a/plans/DECISION-LOG.md b/plans/DECISION-LOG.md
+--- a/plans/DECISION-LOG.md
++++ b/plans/DECISION-LOG.md
+@@ -2250,3 +2250,82 @@
+ 4. Invites then flow through D-407 unchanged: at most 10 per run, pacing, a kill switch check before each send, auto-stop after 2 failures in a row, a live suppression feed, and a send-time address check.
+ 
+ **Tests:** `pnpm test:roster-backfill` (Auth + Firestore emulators, CI `roster-backfill-test`), 5/5 passing: the gate; report-only and dry-run write nothing outside the report; shared, owned and duplicate charts are skipped, and created docs are invisible to the queue; the cap holds and re-runs never double-create; release respects its cap, skips claimed and stale-email docs, and never re-releases.
++
++
++## D-408 — SendGrid Event Webhook receiver + suppression source (#362)
++**2026-09-21 · built, tested, SAFE TO DEPLOY EARLY · prerequisite for D-407 (#558)**
++
++**What it is.** `sendgridEventWebhook` — a public gen-1 `https.onRequest`
++endpoint that receives SendGrid Event Webhook batches, verifies their
++signature, records every event in `emailEvents`, and maintains the
++`emailSuppression` collection the Phase 2 autosender (D-407) fail-closes
++without.
++
++**Public invocation is not open access.** SendGrid must be able to reach the
++URL, so the invoker binding is `allUsers` (same pattern as `twilioWebhook`).
++The security gate is in-function: ECDSA signature verification, before any
++parsing and before any write. Unverified → `403`, nothing stored.
++
++**Scheme verified live at build time (D-079), not written from memory.**
++Source: `https://www.twilio.com/docs/sendgrid/for-developers/tracking-events/getting-started-event-webhook-security-features`
++- Signature: `X-Twilio-Email-Event-Webhook-Signature`, base64 ASN.1/DER ECDSA
++  (prime256v1). Node's default `dsaEncoding` is `der`, so `crypto.createVerify`
++  matches without transcoding.
++- Timestamp: `X-Twilio-Email-Event-Webhook-Timestamp`.
++- Digest: `sha256(timestamp || rawBody)` over the RAW request bytes. The docs
++  warn explicitly that re-serialising parsed JSON changes the bytes and breaks
++  verification — we verify `req.rawBody` and never touch `req.body`.
++- Key: the webhook's public verification key, base64 DER SubjectPublicKeyInfo,
++  stored in Secret Manager as `SENDGRID_EVENT_WEBHOOK_VERIFICATION_KEY`, same
++  discipline as `SENDGRID_API_KEY`. Never in code, never in env.
++- Replay fence: timestamps more than 10 minutes from now are refused before any
++  crypto runs.
++- Key unavailable → `503`, not "process anyway". No key means we cannot prove
++  the caller is SendGrid.
++
++**`emailEvents/{sg_event_id}`.** One doc per event, id = the base64url-safe
++`sg_event_id` (Firestore doc ids cannot contain `/`). Written with `create()`,
++so SendGrid's duplicate deliveries produce exactly ONE record and re-apply
++nothing. Stored fields: email, event, sgEventId, sgMessageId, eventAtMs,
++reason, status, type, bounceClassification, suppressing, funnel, source,
++receivedAtMs. PII discipline: no categories, no unique/custom args, no smtp-id,
++no PHI — SendGrid's own docs warn categories and unique args are not treated as
++PII on their side.
++
++**`emailSuppression/{email}` — the shared surface with D-407.** Keyed by the
++normalized email address and carrying an `email` field, because that is exactly
++what `autoInviteTick.loadSuppressedEmails()` reads. Global by address, never
++per-practice: a hard bounce is a hard bounce everywhere. `firstSuppressedAtMs`
++is set once and never moves (transactional read-then-set); the latest event
++detail wins on the other fields.
++
++**Mapping (verified against the Event Webhook Reference).** SUPPRESSION:
++`bounce` + `type:'bounce'` → `hard_bounce` (severity `hard`); `bounce` +
++`type:'blocked'` → `blocked` (severity `soft` — SendGrid calls this a temporary
++denial, so it is recorded as suppression per the #362 spec but distinguishable
++if we later want to retry soft blocks); `dropped` → `dropped`; `spamreport` →
++`spam_complaint`; `unsubscribe`/`group_unsubscribe` → `unsubscribe`.
++FUNNEL ONLY, never suppression: `processed`, `delivered`, `open`, `click`,
++`deferred`, `group_resubscribe` — these persist the invited→opened funnel past
++SendGrid's 3-day retention window (D-116).
++
++**Failure posture.** A write failure returns `500` so SendGrid retries the
++batch; the retry is safe because every store is idempotent. Malformed JSON with
++a valid signature is `400`. Invalid individual events are counted and skipped,
++never fatal to the batch.
++
++**Deploy posture — deliberately NOT gated behind cutover.** This receiver sends
++nothing and writes no patient data; it only records. Every day it is live
++before the autosender arms is a day of real bounce/complaint data in the
++suppression list, which is the whole point of #362 being D-407's prerequisite.
++
++**Operator step after deploy (not code).** In the SendGrid dashboard,
++Settings → Mail Settings → Event Webhooks: point the Post URL at this
++function's URL, enable Signed Event Webhook, save, copy the generated public
++verification key, and load it into Secret Manager as
++`SENDGRID_EVENT_WEBHOOK_VERIFICATION_KEY`. Until that secret exists the
++endpoint answers `503` and stores nothing — fail-closed by design.
++
++
++### D-408 amendment — 2026-11-09 (#559 / #362)
++Use existing SENDGRID_WEBHOOK_SIGNING_KEY for the portal signing key; confirm it belongs to the portal webhook (CRM remains independent). Event and suppression writes now commit atomically, so a suppression failure cannot silently escape on retry. Both collections deny all client writes and allow admin reads only, verified using real Firestore rules tests. Receiver remains review-only: no merge/deploy, no sends, no flag or trigger changes. Older early-deploy language above is historical, not current authorization.
+diff --git a/plans/INTEGRATION-CONTRACT.md b/plans/INTEGRATION-CONTRACT.md
+--- a/plans/INTEGRATION-CONTRACT.md
++++ b/plans/INTEGRATION-CONTRACT.md
+@@ -1,4 +1,13 @@
+ # Prime Care VIP — Integration Contract
++
++# Portal SendGrid receiver review amendment — 2026-11-09 (#559 / Closes #362)
++
++- `sendgridEventWebhook` is a separate gen-1 HTTPS receiver in us-central1, in portal-functions. It uses `admin.firestore()` (default portal database); no CRM code/database or CRM webhook changes.
++- Secret Manager `SENDGRID_WEBHOOK_SIGNING_KEY` supplies the SendGrid public ECDSA verification key, fetched through runtime ADC. The older proposed `SENDGRID_EVENT_WEBHOOK_VERIFICATION_KEY` name is superseded. The existing key must correspond to the PORTAL Event Webhook, not the CRM subuser's webhook; separate keypairs prevent cross-delivery. No secret values are read or changed in this review.
++- Verify timestamp + exact `req.rawBody` using SHA-256 / DER ECDSA P-256 before parsing/writing. Missing/invalid signature or skew beyond 10 minutes: 403; inaccessible key: 503; bad JSON: 400; no sends, Auth mutations or patient writes.
++- Event IDs deduplicate atomically: `emailEvents` creation and any `emailSuppression` upsert share ONE transaction. Suppression failure rolls back the event, returns 500, and permits safe retry; duplicates never reapply suppression. The existing #558 suppression reader remains unchanged.
++- Both collections: admin/super_admin reads only; ALL client create/update/delete denied (including admin clients). Real Firestore emulator rules matrix is in CI alongside signed-event/retry tests.
++- Review only: no merge/deploy; existing flags off and Auth triggers None. Entry point is based on current callable-only main and exports neither social blocker. The normal production workflow is broad portal-functions, NOT a one-function deployment; any eventual deployment/rules release needs separate owner authorization. A deployed endpoint alone does not satisfy #558: configure the separate PORTAL webhook and prove a valid event within 7 days. Do not arm autosends in this PR.
+ 
+ # Callable-only deployment amendment — 2026-11-05 (#589)
+ 

@@ -8,3 +8,4 @@
 - Mobile iOS dependency remediation is staged under firebase-handoff and delivered through the owning repository; validate the actual EAS post-pod-install lockfile before release because JS versions and local fixture tests cannot certify bundled native dependencies.
 - Disposable hosted social tests use a project-guarded harness and in-memory genuine provider tokens, recording sanitized results only; isolated adapters never certify live integration behavior.
 - Callable-only portal releases exclude blocking modules from the deployment entrypoint and enforce that boundary in the required check; registered blocking functions require a separate hosted audience gate because SDK verification precedes application guards.
+- Portal SendGrid events and suppression updates commit in one transaction, with emulator-enforced collection rules; keep CRM receiver/database independent because partial commits can silently lose suppression on retry.

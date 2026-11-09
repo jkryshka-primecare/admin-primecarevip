@@ -1,0 +1,34 @@
+name: sendgrid-event-webhook-gate
+on:
+  pull_request:
+    paths:
+      - 'functions/**'
+      - 'firestore.rules'
+      - '.github/workflows/sendgrid-event-webhook-gate.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  portal-sendgrid:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - name: Signed events, retries, portal isolation
+        run: node functions/test/unit/sendgrid-event-webhook-d408.test.cjs
+      - name: Install isolated test tooling (no production credentials)
+        run: npm install --prefix /tmp/sendgrid-test --no-save firebase-tools@13.29.2 @firebase/rules-unit-testing@3.0.4 firebase@10.14.1 firebase-admin@12.7.0
+      - name: Real portal collection security rules
+        env:
+          NODE_PATH: /tmp/sendgrid-test/node_modules
+          GCLOUD_PROJECT: demo-portal-sendgrid
+        run: |
+          printf '%s' '{"firestore":{"rules":"firestore.rules"},"emulators":{"firestore":{"port":8085},"ui":{"enabled":false}}}' > sendgrid-test.firebase.json
+          node /tmp/sendgrid-test/node_modules/firebase-tools/lib/bin/firebase.js emulators:exec --config sendgrid-test.firebase.json --project demo-portal-sendgrid --only firestore 'node --test functions/test/unit/sendgrid-rules.emulator.test.cjs'
