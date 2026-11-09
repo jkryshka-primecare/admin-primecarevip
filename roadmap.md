@@ -1,11 +1,10 @@
 # Roadmap
 
 ## Nov 9 — B4 / #593 red-team stateful failures
-- [ ] Seed true-case authUid on red-team caller fixtures (positive reads 200)
-- [ ] Denials return 404 RECORD_NOT_AVAILABLE, no PHI
-- [ ] guardian-uid-case-d068 asserts exact-case contract (drift denied)
-- [ ] Prod count: active members whose authUid does not exactly resolve to live Auth user
-- [ ] Push to #593, red-team stateful green, paste diff + count
+- [x] Red-team fixtures seed true-case authUid (bindMember shape); positives 200; denials 404 RECORD_NOT_AVAILABLE no PHI
+- [x] guardian-uid-case-d068 asserts exact-case caller contract + retired allowlist; mutation check red; pushed fbf2bb6c, Red-team CI green
+- [x] Firestore-side prod audit: 0 drift / 0 duplicate across 305 login-bound; 2 active have authUid but no firebaseUid (pre-existing lockout)
+- [ ] BLOCKED ON OWNER: temporary roles/firebaseauth.viewer on lovable-portal-readonly to verify live Auth exact resolution; backfill the 2 before deploy
 
 ## Nov 9 — B4 Elation read-side allowlist retirement
 - [x] Audited all nine reads plus shared artifact helper; preserved Bearer verification and added original token.uid exact patient.authUid validation after existing index lookup. No membership gate; guardian controls unchanged.

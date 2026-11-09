@@ -1,0 +1,298 @@
+diff --git a/test/redteam/guardian-uid-case-d068.test.js b/test/redteam/guardian-uid-case-d068.test.js
+index 0b66ca3..f679548 100644
+--- a/test/redteam/guardian-uid-case-d068.test.js
++++ b/test/redteam/guardian-uid-case-d068.test.js
+@@ -1,29 +1,34 @@
+ /**
+- * Release 2b · go-live gap coverage. STATEFUL.
++ * Release 2b go-live gap coverage, updated for B4 (#593). STATEFUL.
+  *
+- * Two things the guardian canaries did NOT cover, both named in the
+- * guardian-reads go-live checklist:
++ * Two different uid fields, two different contracts:
+  *
+- *  1. UID CASE DRIFT (D-016 vs D-112). Firestore keys are lower-cased, Auth
+- *     uids are case-sensitive, and the admin/CSV link paths wrote the raw
+- *     mixed-case uid. `guardians.normalizeUid` folds case on BOTH sides, so a
+- *     stored `ABC...` must authorize the caller whose real uid is `abc...` —
+- *     and must NOT widen the match to a near-miss uid.
++ *  1. GUARDIAN LINK uid (`patients/{child}.guardians[].guardianUid`) — UNCHANGED.
++ *     D-016 stores lower-cased keys, D-112 Auth uids are case-sensitive, and
++ *     admin/CSV link paths wrote raw mixed-case uids. `guardians.normalizeUid`
++ *     folds case on BOTH sides, so a case-drifted link still authorizes the real
++ *     guardian — and must NOT widen to a near-miss uid.
+  *
+- *  2. D-068 SUBJECT GATE. `ELATION_READ_ALLOWLIST` is enforced on the CHILD
+- *     (the read subject), not on the guardian. An allowlisted guardian reading
+- *     a non-allowlisted child must be refused, and an empty allowlist must fail
+- *     closed.
++ *  2. CALLER BINDING (`patients/{caller}.authUid`) — NEW B4 CONTRACT.
++ *     Every read now requires the caller's own record to store the token uid
++ *     EXACTLY (true case). Case drift or a missing authUid is denied before any
++ *     subject/guardian logic runs, so the denial is identical whether or not
++ *     the requested child exists: it is not a child-existence oracle, and the
++ *     body carries no PHI and no signed URL.
+  *
+- * ELATION_FULL_SYNC_ENABLED is pinned to 'false' IN THIS FILE. redteam.yml sets
+- * it to 'true' for the whole job, which short-circuits the D-068 gate — without
+- * this pin cases 3 and 4 would pass without testing anything.
++ *  3. D-068 READ ALLOWLIST — RETIRED by B4 (Michael, 2026-10-19). Its presence
++ *     or absence must no longer change the outcome of an authorized read.
++ *
++ * ELATION_FULL_SYNC_ENABLED is pinned to 'false' in this file: the old D-068
++ * gate was only observable with full sync off, so these cases prove retirement
++ * under the exact conditions where it used to bite.
+  *
+  * TARGET: emulator or a dedicated test project ONLY (helpers/env.js aborts on
+  * production).
+  *
+- * MUTATION CHECK: relax `normalizeUid` to a bare `===` and case 1 goes RED;
+- * short-circuit `isReadAllowed` to always-true and cases 3 and 4 go RED.
++ * MUTATION CHECKS: relax `normalizeUid` to a bare `===` and case 1a goes RED;
++ * drop the exact authUid comparison in resolvePatientForCaller and cases 2b/2c
++ * go RED; reinstate the read allowlist and cases 3a/3b go RED.
+  */
+ 
+ const { readArtifact } = require('./helpers/portalRead');
+@@ -45,7 +50,6 @@ const restore = (key, value) => {
+ 
+ beforeAll(() => {
+   process.env.GUARDIAN_READS_ENABLED = 'true';
+-  // The D-068 gate is only observable with full sync OFF.
+   process.env.ELATION_FULL_SYNC_ENABLED = 'false';
+ });
+ 
+@@ -58,8 +62,8 @@ afterAll(async () => {
+ });
+ 
+ /** Seed one guardian + one linked minor with a lab artifact. */
+-async function family() {
+-  const guardian = await seedPatient();
++async function family(guardianOpts = {}) {
++  const guardian = await seedPatient(guardianOpts);
+   const child = await seedPatient({ minor: true });
+   const doc = await seedDocument(child, { module: 'labs' });
+   await child.linkGuardian(guardian, { status: 'active' });
+@@ -67,53 +71,119 @@ async function family() {
+   return { guardian, child, doc };
+ }
+ 
+-const read = ({ guardian, child, doc }) => readArtifact({
++const read = ({ guardian, child, doc }, childId) => readArtifact({
+   as: guardian,
+   reportId: doc.documentId,
+   module: 'labs',
+-  body: { childElationId: child.patientId },
++  body: { childElationId: childId === undefined ? child.patientId : childId },
+ });
+ 
+-describe('[go-live] guardian uid case drift (D-016 vs D-112)', () => {
+-  test('a mixed-case stored guardianUid still authorizes the lower-cased caller', async () => {
++/** A denial must carry no signed URL, no storage path and no chart identifiers. */
++function assertNoPhi(res, { child, doc }) {
++  expect(res.signedUrl).toBeUndefined();
++  const text = JSON.stringify(res.body || {});
++  expect(text).not.toContain(child.patientId);
++  expect(text).not.toContain(doc.documentId);
++  expect(text).not.toContain(doc.path);
++  if (child.internalUid) expect(text).not.toContain(child.internalUid);
++  expect(text).not.toMatch(/https?:\/\//);
++}
++
++describe('[unchanged] guardian-link uid case drift (D-016 vs D-112)', () => {
++  test('1a: a case-drifted stored guardianUid still authorizes the real guardian', async () => {
++    const f = await family();
++    expect(f.guardian.authUid).not.toBe(f.guardian.firebaseUid); // fixture really is mixed-case
++    await f.child.setGuardianUidRaw(f.guardian, String(f.guardian.authUid).toUpperCase());
++    delete process.env.ELATION_READ_ALLOWLIST;
++
++    const res = await read(f);
++    expect(res.status).toBe(200);
++    expect(res.signedUrl).toBeDefined();
++  });
++
++  test('1b: case folding does NOT widen the guardian match to a near-miss uid (404, no PHI)', async () => {
+     const f = await family();
+-    await f.child.setGuardianUidRaw(f.guardian, String(f.guardian.firebaseUid).toUpperCase());
+-    process.env.ELATION_READ_ALLOWLIST = f.child.patientId;
++    await f.child.setGuardianUidRaw(f.guardian, `${String(f.guardian.authUid).toUpperCase()}X`);
++
++    const res = await read(f);
++    expect(res.status).toBe(404);
++    expect(res.body.reason).toBe('RECORD_NOT_AVAILABLE');
++    assertNoPhi(res, f);
++  });
++});
+ 
++describe('[B4 contract] caller authUid must match the token uid exactly', () => {
++  test('2a: exact true-case authUid -> guardian read succeeds', async () => {
++    const f = await family();
+     const res = await read(f);
+     expect(res.status).toBe(200);
+     expect(res.signedUrl).toBeDefined();
+   });
+ 
+-  test('case folding does NOT widen the match to a near-miss uid', async () => {
++  test('2b: case-drifted caller authUid -> denied AUTH_UID_MISMATCH, no PHI', async () => {
++    const f = await family();
++    await f.guardian.setAuthUidRaw(String(f.guardian.authUid).toLowerCase());
++
++    const res = await read(f);
++    expect(res.status).toBe(403);
++    expect(res.body.reason).toBe('AUTH_UID_MISMATCH');
++    assertNoPhi(res, f);
++  });
++
++  test('2c: missing caller authUid -> denied AUTH_UID_MISMATCH, no PHI', async () => {
+     const f = await family();
+-    const near = `${String(f.guardian.firebaseUid).toUpperCase()}X`;
+-    await f.child.setGuardianUidRaw(f.guardian, near);
+-    process.env.ELATION_READ_ALLOWLIST = f.child.patientId;
++    await f.guardian.setAuthUidRaw(null);
+ 
+     const res = await read(f);
+-    expect(res.status).not.toBe(200);
+-    expect(res.signedUrl).toBeUndefined();
++    expect(res.status).toBe(403);
++    expect(res.body.reason).toBe('AUTH_UID_MISMATCH');
++    assertNoPhi(res, f);
++  });
++
++  test('2d: drift denial is identical for a real child, a fake child and no child (no existence oracle)', async () => {
++    const f = await family();
++    await f.guardian.setAuthUidRaw(String(f.guardian.authUid).toUpperCase());
++
++    const real = await read(f);
++    const fake = await read(f, 'redteam-does-not-exist');
++    const self = await read(f, '');
++    const shape = (r) => ({ status: r.status, body: r.body });
++    expect(shape(fake)).toEqual(shape(real));
++    expect(shape(self)).toEqual(shape(real));
++    expect(real.status).toBe(403);
+   });
+ });
+ 
+-describe('[go-live] D-068 subject gate is enforced on the CHILD', () => {
+-  test('guardian allowlisted, child NOT in ELATION_READ_ALLOWLIST -> denied', async () => {
++describe('[B4] D-068 read allowlist is retired', () => {
++  test('3a: child NOT in ELATION_READ_ALLOWLIST no longer blocks an authorized guardian', async () => {
+     const f = await family();
+-    // Only the GUARDIAN's chart is allowlisted — the subject is the child.
+-    process.env.ELATION_READ_ALLOWLIST = f.guardian.patientId;
++    process.env.ELATION_READ_ALLOWLIST = f.guardian.patientId; // only the guardian listed
+ 
+     const res = await read(f);
+-    expect(res.status).not.toBe(200);
+-    expect(res.signedUrl).toBeUndefined();
++    expect(res.status).toBe(200);
++    expect(res.signedUrl).toBeDefined();
+   });
+ 
+-  test('an empty ELATION_READ_ALLOWLIST fails closed', async () => {
++  test('3b: an empty ELATION_READ_ALLOWLIST no longer blocks an authorized guardian', async () => {
+     const f = await family();
+     process.env.ELATION_READ_ALLOWLIST = '';
+ 
+     const res = await read(f);
+-    expect(res.status).not.toBe(200);
+-    expect(res.signedUrl).toBeUndefined();
++    expect(res.status).toBe(200);
++    expect(res.signedUrl).toBeDefined();
++  });
++
++  test('3c: retirement does not open unlinked access — a stranger still gets 404 with no PHI', async () => {
++    const f = await family();
++    const stranger = await seedPatient();
++    process.env.GUARDIAN_READS_ALLOWLIST = `${f.guardian.firebaseUid},${stranger.firebaseUid}`;
++    process.env.ELATION_READ_ALLOWLIST = '';
++
++    const res = await readArtifact({
++      as: stranger, reportId: f.doc.documentId, module: 'labs', body: { childElationId: f.child.patientId },
++    });
++    expect(res.status).toBe(404);
++    expect(res.body.reason).toBe('RECORD_NOT_AVAILABLE');
++    assertNoPhi(res, f);
+   });
+ });
+diff --git a/test/redteam/helpers/seed.js b/test/redteam/helpers/seed.js
+index d4cbd5c..8913546 100644
+--- a/test/redteam/helpers/seed.js
++++ b/test/redteam/helpers/seed.js
+@@ -63,11 +63,19 @@ function accessRef(patientId) {
+   return db().collection('portalAccess').doc(patientId);
+ }
+ 
+-async function seedPatient({ id, suspended = false, bound = true, minor = false } = {}) {
++async function seedPatient({ id, suspended = false, bound = true, minor = false, authUid: authUidOverride } = {}) {
+   const patientId = id ? `${PREFIX}${id}` : uniqueId('patient');
+   // A MINOR never logs in: no Firebase Auth uid at all. That is exactly why
+   // storage is keyed on `internalUid` (Release 2b Part B) and not on the uid.
+-  const firebaseUid = minor ? null : `${patientId}-uid`.toLowerCase();
++  // B4 (#593) mirrors production binding (bindMember, D-112, and
++  // functions/test/seed-portal-enforcement.js): the Auth uid is TRUE-CASE and
++  // mixed-case, `authUid` stores it verbatim, and `firebaseUid` stores the
++  // lower-cased index key. The token is minted for the true-case uid, so every
++  // read exercises the exact-case authUid check, not a lower-case shortcut.
++  // `authUid: <string|null>` overrides the stored value to seed drift/missing.
++  const trueUid = minor ? null : `${patientId}-UID`;
++  const firebaseUid = trueUid ? trueUid.toLowerCase() : null;
++  const storedAuthUid = authUidOverride === undefined ? trueUid : authUidOverride;
+   const internalUid = crypto.randomUUID();
+ 
+   await db()
+@@ -80,6 +88,7 @@ async function seedPatient({ id, suspended = false, bound = true, minor = false
+         // audit must classify its artifacts `unpathed`.
+         ...(bound ? { internalUid } : {}),
+         ...(bound && firebaseUid ? { firebaseUid } : {}),
++        ...(bound && trueUid && storedAuthUid !== null ? { authUid: storedAuthUid } : {}),
+         updatedAt: new Date().toISOString(),
+       },
+       { merge: true },
+@@ -90,11 +99,12 @@ async function seedPatient({ id, suspended = false, bound = true, minor = false
+   }
+ 
+   // Minors get no token — a guardian acts for them.
+-  const token = firebaseUid ? await mintPatientToken(firebaseUid) : null;
++  const token = trueUid ? await mintPatientToken(trueUid) : null;
+ 
+   return {
+     patientId,
+     firebaseUid,
++    authUid: trueUid,
+     internalUid: bound ? internalUid : null,
+     minor,
+     token,
+@@ -166,10 +176,19 @@ async function seedPatient({ id, suspended = false, bound = true, minor = false
+         { merge: true },
+       );
+     },
+-    /** Simulate an invite claim: records the AUTH uid, never the storage key. */
++    /** Simulate an invite claim exactly as bindMember does: true-case
++     * `authUid` plus the lower-cased `firebaseUid` index key — never the
++     * storage key. */
+     async claimLogin(uid) {
+       await db().collection('patients').doc(patientId).set(
+-        { firebaseUid: String(uid).toLowerCase() },
++        { firebaseUid: String(uid).toLowerCase(), authUid: String(uid) },
++        { merge: true },
++      );
++    },
++    /** Overwrite the stored authUid VERBATIM (drift / missing fixtures). */
++    async setAuthUidRaw(raw) {
++      await db().collection('patients').doc(patientId).set(
++        { authUid: raw === null ? admin.firestore.FieldValue.delete() : raw },
+         { merge: true },
+       );
+     },
+@@ -360,8 +379,9 @@ async function cleanup() {
+  * fence: it must never authorize against a null-`guardianElationId` entry.
+  */
+ async function seedGuardianOnlyAccount() {
+-  const uid = `${uniqueId('guardianonly')}-uid`.toLowerCase();
+-  return { patientId: null, firebaseUid: uid, token: await mintPatientToken(uid) };
++  // No patient record at all: there is no authUid to seed by construction.
++  const trueUid = `${uniqueId('guardianonly')}-UID`;
++  return { patientId: null, firebaseUid: trueUid.toLowerCase(), authUid: trueUid, token: await mintPatientToken(trueUid) };
+ }
+ 
+ module.exports = {

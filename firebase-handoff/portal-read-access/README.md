@@ -13,3 +13,7 @@ Local verification: exact committed CI runner 40 real Auth/Firestore/Functions t
 Missing/conflicting authUid is a deliberate fail-closed hardening; no production roster backfill or repair performed. Read retirement does not hydrate never-ingested cached documents. Existing suspension/visibility unchanged. Other pre-existing staff-demographic read APIs remain staff-role authorized, not patient self-read endpoints; no allowlist there.
 
 Full diff in PR-593-review.patch. No merge, deployment, Auth mutation, flags, triggers, sends or production configuration changed. GitHub CI status must be reviewed before merge.
+
+## Nov 9 — red-team stateful fix (head fbf2bb6c)
+Test-only commit: red-team fixtures seed true-case mixed-case authUid + lower-case firebaseUid (bindMember shape), token minted for true uid. guardian-uid-case-d068 rewritten: guardian-link folding unchanged; caller exact-authUid drift/missing -> 403 AUTH_UID_MISMATCH identical for real/fake/no child, no PHI; D-068 allowlist retired without opening unlinked access. Locally 64 pass / 4 pre-existing skips; mutation (drop exact check) turns 3 cases red. GitHub Red-team run 42553399207 SUCCESS, all other checks green.
+Prod audit (authuid-exact-audit.js, read-only): Firestore side 0 case drift, 0 duplicate bindings across 305 login-bound records; 2 active members store authUid without firebaseUid (already cannot read before B4). Live Auth exact-resolution NOT verified: read-only account lacks firebaseauth.viewer (revoked after Oct 30). Re-run after temporary viewer grant.
