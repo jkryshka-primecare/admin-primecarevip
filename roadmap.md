@@ -194,3 +194,5 @@
 - [x] Dry-run approved 2026-10-29; canary staff first, then small member group
 - [ ] BLOCKED ON OWNER: confirm ~270 existing logins valid before real-member test
 - [ ] BLOCKED ON OWNER: separate sign-off to deploy blocking functions (watch existing sign-ins)
+- [x] Invite list email pre-check (free MX + syntax check, read-only; review import files produced 2026-11-10)
+- [ ] Team reviews and applies the inviteEmailCorrections import (2 rows); suppression import is empty (blocked on: team review)
