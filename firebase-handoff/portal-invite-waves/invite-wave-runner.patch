@@ -1,0 +1,340 @@
+diff --git a/functions/core/services/email/sendInviteEmail.js b/functions/core/services/email/sendInviteEmail.js
+index 8545714..2c7d651 100644
+--- a/functions/core/services/email/sendInviteEmail.js
++++ b/functions/core/services/email/sendInviteEmail.js
+@@ -49,6 +49,8 @@ async function initSendgrid() {
+  *   never from caller input: the link is an account-claim token, so an
+  *   arbitrary destination would be an account-takeover path.
+  */
++const INVITE_CATEGORY = 'portal_invite';
++
+ async function sendInviteEmail({ to, token }) {
+   const recipient = typeof to === 'string' ? to.trim() : '';
+   if (!recipient) throw new Error('sendInviteEmail: recipient required');
+@@ -59,8 +61,10 @@ async function sendInviteEmail({ to, token }) {
+     to: recipient,
+     from: { email: 'health@primecarevip.com', name: 'Prime Care VIP' },
+     subject: 'Your Prime Care VIP patient portal is ready',
++    // Non-PHI tag so emailEvents can be filtered to invite sends (wave gate math).
++    categories: [INVITE_CATEGORY],
+     content: [{ type: 'text/html', value: claimEmailHtml(`${CLAIM_BASE}?t=${token}`) }],
+   });
+ }
+ 
+-module.exports = { sendInviteEmail, claimEmailHtml, CLAIM_BASE };
++module.exports = { sendInviteEmail, INVITE_CATEGORY, claimEmailHtml, CLAIM_BASE };
+diff --git a/functions/core/services/email/sendgridEvents.js b/functions/core/services/email/sendgridEvents.js
+index 42d4f89..9ec0f77 100644
+--- a/functions/core/services/email/sendgridEvents.js
++++ b/functions/core/services/email/sendgridEvents.js
+@@ -167,8 +167,15 @@ function classifyEvent(evt) {
+ 
+ /**
+  * The stored event record. PII discipline: email + event metadata only.
+- * No categories, no unique args, no message body, no PHI.
++ * No unique args, no message body, no PHI. Category is allowlisted: only the
++ * fixed non-PHI 'portal_invite' tag is kept, anything else is dropped.
+  */
++const KEPT_CATEGORIES = new Set(['portal_invite']);
++function pickCategory(raw) {
++  const list = Array.isArray(raw) ? raw : [raw];
++  return list.find((c) => typeof c === 'string' && KEPT_CATEGORIES.has(c)) || null;
++}
++
+ function buildEventRecord(evt, classified, receivedAtMs) {
+   const tsSeconds = Number(evt.timestamp);
+   return {
+@@ -181,6 +188,7 @@ function buildEventRecord(evt, classified, receivedAtMs) {
+     status: typeof evt.status === 'string' ? evt.status : null,
+     type: typeof evt.type === 'string' ? evt.type : null,
+     bounceClassification: typeof evt.bounce_classification === 'string' ? evt.bounce_classification : null,
++    category: pickCategory(evt.category),
+     suppressing: !!classified.suppression,
+     funnel: !!classified.funnel,
+     source: 'sendgrid_event_webhook',
+@@ -193,6 +201,7 @@ function buildEventRecord(evt, classified, receivedAtMs) {
+ const { buildSuppressionRow } = require('./suppression');
+ 
+ module.exports = {
++  pickCategory,
+   MAX_TIMESTAMP_SKEW_MS,
+   SIGNATURE_HEADER,
+   TIMESTAMP_HEADER,
+diff --git a/functions/core/services/patient/inviteOne.js b/functions/core/services/patient/inviteOne.js
+index 9834b9a..a57c40c 100644
+--- a/functions/core/services/patient/inviteOne.js
++++ b/functions/core/services/patient/inviteOne.js
+@@ -18,6 +18,7 @@ const { issueClaimToken } = require('./claimToken');
+ const { sendInviteEmail } = require('../email/sendInviteEmail');
+ const { revokeLiveTokens } = require('../../../adminRevokeInvite');
+ const { markInvited } = require('./markInvited');
++const { normalizeEmail } = require('../email/suppression');
+ 
+ /** Typed failure so callers can map to the existing reason strings. */
+ function inviteError(reason, message) {
+@@ -47,7 +48,7 @@ async function writeAudit(entry) {
+  * @param {string} args.reason
+  * @param {string} [args.action]   audit action label
+  * @param {string} [args.cohort]   claim-token cohort ('existing' | 'new')
+- * @throws {Error} with `.inviteReason` = LIVE_TOKEN_EXISTS | MINT_FAILED | EMAIL_SEND_FAILED
++ * @throws {Error} with `.inviteReason` = SUPPRESSED | SUPPRESSION_UNREADABLE | LIVE_TOKEN_EXISTS | MINT_FAILED | EMAIL_SEND_FAILED
+  */
+ async function inviteOne({
+   elationPatientId,
+@@ -62,6 +63,16 @@ async function inviteOne({
+   if (!pid) throw inviteError('PATIENT_ID_REQUIRED');
+   if (!to) throw inviteError('NO_EMAIL_ON_ROSTER');
+ 
++  // SUPPRESSION CHECK — before any mint. Fails closed: if the suppression row
++  // cannot be read, nothing is minted or sent.
++  let suppressed;
++  try {
++    suppressed = (await admin.firestore().collection('emailSuppression').doc(normalizeEmail(to)).get()).exists;
++  } catch (e) {
++    throw inviteError('SUPPRESSION_UNREADABLE');
++  }
++  if (suppressed) throw inviteError('SUPPRESSED');
++
+   let rawToken;
+   try {
+     ({ rawToken } = await issueClaimToken(pid, cohort));
+diff --git a/functions/core/services/patient/inviteWaves.js b/functions/core/services/patient/inviteWaves.js
+new file mode 100644
+index 0000000..d854618
+--- /dev/null
++++ b/functions/core/services/patient/inviteWaves.js
+@@ -0,0 +1,53 @@
++// functions/core/services/patient/inviteWaves.js
++// PURE decision layer for the ramped portal-invite waves.
++// No I/O here: planning, the between-wave gate, and wave authorization.
++
++const RAMP = [20, 35, 50];
++const STEADY = 50;
++const MAX_BOUNCE_RATE = 0.02; // must be strictly below 2%
++const MAX_SPAM_RATE = 0.001; // must be strictly below 0.1%
++const DEFAULT_SETTLE_HOURS = 48;
++
++/** Split an ordered member-id list into waves: 20 -> 35 -> 50 -> 50 ... */
++function planWaves(ids, ramp = RAMP, steady = STEADY) {
++  const waves = [];
++  let i = 0;
++  while (i < ids.length) {
++    const size = waves.length < ramp.length ? ramp[waves.length] : steady;
++    waves.push(ids.slice(i, i + size));
++    i += size;
++  }
++  return waves;
++}
++
++/**
++ * Between-wave gate. Rates are over the prior wave's ACCEPTED sends.
++ * Fails closed on missing data, too-early checks, or zero sends.
++ */
++function evaluateGate({ sent, bouncedEmails, spamEmails, hoursSinceWaveEnd, settleHours = DEFAULT_SETTLE_HOURS, feedOk }) {
++  if (!feedOk) return { pass: false, reason: 'EVENT_FEED_UNAVAILABLE' };
++  if (!Number.isInteger(sent) || sent <= 0) return { pass: false, reason: 'NO_PRIOR_SENDS' };
++  if (!(hoursSinceWaveEnd >= settleHours)) return { pass: false, reason: 'SETTLING' };
++  const bounceRate = bouncedEmails / sent;
++  const spamRate = spamEmails / sent;
++  if (!(bounceRate < MAX_BOUNCE_RATE)) return { pass: false, reason: 'BOUNCE_RATE', bounceRate, spamRate };
++  if (!(spamRate < MAX_SPAM_RATE)) return { pass: false, reason: 'SPAM_RATE', bounceRate, spamRate };
++  return { pass: true, reason: 'CLEAR', bounceRate, spamRate };
++}
++
++/**
++ * Live sends need: explicit --go, a domain-prep sign-off, and an approval
++ * record that covers this wave number. Anything missing -> dry run only.
++ */
++function authorizeWave({ go, waveNumber, config }) {
++  const c = config || {};
++  if (go !== true) return { live: false, reason: 'DRY_RUN' };
++  if (c.domainPrepComplete !== true) return { live: false, reason: 'DOMAIN_PREP_PENDING' };
++  if (!Number.isInteger(c.approvedThroughWave) || c.approvedThroughWave < waveNumber) {
++    return { live: false, reason: 'WAVE_NOT_APPROVED' };
++  }
++  if (c.enabled !== true) return { live: false, reason: 'KILL_SWITCH_OFF' };
++  return { live: true, reason: 'APPROVED' };
++}
++
++module.exports = { RAMP, STEADY, MAX_BOUNCE_RATE, MAX_SPAM_RATE, DEFAULT_SETTLE_HOURS, planWaves, evaluateGate, authorizeWave };
+diff --git a/functions/scripts/invite-wave-runner.js b/functions/scripts/invite-wave-runner.js
+new file mode 100644
+index 0000000..e84f24a
+--- /dev/null
++++ b/functions/scripts/invite-wave-runner.js
+@@ -0,0 +1,127 @@
++#!/usr/bin/env node
++// functions/scripts/invite-wave-runner.js
++// Ramped portal-invite waves for adult members who ALREADY have a portal record.
++//
++// DEFAULT IS REPORT-ONLY: plans waves, reads suppression + emailEvents, prints
++// per-wave COUNTS. It sends nothing and writes nothing.
++//
++// A live wave sends through the existing adminBatchReissue function (revoke the
++// stale/live link, mint a fresh 30-day link to the roster address, audited),
++// which re-checks eligibility and its own kill switch per member. inviteOne
++// then re-checks suppression immediately before each mint.
++// Live requires ALL of: --wave N --go, config/inviteWaves.domainPrepComplete,
++// config/inviteWaves.approvedThroughWave >= N, config/inviteWaves.enabled, and
++// for N>1 the prior wave's gate (bounce <2%, spam <0.1%, settled).
++//
++// Usage:
++//   node invite-wave-runner.js --list send_eligible_by_member_id.csv            # report only
++//   ADMIN_ID_TOKEN=... REISSUE_URL=... node invite-wave-runner.js --list ... --wave 1 --go
++// Only ids are printed; never emails or names.
++
++const fs = require('fs');
++const admin = require('firebase-admin');
++const { planWaves, evaluateGate, authorizeWave } = require('../core/services/patient/inviteWaves');
++const { loadSuppressedEmails, normalizeEmail } = require('../core/services/email/suppression');
++
++const arg = (k) => { const i = process.argv.indexOf(k); return i > -1 ? process.argv[i + 1] : undefined; };
++const INCLUDED_BUCKETS = new Set(['live_invite', 'expired_invite']); // claimed members are not reissued
++const CATEGORY = 'portal_invite';
++
++function readList(file) {
++  const [head, ...rows] = fs.readFileSync(file, 'utf8').trim().split('\n');
++  const cols = head.split(',');
++  return rows.map((r) => {
++    const v = r.split(',').map((x) => x.replace(/^"|"$/g, ''));
++    return Object.fromEntries(cols.map((c, i) => [c, v[i]]));
++  }).sort((a, b) => Number(a.sendOrder) - Number(b.sendOrder));
++}
++
++async function main() {
++  if (!admin.apps.length) {
++    admin.initializeApp(process.env.FIREBASE_SERVICE_ACCOUNT
++      ? { credential: admin.credential.cert(JSON.parse(process.env.FIREBASE_SERVICE_ACCOUNT)) } : {});
++  }
++  const db = admin.firestore();
++  const rows = readList(arg('--list'));
++  const excluded = {};
++  const ids = [];
++  for (const r of rows) {
++    if (r.outcome !== 'send' || !r.memberId) { excluded.NOT_SEND_OR_NO_RECORD = (excluded.NOT_SEND_OR_NO_RECORD || 0) + 1; continue; }
++    if (!INCLUDED_BUCKETS.has(r.bucket)) { excluded[`BUCKET_${r.bucket}`] = (excluded[`BUCKET_${r.bucket}`] || 0) + 1; continue; }
++    ids.push(r.memberId);
++  }
++  const waves = planWaves(ids);
++
++  // Live-data pre-check per wave (read-only): suppression + roster email.
++  const supp = await loadSuppressedEmails(db);
++  if (!supp.ok) throw new Error('SUPPRESSION_UNREADABLE');
++  const report = [];
++  for (let w = 0; w < waves.length; w++) {
++    const c = { wave: w + 1, planned: waves[w].length, suppressed: 0, claimedSince: 0, noRecordOrEmail: 0, ready: 0 };
++    for (const id of waves[w]) {
++      const s = await db.collection('patients').doc(id).get();
++      const d = s.exists ? s.data() : null;
++      const em = d && normalizeEmail(d.email);
++      if (!em) c.noRecordOrEmail++;
++      else if (d.authUid || d.firebaseUid) c.claimedSince++;
++      else if (supp.emails.has(em)) c.suppressed++;
++      else c.ready++;
++    }
++    report.push(c);
++  }
++  console.log(JSON.stringify({ mode: 'report', total: ids.length, excluded, waves: report }, null, 1));
++
++  const waveArg = arg('--wave');
++  if (!waveArg) return;
++  const n = Number(waveArg);
++  const cfg = (await db.collection('config').doc('inviteWaves').get()).data() || {};
++  const auth = authorizeWave({ go: process.argv.includes('--go'), waveNumber: n, config: cfg });
++
++  if (n > 1) {
++    const prior = (cfg.waves || {})[String(n - 1)];
++    let gate = { pass: false, reason: 'PRIOR_WAVE_NOT_RECORDED' };
++    if (prior && prior.endedAtMs) {
++      let feedOk = true; const bounced = new Set(); const spam = new Set();
++      try {
++        const ev = await db.collection('emailEvents').where('category', '==', CATEGORY).get(); // single-field filter: no composite index needed
++        const recips = new Set(prior.recipientHashes || []);
++        const crypto = require('crypto');
++        ev.forEach((doc) => {
++          const e = doc.data(); const h = crypto.createHash('sha256').update(normalizeEmail(e.email)).digest('hex');
++          if (!recips.has(h) || !(e.eventAtMs >= prior.startedAtMs)) return;
++          if (e.event === 'bounce' || e.event === 'dropped') bounced.add(h);
++          if (e.event === 'spamreport') spam.add(h);
++        });
++      } catch (e) { feedOk = false; }
++      gate = evaluateGate({ sent: prior.sent, bouncedEmails: bounced.size, spamEmails: spam.size,
++        hoursSinceWaveEnd: (Date.now() - prior.endedAtMs) / 36e5, settleHours: cfg.settleHours, feedOk });
++    }
++    console.log(JSON.stringify({ gateForWave: n, ...gate }));
++    if (!gate.pass) { console.log(JSON.stringify({ wave: n, sent: 0, stopped: gate.reason })); return; }
++  }
++  if (!auth.live) { console.log(JSON.stringify({ wave: n, sent: 0, stopped: auth.reason })); return; }
++
++  const batch = waves[n - 1] || [];
++  const startedAtMs = Date.now();
++  const r = await fetch(process.env.REISSUE_URL, {
++    method: 'POST',
++    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${process.env.ADMIN_ID_TOKEN}` },
++    body: JSON.stringify({ patientIds: batch, cap: batch.length, dryRun: false, confirm: true, reason: `invite wave ${n}` }),
++  });
++  const out = await r.json();
++  // Record the wave for the next gate from the audit trail (the function's
++  // response samples only 25 ids). Counts + SHA-256 recipient hashes only.
++  const crypto = require('crypto');
++  const audit = await db.collection('portalAdminAudit').where('reason', '==', `invite wave ${n}`).get();
++  const hashes = new Set(); const sentIds = new Set();
++  audit.forEach((doc) => { const a = doc.data();
++    if (a.action !== 'batch_invite_reissued' || a.ok !== true || !batch.includes(a.elationPatientId)) return;
++    sentIds.add(a.elationPatientId); hashes.add(crypto.createHash('sha256').update(normalizeEmail(a.sentTo)).digest('hex')); });
++  out.reissuedIds = [...sentIds];
++  await db.collection('config').doc('inviteWaves').set({ waves: { [String(n)]: {
++    startedAtMs, endedAtMs: Date.now(), sent: (out.reissuedIds || []).length, recipientHashes: [...hashes],
++    skippedByReason: out.skippedByReason || {}, aborted: !!out.aborted } } }, { merge: true });
++  console.log(JSON.stringify({ wave: n, sent: (out.reissuedIds || []).length, skipped: out.skippedByReason || {}, aborted: !!out.aborted }));
++}
++
++main().catch((e) => { console.error('FAIL', e.message); process.exit(1); });
+diff --git a/functions/test/unit/invite-waves.test.cjs b/functions/test/unit/invite-waves.test.cjs
+new file mode 100644
+index 0000000..633e56f
+--- /dev/null
++++ b/functions/test/unit/invite-waves.test.cjs
+@@ -0,0 +1,42 @@
++// node functions/test/unit/invite-waves.test.cjs
++const assert = require('assert');
++const path = require('path');
++const W = require(path.join(__dirname, '..', '..', 'core', 'services', 'patient', 'inviteWaves.js'));
++const { pickCategory } = require(path.join(__dirname, '..', '..', 'core', 'services', 'email', 'sendgridEvents.js'));
++const t = (n, f) => { f(); console.log('ok', n); };
++
++t('ramp 20 -> 35 -> 50 -> 50 for 501 ids', () => {
++  const sizes = W.planWaves(Array.from({ length: 501 }, (_, i) => String(i))).map((w) => w.length);
++  assert.deepStrictEqual(sizes.slice(0, 4), [20, 35, 50, 50]);
++  assert.strictEqual(sizes.reduce((a, b) => a + b, 0), 501);
++  assert.strictEqual(sizes.length, 11);
++});
++t('order preserved', () => assert.deepStrictEqual(W.planWaves(['a', 'b', 'c'], [2], 1), [['a', 'b'], ['c']]));
++const base = { sent: 100, bouncedEmails: 0, spamEmails: 0, hoursSinceWaveEnd: 72, feedOk: true };
++t('bounce 1.99% passes, 2% stops', () => {
++  assert.strictEqual(W.evaluateGate({ ...base, sent: 1000, bouncedEmails: 19 }).pass, true);
++  assert.strictEqual(W.evaluateGate({ ...base, bouncedEmails: 2 }).reason, 'BOUNCE_RATE');
++});
++t('spam below 0.1% passes, 0.1% stops', () => {
++  assert.strictEqual(W.evaluateGate({ ...base, sent: 2000, spamEmails: 1 }).pass, true);
++  assert.strictEqual(W.evaluateGate({ ...base, sent: 1000, spamEmails: 1 }).reason, 'SPAM_RATE');
++});
++t('fails closed', () => {
++  assert.strictEqual(W.evaluateGate({ ...base, feedOk: false }).reason, 'EVENT_FEED_UNAVAILABLE');
++  assert.strictEqual(W.evaluateGate({ ...base, sent: 0 }).reason, 'NO_PRIOR_SENDS');
++  assert.strictEqual(W.evaluateGate({ ...base, hoursSinceWaveEnd: 10 }).reason, 'SETTLING');
++});
++const ok = { domainPrepComplete: true, approvedThroughWave: 1, enabled: true };
++t('live needs go + domain prep + wave approval + switch', () => {
++  assert.strictEqual(W.authorizeWave({ go: true, waveNumber: 1, config: ok }).live, true);
++  assert.strictEqual(W.authorizeWave({ go: false, waveNumber: 1, config: ok }).reason, 'DRY_RUN');
++  assert.strictEqual(W.authorizeWave({ go: true, waveNumber: 1, config: { ...ok, domainPrepComplete: false } }).reason, 'DOMAIN_PREP_PENDING');
++  assert.strictEqual(W.authorizeWave({ go: true, waveNumber: 2, config: ok }).reason, 'WAVE_NOT_APPROVED');
++  assert.strictEqual(W.authorizeWave({ go: true, waveNumber: 1, config: { ...ok, enabled: false } }).reason, 'KILL_SWITCH_OFF');
++  assert.strictEqual(W.authorizeWave({ go: true, waveNumber: 1, config: undefined }).live, false);
++});
++t('only portal_invite category stored', () => {
++  assert.strictEqual(pickCategory(['x', 'portal_invite']), 'portal_invite');
++  assert.strictEqual(pickCategory('newsletter'), null);
++  assert.strictEqual(pickCategory(undefined), null);
++});

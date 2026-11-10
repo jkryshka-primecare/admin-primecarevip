@@ -196,3 +196,6 @@
 - [ ] BLOCKED ON OWNER: separate sign-off to deploy blocking functions (watch existing sign-ins)
 - [x] Invite list email pre-check (free MX + syntax check, read-only; review import files produced 2026-11-10)
 - [ ] Team reviews and applies the inviteEmailCorrections import (2 rows); suppression import is empty (blocked on: team review)
+- [x] Invite wave runner (issue #594) built report-only; waiting on domain prep + wave 1 approval
+- [ ] Hold: 64 no-account adults (account creation gated), 194 minors (guardian policy pending)
+- [ ] Review: 1 under-18 with portal access, 2 under-18 with expired direct invites
