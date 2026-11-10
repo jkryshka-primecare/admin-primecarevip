@@ -1,5 +1,12 @@
 # Roadmap
 
+## Nov 10 — #695 production function rollout timeout
+- [ ] BLOCKED: root cause/build/operation/function log reads denied HTTP403; requires logging.viewer, cloudfunctions.viewer, cloudbuild.builds.viewer on investigation identity. Driver is gen1, not a gen2 Cloud Run revision.
+- [x] Compared #595 against parent: no hydration driver, entrypoint, workflow, dependency manifest or lockfile changes. Pre-existing/rebuild-time cause remains unverified pending GCP.
+- [x] Run logs show webhook and adminBatchReissue successful updates on retry; runner is a merged operator script, not a deployed function. No run performed.
+- [ ] BLOCKED: live webhook/reissue last-deployed/source confirmation denied cloudfunctions.functions.get. Buffered Actions timestamps are not deployment timestamps.
+- [ ] BLOCKED: any source repair awaits confirmed root cause; no blind rerun, sends, flag changes, IAM changes or trigger registration. Findings saved in portal-invite-waves/DEPLOY-695-INVESTIGATION.md.
+
 ## Nov 9 — B4 / #593 red-team stateful failures
 - [x] Red-team fixtures seed true-case authUid (bindMember shape); positives 200; denials 404 RECORD_NOT_AVAILABLE no PHI
 - [x] guardian-uid-case-d068 asserts exact-case caller contract + retired allowlist; mutation check red; pushed fbf2bb6c, Red-team CI green
