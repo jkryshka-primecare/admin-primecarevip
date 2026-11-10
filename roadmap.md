@@ -1,11 +1,11 @@
 # Roadmap
 
 ## Nov 10 — #695 production function rollout timeout
-- [ ] BLOCKED: root cause/build/operation/function log reads denied HTTP403; requires logging.viewer, cloudfunctions.viewer, cloudbuild.builds.viewer on investigation identity. Driver is gen1, not a gen2 Cloud Run revision.
+- [x] After temporary grants, read gen1 operation/build/startup logs: build SUCCESS; retry code9 operation already in progress; original ends code10 Operation interrupted at 20:30:24 UTC. Driver remains ACTIVE old version24; no runtime startup crash logs returned.
 - [x] Compared #595 against parent: no hydration driver, entrypoint, workflow, dependency manifest or lockfile changes. Pre-existing/rebuild-time cause remains unverified pending GCP.
 - [x] Run logs show webhook and adminBatchReissue successful updates on retry; runner is a merged operator script, not a deployed function. No run performed.
-- [ ] BLOCKED: live webhook/reissue last-deployed/source confirmation denied cloudfunctions.functions.get. Buffered Actions timestamps are not deployment timestamps.
-- [ ] BLOCKED: any source repair awaits confirmed root cause; no blind rerun, sends, flag changes, IAM changes or trigger registration. Findings saved in portal-invite-waves/DEPLOY-695-INVESTIGATION.md.
+- [x] Live webhook ACTIVE v4 updateTime 2026-11-10T20:28:38.890Z; successful #695 audit operations/hash provenance verified. Reissue ACTIVE v23 updateTime 20:28:48.047Z. Independent source download denied sourceCodeGet/object read; signed event acceptance not performed.
+- [ ] BLOCKED: deeper post-build interruption cause absent from accessible GCP records; no proven code fix. Report before any redeploy; no blind rerun, sends, flag changes, IAM changes or trigger registration. Findings saved in portal-invite-waves/DEPLOY-695-INVESTIGATION.md; temporary grants may be revoked after owner review.
 
 ## Nov 9 — B4 / #593 red-team stateful failures
 - [x] Red-team fixtures seed true-case authUid (bindMember shape); positives 200; denials 404 RECORD_NOT_AVAILABLE no PHI

@@ -2,7 +2,7 @@
 
 ## Status
 
-Root cause remains unverified: Google Cloud diagnostic reads returned HTTP 403 using `lovable-portal-readonly@prive-care-vip.iam.gserviceaccount.com`. No redeploy, source repair, sends, flag changes, IAM changes or Auth trigger registration performed.
+Read-only function/build/log access succeeded after the temporary grants. Confirmed failure boundary: the gen1 update operation stalled after a successful build, the automatic retry was refused because that operation was still running, and the original operation ended with code 10 `Operation interrupted.` GCP exposes no deeper reason in the accessible logs; a startup crash or specific application defect is **not established**. No redeploy, source repair, sends, flag changes, IAM changes or Auth trigger registration performed.
 
 ## Verified evidence
 
@@ -17,6 +17,20 @@ Root cause remains unverified: Google Cloud diagnostic reads returned HTTP 403 u
 
 ## Direct GCP read results
 
+### Follow-up after grants, 21:25 UTC request
+
+- Driver failed update: accepted at **20:00:23.705 UTC**, intended version **25**. Build `e12846c5-a7c3-45f6-98b5-8dd27acb3395` succeeded at **20:00:17.544 UTC**; complete build logs contain fetch success, dependency-install completion, `node --check index.js`, all steps complete and `DONE`. This build is shared with backfillElationReports; the driver's operation metadata explicitly references it. There is no build error.
+- At **20:27:44.066 UTC**, automatic retry failed with code **9**: `An operation on function hydrationRecoveryDriver in region us-central1 in project prive-care-vip is already in progress. Please try again later.` It did not create a second build or a second 25-minute rollout.
+- Original operation completed at **20:30:24 UTC** with code **10**, `Operation interrupted.` Its final metadata is available, but contains no detailed infrastructure/startup cause. The operation is now done, not still holding an in-progress lock.
+- Exhaustive driver-name function/startup search for Nov 9–10 and broader incident-window search returned audit records only, **no runtime startup crash/stack trace**. Build status SUCCESS does not prove the function started; absent startup logs do not prove absence of a crash.
+- Driver remains **ACTIVE, version 24**, last updated **2026-11-09T20:32:34.757Z**. Its prior successful update took approximately 22 seconds (20:32:12–20:32:34 UTC); a Nov 9 earlier update also succeeded. This is not evidence of a longstanding broken application revision.
+- Webhook is **ACTIVE, version 4**, last updated **2026-11-10T20:28:38.890Z** (**15:28:38.890 New York**). Its live build `17ff33b3-0036-42d4-b807-b9482dcedaa5` succeeded at 20:27:33.949 UTC. Both webhook update operations have successful final audit records; latest completes 20:28:39.059 UTC. Live `firebase-functions-hash` `15e28703e6485b9873f67913deb102fe40640d8d` equals both #695 update requests. Those requests use the same first/retry uploaded source objects as run #695. This confirms #695's webhook release landed via deployment metadata/audit provenance.
+- `adminBatchReissue` is **ACTIVE, version 23**, last updated **2026-11-10T20:28:48.047Z**. Runner remains a merged operator script; nothing executed.
+- Direct source download (`cloudfunctions.functions.sourceCodeGet`) and build source-object read both returned **403**. Thus deployment provenance is verified, but independent byte-level inspection of deployed `portal_invite` logic and a signed event-to-Firestore acceptance test remain unperformed. Do not mistake release provenance for functional feed certification.
+- #595 introduced no dependency/lockfile or hydration-source change. Old/new builds use the same Node.js runtime and builder release identifiers. Evidence points to an interrupted **post-build control-plane update**, but does not establish why it stalled. No speculative dependency/runtime patch is justified.
+
+### Initial reads before grants
+
 - Logging `entries:list`: `Permission denied for all log views`.
 - Regional/global Cloud Build history: caller permission denied.
 - Cloud Functions list/operations list and individual get for driver, webhook and reissue: corresponding permission denied.
@@ -26,4 +40,4 @@ Root cause remains unverified: Google Cloud diagnostic reads returned HTTP 403 u
 
 Grant this investigation identity project-level `roles/logging.viewer`, `roles/cloudfunctions.viewer`, and `roles/cloudbuild.builds.viewer`. No Editor/runtime write permission is needed. Add narrowly scoped build-log object access only if the referenced build logs are stored in a private Cloud Storage bucket and the subsequent read specifically fails there.
 
-Once granted: retrieve the gen1 function metadata and failed operations; resolve the function build ID and build error; read function startup/platform logs for 19:58–20:30 UTC; compare old/new source/build/config; verify webhook and reissue `updateTime` and source provenance. Present a confirmed root cause and proposed repair before deployment. Keep all wave approvals/domain-prep gates and flags unchanged.
+Function metadata, operation and build/log reads are now complete. Deeper platform interruption cause remains unavailable in these records. Optional narrowly scoped source-code/object read would allow independent byte comparison, not necessarily expose the control-plane reason. Keep redeployment held pending owner review of these findings; no startup-crash fix or blind retry is justified. Keep wave gates and flags unchanged. The owner may revoke the temporary diagnostic grants after reviewing the captured evidence.
