@@ -1,5 +1,10 @@
 # Roadmap
 
+## Nov 10 — portal invite tracking and one staff test
+- [x] PR #596 e1d6fbf: normal shared invite/reissue sender clicks off (HTML/plain text), opens on; 3 behavioral tests pass. Owning-project merge/deploy pending; no live tracking change claimed.
+- [ ] BLOCKED: single non-member test not sent; configured portal-admin identity denied secretmanager.versions.access for existing SENDGRID_API_KEY (HTTP403). No claim minted, member selected or wave started. Requires narrowly scoped operator execution/access.
+- [ ] BLOCKED on actual authorized test send: verify accepted send and matching genuine portal emailEvents category. Wave holds stay unchanged; Gmail DMARC inspection owner-operated.
+
 ## Nov 10 — #695 production function rollout timeout
 - [x] After temporary grants, read gen1 operation/build/startup logs: build SUCCESS; retry code9 operation already in progress; original ends code10 Operation interrupted at 20:30:24 UTC. Driver remains ACTIVE old version24; no runtime startup crash logs returned.
 - [x] Compared #595 against parent: no hydration driver, entrypoint, workflow, dependency manifest or lockfile changes. Pre-existing/rebuild-time cause remains unverified pending GCP.

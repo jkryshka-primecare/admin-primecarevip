@@ -1,0 +1,14 @@
+--- a/functions/core/services/email/sendInviteEmail.js
++++ b/functions/core/services/email/sendInviteEmail.js
+@@ -63,6 +63,11 @@
+     subject: 'Your Prime Care VIP patient portal is ready',
+     // Non-PHI tag so emailEvents can be filtered to invite sends (wave gate math).
+     categories: [INVITE_CATEGORY],
++    // Keep branded claim URLs intact; retain opens for invite wave checks.
++    trackingSettings: {
++      clickTracking: { enable: false, enableText: false },
++      openTracking: { enable: true },
++    },
+     content: [{ type: 'text/html', value: claimEmailHtml(`${CLAIM_BASE}?t=${token}`) }],
+   });
+ }
