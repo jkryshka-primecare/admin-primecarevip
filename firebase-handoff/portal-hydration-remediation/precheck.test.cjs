@@ -1,0 +1,12 @@
+const {test}=require('node:test');const assert=require('node:assert/strict');
+const {validSyntax,domainResolver,classify}=require('./precheck.cjs');
+test('bad syntax needs correction',async()=>{assert.equal(validSyntax('a..b@gmail.com'),false);assert.equal((await classify('a..b@gmail.com')).outcome,'correction');});
+test('domain typo needs correction',async()=>{assert.equal((await classify('member@gmial.com')).outcome,'correction');});
+test('MX qualifies syntactically valid candidate',async()=>{assert.equal((await classify('member@gmail.com',{resolveDomain:async()=> 'MX'})).outcome,'send');});
+test('no MX/A suppresses',async()=>{assert.equal((await classify('member@legitimate-example.org',{resolveDomain:async()=> 'NONE'})).outcome,'suppress');});
+test('role address is held, never send eligible',async()=>{assert.equal((await classify('info@gmail.com')).outcome,'risky');});
+test('disposable address is held',async()=>{assert.equal((await classify('member@mailinator.com')).outcome,'risky');});
+test('existing suppression overrides valid domain',async()=>{assert.equal((await classify('member@gmail.com',{suppressed:new Set(['member@gmail.com'])})).reason,'ALREADY_SUPPRESSED');});
+test('known bounce overrides valid domain',async()=>{assert.equal((await classify('member@gmail.com',{bounced:new Set(['member@gmail.com'])})).reason,'KNOWN_BOUNCE');});
+test('per-domain caching and implicit A fallback',async()=>{let calls=0;const resolve=domainResolver({resolveMx:async()=>{calls++;return []},resolve4:async()=>['192.0.2.1']});assert.deepEqual(await Promise.all([resolve('example.org'),resolve('example.org')]),['A','A']);assert.equal(calls,1);});
+test('null MX does not fall back to A',async()=>{const resolve=domainResolver({resolveMx:async()=>[{exchange:'.',priority:0}],resolve4:async()=>['192.0.2.1']});assert.equal(await resolve('example.org'),'NONE');});

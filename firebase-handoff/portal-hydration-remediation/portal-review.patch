@@ -1,0 +1,231 @@
+--- a/functions/claimAccount.js
++++ b/functions/claimAccount.js
+@@ -48,6 +48,7 @@
+ } = require('./core/services/patient/hydrationStatus');
+ const { checkThrottle, recordFailure, clearThrottle } = require('./core/services/patient/dobThrottle');
+ const { runPostClaimSteps } = require('./core/services/patient/postClaim');
++const { queueClaimHydration } = require('./core/services/patient/claimHydrationQueue');
+ const { setCors } = require('./core/config/allowedOrigins');
+ 
+ const DOB_RE = /^\d{4}-\d{2}-\d{2}$/;
+@@ -358,7 +359,14 @@
+   // 9b / 9b-i / 9c) Shared post-bind steps (status active, guardian bind,
+   //     first-claim hydration). Moved verbatim to core/services/patient/postClaim.js
+   //     so social sign-in path B runs the identical hydration. Never throws.
+-  await runPostClaimSteps({ elationPatientId, uid, actor: 'claimAccount' });
++  // Durable commit before returning a session; never launch background work here.
++  try {
++    await queueClaimHydration({ db: admin.firestore(), FieldValue, patientId: elationPatientId, rawUid: userRecord.uid });
++  } catch (err) {
++    logError('claimAccount', 'hydration-queue-failed', err, { elationPatientId });
++    return jsonError(res, 503, 'UNAVAILABLE', 'SETUP_FINISHING', 'Your account is linked. Please sign in while setup finishes.');
++  }
++  await runPostClaimSteps({ elationPatientId, uid, actor: 'claimAccount', skipHydration: true });
+ 
+   try { await clearThrottle(tokenId); }
+   catch (err) { logError('claimAccount', 'throttle-clear-failed', err, { elationPatientId }); /* non-fatal: TTL cleans up */ }
+--- /dev/null
++++ b/functions/claimHydrationWorker.js
+@@ -0,0 +1,34 @@
++// REVIEW ONLY. A durable Firestore trigger, not work started after an HTTP response.
++const functions = require('firebase-functions');
++const admin = require('firebase-admin');
++const { runPostClaimSteps } = require('./core/services/patient/postClaim');
++const { markDeferred } = require('./core/services/patient/hydrationStatus');
++exports.claimHydrationWorker = functions.region('us-central1')
++  .runWith({ timeoutSeconds: 180, memory: '512MB', failurePolicy: true, secrets: ['ELATION_CLIENT_ID', 'ELATION_CLIENT_SECRET'] })
++  .firestore.document('claim_hydration_jobs/{patientId}').onCreate(async (snap, context) => {
++    const db = admin.firestore();
++    const id = String(context.params.patientId);
++    const job = snap.data() || {};
++    const acquired = await db.runTransaction(async (tx) => {
++      const [current, patient] = await Promise.all([tx.get(snap.ref), tx.get(db.collection('patients').doc(id))]);
++      const j = current.data() || {}; const p = patient.exists ? patient.data() : null;
++      if (!p || p.authUid !== job.rawUid || p.firebaseUid !== String(job.rawUid).toLowerCase()) throw new Error('BINDING_MISMATCH');
++      if (['complete', 'failed'].includes(p.hydrationStatus) || j.state === 'done') return false;
++      if (j.state === 'running' && Number(j.leaseUntilMs) > Date.now()) throw new Error('WORKER_LEASE_LIVE');
++      tx.set(snap.ref, { state: 'running', leaseUntilMs: Date.now() + 180000 }, { merge: true });
++      return true;
++    });
++    if (!acquired) return;
++    try {
++      await runPostClaimSteps({ elationPatientId: id, uid: job.rawUid.toLowerCase(), actor: 'claimHydrationWorker', ownsPending: true });
++      const patient = await db.collection('patients').doc(id).get();
++      if (patient.get('hydrationStatus') === 'pending') {
++        await markDeferred(db, admin.firestore.FieldValue, id, { reason: 'CLAIM_WORKER_INCOMPLETE' });
++      }
++      await snap.ref.set({ state: 'done', leaseUntilMs: 0, finishedAt: admin.firestore.FieldValue.serverTimestamp() }, { merge: true });
++    } catch (err) {
++      // Retry has a durable checkpoint; Recovery independently retains the patient ID.
++      await snap.ref.set({ state: 'queued', leaseUntilMs: 0 }, { merge: true });
++      throw err;
++    }
++  });
+--- /dev/null
++++ b/functions/core/services/patient/claimHydrationQueue.js
+@@ -0,0 +1,21 @@
++// REVIEW ONLY: patient-ID keyed durable invitation hydration, committed pre-response.
++const { DEFAULT_RECOVERY_RUN_ID } = require('./hydrationStatus');
++async function queueClaimHydration({ db, FieldValue, patientId, rawUid }) {
++  const id = String(patientId);
++  if (!/^\d{6,25}$/.test(id) || typeof rawUid !== 'string' || !rawUid) throw new Error('INVALID_BINDING');
++  const patient = db.collection('patients').doc(id);
++  const job = db.collection('claim_hydration_jobs').doc(id);
++  const recovery = db.collection('hydration_runs').doc(DEFAULT_RECOVERY_RUN_ID);
++  return db.runTransaction(async (tx) => {
++    const [p, j] = await Promise.all([tx.get(patient), tx.get(job)]);
++    const d = p.exists ? p.data() : null;
++    if (!d || d.authUid !== rawUid || d.firebaseUid !== rawUid.toLowerCase()) throw new Error('BINDING_MISMATCH');
++    if (d.hydrationStatus === 'complete' || d.hydrationStatus === 'failed' || j.exists) return false;
++    tx.set(patient, { status: 'active', hydrationStatus: 'pending', hydrationPendingAt: FieldValue.serverTimestamp(), hydrationRunId: DEFAULT_RECOVERY_RUN_ID }, { merge: true });
++    tx.set(job, { patientId: id, rawUid, state: 'queued', createdAt: FieldValue.serverTimestamp() });
++    // Atomic safety net: if the worker never arrives, stale-pending Recovery owns it.
++    tx.set(recovery, { runId: DEFAULT_RECOVERY_RUN_ID, standing: true, queued: FieldValue.arrayUnion(id), updatedAt: FieldValue.serverTimestamp() }, { merge: true });
++    return true;
++  });
++}
++module.exports = { queueClaimHydration };
+--- a/functions/core/services/patient/postClaim.js
++++ b/functions/core/services/patient/postClaim.js
+@@ -30,7 +30,7 @@
+   GUARDIAN_BIND_MAX_CHILDREN,
+ } = require('./claimTimeGuardianBind');
+ 
+-async function runPostClaimSteps({ elationPatientId, uid, actor = 'claimAccount' }) {
++async function runPostClaimSteps({ elationPatientId, uid, actor = 'claimAccount', skipHydration = false, ownsPending = false }) {
+   // 9b) Flip lifecycle status invited -> active (#303). bindMember owns identity
+   //     (firebaseUid), NOT lifecycle — so the CF writes status. Ordered AFTER a
+   //     successful bind and idempotent (merge). A failure HERE leaves the patient
+@@ -81,6 +81,10 @@
+ 
+ 
+ 
++
++  // Invite claims persist a durable worker job before requesting a session.
++  // Social path B keeps its existing awaited behavior until its separate review.
++  if (skipHydration) return;
+ 
+   // 9c) First-claim hydration (#304). Pull this patient's historical Elation reports +
+   //     letters into the store so records are present on first login. AWAITED: Firebase
+@@ -117,7 +121,7 @@
+       // enqueue is an idempotent arrayUnion). `failed` and `complete` stay
+       // untouched here — those are operator/force territory.
+       const deferredRetry = already === STATUS_DEFERRED;
+-      if (already === undefined || already === null || stalePending || deferredRetry) {
++      if (already === undefined || already === null || stalePending || deferredRetry || (ownsPending && already === 'pending')) {
+         tx.set(pRef, {
+           hydrationStatus: 'pending',
+           hydrationPendingAt: admin.firestore.FieldValue.serverTimestamp(),
+--- a/functions/hydrationRecoveryTick.js
++++ b/functions/hydrationRecoveryTick.js
+@@ -39,6 +39,7 @@
+   RECOVERY_RUNS_COLLECTION,
+   DEFAULT_RECOVERY_RUN_ID,
+   SOURCE_RECOVERY,
++  recoveryEligibility,
+ } = require('./core/services/patient/hydrationStatus');
+ const {
+   DRAIN_CONFIG_DOC,
+@@ -70,7 +71,15 @@
+ 
+   const runSnap = await runRef.get();
+   const run = runSnap.exists ? (runSnap.data() || {}) : {};
+-  const queued = Array.isArray(run.queued) ? run.queued : [];
++  // Do not let the recovery safety-net queue race a fresh claim worker.
++  const queuedRaw = Array.isArray(run.queued) ? run.queued : [];
++  const queued = [];
++  if (config.enabled) {
++    for (const id of queuedRaw) {
++      const patient = await db().collection('patients').doc(String(id)).get();
++      if (recoveryEligibility(patient.exists ? patient.data() : null, now).eligible) queued.push(String(id));
++    }
++  }
+ 
+   // Cheap gates first: never pay for a cohort scan on a disabled or busy tick.
+   const preflight = tickDecision({
+--- a/functions/index.js
++++ b/functions/index.js
+@@ -83,6 +83,7 @@
+ // letters wrapper is the operator surface the reports backfill always had.
+ const { hydrationRecoveryDriver } = require('./hydrationRecoveryDriver');
+ const { hydrationRecoveryTick } = require('./hydrationRecoveryTick');
++const { claimHydrationWorker } = require('./claimHydrationWorker');
+ const { backfillElationLettersHttp } = require('./backfillElationLettersHttp');
+ 
+ module.exports = {
+@@ -154,6 +155,6 @@
+   adminRunBackfillDriver,
+   hydrationRecoveryDriver,
+   hydrationRecoveryTick,
++  claimHydrationWorker,
+   backfillElationLettersHttp,
+ };
+-
+--- /dev/null
++++ b/functions/test/unit/claim-hydration-queue.test.cjs
+@@ -0,0 +1,36 @@
++const { test } = require('node:test');
++const assert = require('node:assert/strict');
++const { queueClaimHydration } = require('../../core/services/patient/claimHydrationQueue');
++function fixture(patient, exists = false) {
++  const writes = [];
++  const db = { collection: c => ({ doc: id => ({ c, id }) }), runTransaction: fn => fn({
++    get: async ref => ref.c === 'patients' ? { exists: !!patient, data: () => patient } : { exists },
++    set: (ref, data) => writes.push({ ref, data }),
++  }) };
++  const FieldValue = { serverTimestamp: () => 'TS', arrayUnion: id => [id] };
++  return { writes, args: { db, FieldValue, patientId: '123456', rawUid: 'TrueCaseUID' } };
++}
++test('bind + loading job + recovery ID commit atomically before hydration starts', async () => {
++  const f = fixture({ authUid: 'TrueCaseUID', firebaseUid: 'truecaseuid' });
++  assert.equal(await queueClaimHydration(f.args), true);
++  assert.equal(f.writes.length, 3);
++  assert.equal(f.writes[0].data.status, 'active');
++  assert.equal(f.writes[0].data.hydrationStatus, 'pending');
++  assert.equal(f.writes[1].data.state, 'queued');
++  assert.deepEqual(f.writes[2].data.queued, ['123456']);
++});
++test('wrong true-case UID cannot queue another patient', async () => {
++  const f = fixture({ authUid: 'truecaseuid', firebaseUid: 'truecaseuid' });
++  await assert.rejects(queueClaimHydration(f.args), /BINDING_MISMATCH/);
++  assert.equal(f.writes.length, 0);
++});
++test('completed records never restart', async () => {
++  const f = fixture({ authUid: 'TrueCaseUID', firebaseUid: 'truecaseuid', hydrationStatus: 'complete' });
++  assert.equal(await queueClaimHydration(f.args), false);
++  assert.equal(f.writes.length, 0);
++});
++test('a repeated job cannot enqueue duplicate worker work', async () => {
++  const f = fixture({ authUid: 'TrueCaseUID', firebaseUid: 'truecaseuid' }, true);
++  assert.equal(await queueClaimHydration(f.args), false);
++  assert.equal(f.writes.length, 0);
++});
+--- /dev/null
++++ b/functions/test/unit/claim-hydration-worker.test.cjs
+@@ -0,0 +1,26 @@
++const {test}=require('node:test');const assert=require('node:assert/strict');const Module=require('node:module');
++function harness({wrongBinding=false,liveLease=false,status='pending',result='complete'}={}) {
++  let called=0,deferred=0;const job={rawUid:'TrueCaseUID',state:liveLease?'running':'queued',leaseUntilMs:liveLease?Date.now()+180000:0};
++  const patient={authUid:wrongBinding?'wrong':'TrueCaseUID',firebaseUid:'truecaseuid',hydrationStatus:status};
++  const jobRef={set:async data=>Object.assign(job,data)};
++  const patientRef={get:async()=>({get:key=>patient[key]})};
++  const db={collection:()=>({doc:()=>patientRef}),runTransaction:fn=>fn({get:async ref=>ref===jobRef?{data:()=>job}:{exists:true,data:()=>patient},set:(ref,data)=>Object.assign(job,data)})};
++  const firestore=()=>db;firestore.FieldValue={serverTimestamp:()=>0};
++  const chain={region:()=>chain,runWith:()=>chain,firestore:{document:()=>chain},onCreate:fn=>fn};
++  const original=Module._load;
++  Module._load=function(name,parent,...rest){
++    if(name==='firebase-admin')return {firestore};
++    if(name==='firebase-functions')return chain;
++    if(name==='./core/services/patient/postClaim')return {runPostClaimSteps:async args=>{assert.equal(args.ownsPending,true);called++;patient.hydrationStatus=result;}};
++    if(name==='./core/services/patient/hydrationStatus')return {markDeferred:async()=>{deferred++;patient.hydrationStatus='deferred';}};
++    return original.call(this,name,parent,...rest);
++  };
++  const path=require.resolve('../../claimHydrationWorker');delete require.cache[path];
++  let worker;try{worker=require(path).claimHydrationWorker;}finally{Module._load=original;}
++  return {run:()=>worker({ref:jobRef,data:()=>job},{params:{patientId:'123456'}}),job,patient,get called(){return called},get deferred(){return deferred}};
++}
++test('worker owns queued pending and finishes once',async()=>{const h=harness();await h.run();await h.run();assert.equal(h.called,1);assert.equal(h.job.state,'done');assert.equal(h.patient.hydrationStatus,'complete');});
++test('worker refuses wrong exact binding before hydration',async()=>{const h=harness({wrongBinding:true});await assert.rejects(h.run(),/BINDING_MISMATCH/);assert.equal(h.called,0);});
++test('concurrent delivery cannot take a live worker lease',async()=>{const h=harness({liveLease:true});await assert.rejects(h.run(),/WORKER_LEASE_LIVE/);assert.equal(h.called,0);});
++test('unfinished worker hands pending to deferred safety net',async()=>{const h=harness({result:'pending'});await h.run();assert.equal(h.deferred,1);assert.equal(h.patient.hydrationStatus,'deferred');});
++test('failed records are not restarted automatically',async()=>{const h=harness({status:'failed'});await h.run();assert.equal(h.called,0);});

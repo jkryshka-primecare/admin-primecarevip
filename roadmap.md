@@ -1,5 +1,15 @@
 # Roadmap
 
+## Nov 11 22:27 — hydration remediation before wave one
+- [x] Prepare review-only durable async claim hydration and Hub loading/polling patches; 19 new queue/worker/domain tests PASS and both patch dry-runs PASS. Not applied, emulator/CI/client-denial rules pending; issue create denied 403, no issue or PR claimed.
+- [ ] Enable and verify bounded Recovery, including September deferred member — awaiting temporary live log/function read access and scoped config execution; no wave approval.
+- [x] Refreshed read-only 1036 active / 764 candidates: 500 adult account candidates (497 expired + 3 live), 66 no-account adults held, 195 minors held, 1 age review, 1 adult correction, 1 claimed setup fix; zero suppression exclusions. Across candidates 2 corrections + 1 risky overlap holds. ID-keyed Files outputs validated; no imports/sends.
+- [ ] Attribute Nicholas's actual failure using authorized logs/Auth; reissue by patient ID only after activation/recovery fixes are live, then owner-operated claim/read walkthrough.
+- [ ] Verify normal claim and forced-deferred Recovery end-to-end in authorized hosted state; cannot certify through mocks or signed-out pages.
+- [ ] Audit effective social access and flag-change attribution; recommend restoring master off, without silently changing flags or triggers.
+- [x] Fresh read: deploy #697 succeeded 21:36:34 UTC; function metadata and Logging still 403; recovery config missing, standing queue count one; social master/default true, one staff-target doc.
+- [x] Recovery operator setting documented: default Firestore config/hydrationRecovery {enabled:true,maxPerTick:1}, not env/secret; no execution. Social source requires signed-in enabled Auth + exact UID staff target (one enabled default target); change attribution unavailable. Master-off recommended, not silently changed. Cloud Build Viewer optional for build investigation only.
+
 ## Nov 11 — login-to-records readiness audit
 - [x] Read current portal source and Hub snapshot/live request client: claim hydrates reports+letters up to 120s; live Hub aborts at 15s. Prior exported reissue cohort 501 now 500 unhydrated/unbound, one claimed-complete (not identical to original 501 expired bucket).
 - [x] Live recovery config absent; standing queue one deferred since Sep21, no drain checkpoints. Claimed-incomplete cause recorded CLAIM_SOFT_BUDGET_REACHED; baseline completeness remains unverified.
