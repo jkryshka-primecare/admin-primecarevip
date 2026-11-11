@@ -1,6 +1,8 @@
 # Roadmap
 
 ## Nov 11 — invite MIME and unsubscribe headers
+- [x] Owner confirms health@primecarevip.com is monitored; clarified mailto requests do not automatically generate SendGrid unsubscribe events or suppression writes.
+- [ ] BLOCKED before wave 1: establish authorized mailbox-to-emailSuppression handling and test next-invite denial; mailbox access/ingestion and an implemented staff action are not available or verified here. No opt-out or patient records written.
 - [x] Current main sender HTML-only/no unsubscribe header; added text/plain + HTML alternatives and static mailbox List-Unsubscribe. Five sender tests pass.
 - [x] PR #596 amended aa9683f9; committed bytes verified. No List-Unsubscribe-Post without HTTPS POST suppression handler. No sends/deploy/wave approval.
 - [ ] BLOCKED on owner merge/deploy and authorized staff test: verify delivered MIME, DKIM/header coverage and staff handling of mailbox opt-outs. One-click remains unimplemented, not claimed.
