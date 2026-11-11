@@ -33,6 +33,24 @@ function claimEmailHtml(claimLink) {
 }
 
 let sendgridReady = false;
+function claimEmailText(claimLink) {
+  return [
+    'Dear Prime Care VIP Member,',
+    '',
+    'Your Prime Care VIP Patient Portal is ready. View your lab and imaging results, medications, and upcoming appointments securely.',
+    '',
+    'Activate your portal using your unique invitation link:',
+    claimLink,
+    '',
+    'For your security, this link is just for you and expires in 30 days. If it expires, contact us for a new one.',
+    '',
+    'Need help? Email health@primecarevip.com or call 561-948-2020.',
+    '',
+    'Warmly,',
+    'The Prime Care VIP Team',
+  ].join('\n');
+}
+
 async function initSendgrid() {
   if (sendgridReady) return;
   const client = new SecretManagerServiceClient();
@@ -63,13 +81,21 @@ async function sendInviteEmail({ to, token }) {
     subject: 'Your Prime Care VIP patient portal is ready',
     // Non-PHI tag so emailEvents can be filtered to invite sends (wave gate math).
     categories: [INVITE_CATEGORY],
+    // Mailbox requests are staff-processed; no RFC8058 HTTPS POST handler exists.
+    // Never put the account-claim token or patient identifiers in this header.
+    headers: {
+      'List-Unsubscribe': '<mailto:health@primecarevip.com?subject=Unsubscribe%20from%20portal%20invitations>',
+    },
     // Keep branded claim URLs intact; retain opens for invite wave checks.
     trackingSettings: {
       clickTracking: { enable: false, enableText: false },
       openTracking: { enable: true },
     },
-    content: [{ type: 'text/html', value: claimEmailHtml(`${CLAIM_BASE}?t=${token}`) }],
+    content: [
+      { type: 'text/plain', value: claimEmailText(`${CLAIM_BASE}?t=${token}`) },
+      { type: 'text/html', value: claimEmailHtml(`${CLAIM_BASE}?t=${token}`) },
+    ],
   });
 }
 
-module.exports = { sendInviteEmail, INVITE_CATEGORY, claimEmailHtml, CLAIM_BASE };
+module.exports = { sendInviteEmail, INVITE_CATEGORY, claimEmailHtml, claimEmailText, CLAIM_BASE };

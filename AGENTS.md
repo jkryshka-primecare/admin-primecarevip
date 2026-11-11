@@ -9,4 +9,5 @@
 - Disposable hosted social tests use a project-guarded harness and in-memory genuine provider tokens, recording sanitized results only; isolated adapters never certify live integration behavior.
 - Callable-only portal releases exclude blocking modules from the deployment entrypoint and enforce that boundary in the required check; registered blocking functions require a separate hosted audience gate because SDK verification precedes application guards.
 - Portal SendGrid events and suppression updates commit in one transaction, with emulator-enforced collection rules; keep CRM receiver/database independent because partial commits can silently lose suppression on retry.
+- Invite email alternatives and unsubscribe headers belong in the shared sender; advertise RFC8058 one-click only with an implemented HTTPS POST opt-out handler because a mailbox header alone cannot fulfill that contract.
 - Elation read retirement removes checks at read call sites, not the shared containment helper; preserve non-read callers and validate true-case token authUid against the resolved patient because provisioning and read authorization have different boundaries.

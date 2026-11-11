@@ -45,3 +45,25 @@ test('normal sender keeps exact portal_invite category and practice From', async
   assert.deepEqual(Array.from(sender.message().categories), ['portal_invite']);
   assert.equal(sender.message().from.email, 'health@primecarevip.com');
 });
+
+test('invite provides plain-text and HTML alternatives with the same claim link', async () => {
+  const sender = loadSender();
+  await sender.send({ to: 'synthetic@example.com', token: 'synthetic-token' });
+  const parts = sender.message().content;
+  assert.deepEqual(Array.from(parts, part => part.type), ['text/plain', 'text/html']);
+  for (const part of parts) {
+    assert.ok(part.value.includes('https://care.primecarevip.com/claim?t=synthetic-token'));
+    assert.ok(part.value.includes('30 days'));
+  }
+  assert.equal(/<[^>]+>/.test(parts[0].value), false);
+});
+
+test('invite supplies mailbox unsubscribe without claiming unsupported one-click', async () => {
+  const sender = loadSender();
+  await sender.send({ to: 'synthetic@example.com', token: 'synthetic-token' });
+  const headers = sender.message().headers;
+  assert.equal(headers['List-Unsubscribe'], '<mailto:health@primecarevip.com?subject=Unsubscribe%20from%20portal%20invitations>');
+  assert.equal(Object.hasOwn(headers, 'List-Unsubscribe-Post'), false);
+  assert.equal(JSON.stringify(headers).includes('synthetic-token'), false);
+  assert.equal(JSON.stringify(headers).includes('synthetic@example.com'), false);
+});

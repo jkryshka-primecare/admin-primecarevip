@@ -1,5 +1,10 @@
 # Roadmap
 
+## Nov 11 — invite MIME and unsubscribe headers
+- [x] Current main sender HTML-only/no unsubscribe header; added text/plain + HTML alternatives and static mailbox List-Unsubscribe. Five sender tests pass.
+- [x] PR #596 amended aa9683f9; committed bytes verified. No List-Unsubscribe-Post without HTTPS POST suppression handler. No sends/deploy/wave approval.
+- [ ] BLOCKED on owner merge/deploy and authorized staff test: verify delivered MIME, DKIM/header coverage and staff handling of mailbox opt-outs. One-click remains unimplemented, not claimed.
+
 ## Nov 10 — portal invite tracking and one staff test
 - [x] PR #596 e1d6fbf: normal shared invite/reissue sender clicks off (HTML/plain text), opens on; 3 behavioral tests pass. Owning-project merge/deploy pending; no live tracking change claimed.
 - [ ] BLOCKED: single non-member test not sent; configured portal-admin identity denied secretmanager.versions.access for existing SENDGRID_API_KEY (HTTP403). No claim minted, member selected or wave started. Requires narrowly scoped operator execution/access.
