@@ -226,3 +226,5 @@
 - [x] Invite wave runner (issue #594) built report-only; waiting on domain prep + wave 1 approval
 - [ ] Hold: 64 no-account adults (account creation gated), 194 minors (guardian policy pending)
 - [ ] Review: 1 under-18 with portal access, 2 under-18 with expired direct invites
+
+- [x] #597 / PR #598: admin Issue invite + 18th-birthday sweep honour emailSuppression and Portal Invitations group; 12 checks green; not merged/deployed. Follow-up: human-run issueInvites CLI also bypasses opt-outs.
