@@ -1,5 +1,13 @@
 # Roadmap
 
+## Nov 11 — login-to-records readiness audit
+- [x] Read current portal source and Hub snapshot/live request client: claim hydrates reports+letters up to 120s; live Hub aborts at 15s. Prior exported reissue cohort 501 now 500 unhydrated/unbound, one claimed-complete (not identical to original 501 expired bucket).
+- [x] Live recovery config absent; standing queue one deferred since Sep21, no drain checkpoints. Claimed-incomplete cause recorded CLAIM_SOFT_BUDGET_REACHED; baseline completeness remains unverified.
+- [x] Located reported member by name/record ID: invited, unbound, no hydration status; both old tokens expired. No individual login failure attribution or Auth lookup available; no member impersonation.
+- [x] Report recorded in portal-invite-waves/LOGIN-RECORDS-READINESS-2026-11-11.md; no production writes/sends/deploy. Observed social master/default-practice flags true; did not change them.
+- [ ] BLOCKED: current metadata/log/Auth reads denied despite prior grants; restore intended read-only access to verify Driver version, Tick/feed runtime and named login failure.
+- [ ] BLOCKED: owning Hub claim-timeout repair, approved recovery-drain enable/recovery, and authorized synthetic/staff claim-to-session-to-records walkthrough required before wave-one certification.
+
 ## Nov 11 — group-only invitation opt-out
 - [x] Amended PR #596 at c299b2a: configured ASM group with concrete 36716 tests, global subscription tracking explicitly disabled, clicks off/opens on; three published files byte-verified.
 - [x] Nine focused sender/receiver classification tests pass; group_unsubscribe still yields hard emailSuppression. Review documentation updated; local suppression remains portal address-wide, no SendGrid global-list write.
