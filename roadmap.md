@@ -1,11 +1,14 @@
 # Roadmap
 
 ## Nov 11 — invite MIME and unsubscribe headers
+- [x] Replace raw mailto proposal with configured SendGrid ASM group + group links in both alternatives + per-message subscription tracking; preserve clicks off/opens on and existing receiver.
+- [x] PR #596 amended 3dc8e974; four files read back byte-verified; nine focused tests pass. Production variable wiring added; no configured ID or live integration claimed.
+- [ ] BLOCKED: owner must supply/create main-account Portal Invitations group and set SENDGRID_PORTAL_INVITE_ASM_GROUP_ID_PRODUCTION repository variable; no SendGrid connection/access available. Verify Unsubscribe/Group Unsubscribe subscriptions and actual opt-out → event → suppression → next-invite denial before wave 1.
 - [x] Owner confirms health@primecarevip.com is monitored; clarified mailto requests do not automatically generate SendGrid unsubscribe events or suppression writes.
-- [ ] BLOCKED before wave 1: establish authorized mailbox-to-emailSuppression handling and test next-invite denial; mailbox access/ingestion and an implemented staff action are not available or verified here. No opt-out or patient records written.
+- [x] Mailbox-to-suppression proposal superseded by requested SendGrid-managed opt-outs; no mailbox parsing or new endpoint.
 - [x] Current main sender HTML-only/no unsubscribe header; added text/plain + HTML alternatives and static mailbox List-Unsubscribe. Five sender tests pass.
 - [x] PR #596 amended aa9683f9; committed bytes verified. No List-Unsubscribe-Post without HTTPS POST suppression handler. No sends/deploy/wave approval.
-- [ ] BLOCKED on owner merge/deploy and authorized staff test: verify delivered MIME, DKIM/header coverage and staff handling of mailbox opt-outs. One-click remains unimplemented, not claimed.
+- [ ] BLOCKED on owner config/merge/deploy and authorized staff test: verify delivered MIME, DKIM and SendGrid-managed header/opt-out behavior. No live sends or wave release.
 
 ## Nov 10 — portal invite tracking and one staff test
 - [x] PR #596 e1d6fbf: normal shared invite/reissue sender clicks off (HTML/plain text), opens on; 3 behavioral tests pass. Owning-project merge/deploy pending; no live tracking change claimed.

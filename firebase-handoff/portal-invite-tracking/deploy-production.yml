@@ -1,0 +1,355 @@
+# Deploy pipeline — hardened for deploy-trust per D-071 (#218, #219).
+# Failure signal for functions is the deploy OUTPUT TEXT ("failed to update function"),
+# NOT the CLI exit code, which is unreliable (firebase-tools#6989 / #5006 — exits 0 on failure).
+# Hosting/rules/storage deploy SEPARATELY from functions so a hosting no-op 400 can't abort functions.
+# Health gate runs `if: always()` so a failed deploy cannot skip verification.
+# updateTime report is Defect-A visibility only (Option 2) — the text scan is the enforcer.
+# Env config is written to functions/.env.<projectId> (D-070), the file Firebase actually loads.
+# Function list is duplicated in the snapshot step and the gate — keep both in sync when adding a read CF (see #218 follow-up).
+name: Deploy to Production
+on:
+  push:
+    branches:
+      - main
+# Deploys must SERIALIZE, never race. Two runs (a commit push and its merge)
+# updating the same 2nd-gen functions concurrently make the loser fail with
+# `409 unable to queue the operation`; prod ended up correct but the run was red.
+# cancel-in-progress: false — a deploy already talking to Cloud Functions must
+# finish, not be killed mid-update.
+concurrency:
+  group: deploy-production
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v5
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v5
+      - name: Install dependencies
+        run: pnpm --filter @workspace/portal install
+      - name: Build portal
+        run: pnpm --filter @workspace/portal build
+        env:
+          VITE_FIREBASE_API_KEY: ${{ secrets.PROD_VITE_FIREBASE_API_KEY }}
+          VITE_FIREBASE_AUTH_DOMAIN: ${{ secrets.PROD_VITE_FIREBASE_AUTH_DOMAIN }}
+          VITE_FIREBASE_PROJECT_ID: ${{ secrets.PROD_VITE_FIREBASE_PROJECT_ID }}
+          VITE_FIREBASE_STORAGE_BUCKET: ${{ secrets.PROD_VITE_FIREBASE_STORAGE_BUCKET }}
+          VITE_FIREBASE_MESSAGING_SENDER_ID: ${{ secrets.PROD_VITE_FIREBASE_MESSAGING_SENDER_ID }}
+          VITE_FIREBASE_APP_ID: ${{ secrets.PROD_VITE_FIREBASE_APP_ID }}
+          VITE_FUNCTIONS_BASE_URL: ${{ secrets.VITE_FUNCTIONS_BASE_URL_PRODUCTION }}
+      - name: Build web-member (patient site)
+        run: |
+          pnpm --filter @workspace/web-member install
+          pnpm --filter @workspace/web-member build
+        env:
+          VITE_FIREBASE_API_KEY: ${{ secrets.PROD_VITE_FIREBASE_API_KEY }}
+          VITE_FUNCTIONS_BASE_URL: ${{ secrets.VITE_FUNCTIONS_BASE_URL_PRODUCTION }}
+      - name: Snapshot function updateTime (pre-deploy)
+        env:
+          GOOGLE_APPLICATION_CREDENTIALS_JSON: ${{ secrets.GOOGLE_APPLICATION_CREDENTIALS_JSON_PRODUCTION }}
+          PROJECT_ID: ${{ secrets.FIREBASE_PROJECT_PRODUCTION }}
+        run: |
+          set +e -uo pipefail
+          printf '%s' "$GOOGLE_APPLICATION_CREDENTIALS_JSON" > /tmp/production-sa.json
+          export GOOGLE_APPLICATION_CREDENTIALS=/tmp/production-sa.json
+          # Snapshot the deployed updateTime of each gate-listed function BEFORE deploy.
+          # Hunk 3 compares against this so we can SEE which functions actually shipped
+          # (a silent skip leaves updateTime unchanged). Report-only per Option 2 — the
+          # authoritative failure signal is the deploy-step text scan (firebase-tools#6989).
+          # adminIssueInvite/adminRevokeInvite/adminSetPortalAccess/adminGetPortalAccess are intentionally excluded: IAM-restricted (invoker-only), so the anonymous probe gets a platform 403 with an HTML body and cannot satisfy the JSON gate.
+          FUNCTIONS=(
+            addProviderToConversation
+            createPatientConversation
+            getConversationMessages
+            getAllergies
+            getMyPatientRecord
+            getPatient
+            getPatients
+            getProblems
+            getAppointments
+            getLabs
+            getImaging
+            getMedicalRecords
+            getLetters
+            getMedications
+            getProviderConversations
+            protectedConversationsApi
+            sendMessage
+            syncElationPatients
+          )
+          : > /tmp/fn-updatetime-before.txt
+          for fn in "${FUNCTIONS[@]}"; do
+            ut=$(gcloud functions describe "$fn" --region=us-central1 --project="$PROJECT_ID" --format="value(updateTime)" 2>/dev/null)
+            echo "${fn} ${ut:-MISSING}" >> /tmp/fn-updatetime-before.txt
+          done
+          echo "Pre-deploy updateTime snapshot:"
+          cat /tmp/fn-updatetime-before.txt
+      - name: Deploy to Firebase Production
+        env:
+          GOOGLE_APPLICATION_CREDENTIALS_JSON: ${{ secrets.GOOGLE_APPLICATION_CREDENTIALS_JSON_PRODUCTION }}
+          ENFORCE_AUTH: ${{ secrets.ENFORCE_AUTH_PRODUCTION }}
+          ELATION_READ_ALLOWLIST: ${{ secrets.ELATION_READ_ALLOWLIST_PRODUCTION }}
+          ELATION_INGEST_EXTRA: ${{ secrets.ELATION_INGEST_EXTRA_PRODUCTION }}
+          ELATION_STORE_MEDICAL_RECORDS: ${{ secrets.ELATION_STORE_MEDICAL_RECORDS_PRODUCTION }}
+          ELATION_CLIENT_TIMEOUT_MS: ${{ secrets.ELATION_CLIENT_TIMEOUT_MS_PRODUCTION }}
+          SMOKE_WEB_API_KEY: ${{ secrets.PROD_VITE_FIREBASE_API_KEY }}
+          GUARDIAN_READS_ENABLED: ${{ secrets.GUARDIAN_READS_ENABLED_PRODUCTION }}
+          GUARDIAN_READS_ALLOWLIST: ${{ secrets.GUARDIAN_READS_ALLOWLIST_PRODUCTION }}
+          PORTAL_ALLOWED_ORIGINS: ${{ secrets.PORTAL_ALLOWED_ORIGINS_PRODUCTION }}
+          BATCH_INVITE_ENABLED: ${{ secrets.BATCH_INVITE_ENABLED_PRODUCTION }}
+          BATCH_REISSUE_ENABLED: ${{ secrets.BATCH_REISSUE_ENABLED_PRODUCTION }}
+          ROSTER_DISCOVERY_ENABLED: ${{ secrets.ROSTER_DISCOVERY_ENABLED_PRODUCTION }}
+          AUTOSEND_ENABLED: ${{ secrets.AUTOSEND_ENABLED_PRODUCTION }}
+          SOCIAL_GOOGLE_CLIENT_IDS: ${{ secrets.SOCIAL_GOOGLE_CLIENT_IDS_PRODUCTION }}
+          SENDGRID_PORTAL_INVITE_ASM_GROUP_ID: ${{ vars.SENDGRID_PORTAL_INVITE_ASM_GROUP_ID_PRODUCTION }}
+        run: |
+          printf '%s' "$GOOGLE_APPLICATION_CREDENTIALS_JSON" > /tmp/production-sa.json
+          export GOOGLE_APPLICATION_CREDENTIALS=/tmp/production-sa.json
+          pnpm add -g firebase-tools
+          # #219 / D-070: write the project-scoped env file (.env.<projectId>) that Firebase
+          # actually loads for this project — matches the local deploy mechanism exactly.
+          echo "ENFORCE_AUTH=${ENFORCE_AUTH:-true}" > functions/.env.prive-care-vip
+          echo "ELATION_READ_ALLOWLIST=${ELATION_READ_ALLOWLIST:-}" >> functions/.env.prive-care-vip
+          # Ingest gate: DELTA only (ids ingest-allowed but NOT read-allowed). Writing the
+          # full second list pushed the env past the ~32KB Cloud Functions cap. Unset -> ingest = read.
+          echo "ELATION_INGEST_EXTRA=${ELATION_INGEST_EXTRA:-}" >> functions/.env.prive-care-vip
+          echo "ELATION_STORE_MEDICAL_RECORDS=${ELATION_STORE_MEDICAL_RECORDS:-false}" >> functions/.env.prive-care-vip
+          # Per-attempt Elation HTTP timeout. 30s keeps the runner's 90s withDeadline as the
+          # real ceiling for heavy list-reports calls; unset -> 30000.
+          echo "ELATION_CLIENT_TIMEOUT_MS=${ELATION_CLIENT_TIMEOUT_MS:-30000}" >> functions/.env.prive-care-vip
+          echo "GUARDIAN_READS_ENABLED=${GUARDIAN_READS_ENABLED:-false}" >> functions/.env.prive-care-vip
+          echo "GUARDIAN_READS_ALLOWLIST=${GUARDIAN_READS_ALLOWLIST:-}" >> functions/.env.prive-care-vip
+          echo "PORTAL_ALLOWED_ORIGINS=${PORTAL_ALLOWED_ORIGINS:-}" >> functions/.env.prive-care-vip
+          # D-309a outer guard: batch invite sends stay off unless this is exactly "true".
+          # Per-run control is the Firestore doc config/batchInvite.enabled (super_admin-write-only).
+          echo "BATCH_INVITE_ENABLED=${BATCH_INVITE_ENABLED:-false}" >> functions/.env.prive-care-vip
+          # D-321 outer guard: batch reissue sends stay off unless this is exactly "true".
+          # Per-run control is the Firestore doc config/batchReissue.enabled (super_admin-write-only).
+          echo "BATCH_REISSUE_ENABLED=${BATCH_REISSUE_ENABLED:-false}" >> functions/.env.prive-care-vip
+          echo "ROSTER_DISCOVERY_ENABLED=${ROSTER_DISCOVERY_ENABLED:-false}" >> functions/.env.prive-care-vip
+          echo "AUTOSEND_ENABLED=${AUTOSEND_ENABLED:-false}" >> functions/.env.prive-care-vip
+          echo "SOCIAL_GOOGLE_CLIENT_IDS=${SOCIAL_GOOGLE_CLIENT_IDS:-}" >> functions/.env.prive-care-vip
+          echo "SENDGRID_PORTAL_INVITE_ASM_GROUP_ID=${SENDGRID_PORTAL_INVITE_ASM_GROUP_ID:-}" >> functions/.env.prive-care-vip
+          echo "SMOKE_WEB_API_KEY=${SMOKE_WEB_API_KEY:-}" >> functions/.env.prive-care-vip
+          cd functions && npm install --prefer-offline && node middleware/verifyAuth.test.js && cd ..
+          firebase target:apply hosting provider prive-care-vip --project ${{ secrets.FIREBASE_PROJECT_PRODUCTION }}
+          firebase target:apply hosting web-member care-primecarevip --project ${{ secrets.FIREBASE_PROJECT_PRODUCTION }}
+          # From here we manage failures ourselves: firebase deploy's exit code is unreliable
+          # (firebase-tools#6989 / #5006 — prints "failed to update function" but exits 0),
+          # so errexit must NOT auto-kill the step. We scan the output text instead.
+          set +e
+          # Rules/storage deploy FIRST and are FATAL on any failure — silently-stale
+          # Firestore/Storage security rules are a HIPAA risk, never tolerated.
+          firebase deploy --only firestore:rules,storage --force --project ${{ secrets.FIREBASE_PROJECT_PRODUCTION }}
+          rules_rc=$?
+          if [ "$rules_rc" -ne 0 ]; then
+            echo "ERROR: firestore:rules/storage deploy failed (exit ${rules_rc}) — failing the deploy. Stale security rules are never shipped."
+            exit 1
+          fi
+          # Firestore INDEXES deploy separately: an index-config rejection is an
+          # availability issue (a query may need a backfilled index), NOT a security
+          # issue, and must never be reported as a stale-security-rules failure or
+          # abort the functions deploy below.
+          firebase deploy --only firestore:indexes --force --project ${{ secrets.FIREBASE_PROJECT_PRODUCTION }} > /tmp/indexes-deploy.log 2>&1
+          indexes_rc=$?
+          cat /tmp/indexes-deploy.log
+          if [ "$indexes_rc" -ne 0 ]; then
+            echo "WARNING: firestore:indexes deploy failed (exit ${indexes_rc}) — continuing with hosting/functions. Fix the index config; queries needing it may fail at runtime."
+          fi
+          # Hosting deploys SEPARATELY. Only the specific no-op case (re-releasing an
+          # identical live version, common on docs-only commits) is tolerated; any OTHER
+          # hosting failure stays fatal. Text-scan, not exit code, decides which (same
+          # principle as the functions deploy below).
+          firebase deploy --only hosting:provider --force --project ${{ secrets.FIREBASE_PROJECT_PRODUCTION }} > /tmp/hosting-deploy.log 2>&1
+          hosting_rc=$?
+          cat /tmp/hosting-deploy.log
+          if [ "$hosting_rc" -ne 0 ]; then
+            if grep -q "is the current active version" /tmp/hosting-deploy.log; then
+              echo "NOTE: hosting deploy exited ${hosting_rc} — benign no-op re-release (version already live). Continuing."
+            else
+              echo "ERROR: hosting deploy failed (exit ${hosting_rc}) for a reason other than the known no-op re-release — failing the deploy."
+              exit 1
+            fi
+          fi
+          # web-member (patient site care.primecarevip.com) hosting deploy — #254.
+          # Same separate-deploy + no-op text-scan tolerance as the provider block above.
+          firebase deploy --only hosting:web-member --force --project ${{ secrets.FIREBASE_PROJECT_PRODUCTION }} > /tmp/hosting-web-member-deploy.log 2>&1
+          hosting_wm_rc=$?
+          cat /tmp/hosting-web-member-deploy.log
+          if [ "$hosting_wm_rc" -ne 0 ]; then
+            if grep -q "is the current active version" /tmp/hosting-web-member-deploy.log; then
+              echo "NOTE: web-member hosting deploy exited ${hosting_wm_rc} — benign no-op re-release (version already live). Continuing."
+            else
+              echo "ERROR: web-member hosting deploy failed (exit ${hosting_wm_rc}) for a reason other than the known no-op re-release — failing the deploy."
+              exit 1
+            fi
+          fi
+          # Functions deploy — authoritative signal is OUTPUT TEXT, not the exit code.
+          firebase deploy --only functions:portal-functions --force --project ${{ secrets.FIREBASE_PROJECT_PRODUCTION }} > /tmp/fn-deploy.log 2>&1
+          fn_rc=$?
+          cat /tmp/fn-deploy.log
+          echo "functions deploy CLI exit code: ${fn_rc} (unreliable per firebase-tools#6989/#5006 — text scan is authoritative)"
+          if grep -q "failed to update function" /tmp/fn-deploy.log || [ "$fn_rc" -ne 0 ]; then
+            echo "WARN: functions deploy reported a failure — retrying once after 15s..."
+            sleep 15
+            firebase deploy --only functions:portal-functions --force --project ${{ secrets.FIREBASE_PROJECT_PRODUCTION }} > /tmp/fn-deploy.log 2>&1
+            fn_rc=$?
+            cat /tmp/fn-deploy.log
+            if grep -q "failed to update function" /tmp/fn-deploy.log || [ "$fn_rc" -ne 0 ]; then
+              echo "ERROR: function(s) still failed to update after one retry — failing the deploy."
+              grep "failed to update function" /tmp/fn-deploy.log || true
+              exit 1
+            fi
+            echo "Retry succeeded — no 'failed to update function' in output."
+          fi
+      - name: Lock admin function invokers (no allUsers)
+        env:
+          GOOGLE_APPLICATION_CREDENTIALS_JSON: ${{ secrets.GOOGLE_APPLICATION_CREDENTIALS_JSON_PRODUCTION }}
+        run: |
+          set -uo pipefail
+          # GitHub Actions does NOT carry auth/env from the deploy step into this one,
+          # so re-establish gcloud auth from the same production SA key.
+          printf '%s' "$GOOGLE_APPLICATION_CREDENTIALS_JSON" > /tmp/production-sa.json
+          gcloud auth activate-service-account --key-file=/tmp/production-sa.json
+          gcloud config set project prive-care-vip --quiet
+          echo "Acting as: $(gcloud config get-value account 2>/dev/null)"
+          REGION=us-central1
+          ADMIN_SA=portal-admin@prive-care-vip.iam.gserviceaccount.com
+          ADMIN_FUNCTIONS=(
+            adminIssueInvite
+            adminRevokeInvite
+            adminSetPortalAccess
+            adminGetPortalAccess
+            adminSyncMemberEmail
+            adminProvisionPatients
+            adminRosterBackfill
+            adminRunArtifactAudit
+            adminRunArtifactRepairSweep
+            adminRunReadPathSmoke
+            adminLinkGuardian
+            adminRevokeGuardian
+            adminUnclaimedGuardiansReport
+            backfillInternalUids
+            backfillArtifactObjects
+            backfillElationReports
+            adminRunBackfillDriver
+            hydrationRecoveryDriver
+            backfillElationLettersHttp
+          )
+          fail=0
+          for FN in "${ADMIN_FUNCTIONS[@]}"; do
+            echo "::group::$FN"
+            out=$(gcloud functions remove-iam-policy-binding "$FN" \
+              --region="$REGION" \
+              --member=allUsers \
+              --role=roles/cloudfunctions.invoker 2>&1) || true
+            if echo "$out" | grep -qiE 'NOT_FOUND|Policy binding.*not found'; then
+              echo "allUsers binding already absent"
+            elif echo "$out" | grep -qiE '^ERROR'; then
+              echo "$out"; echo "FAILED to remove allUsers from $FN"; fail=1; echo "::endgroup::"; continue
+            else
+              echo "removed allUsers binding"
+            fi
+            if ! gcloud functions add-iam-policy-binding "$FN" \
+              --region="$REGION" \
+              --member="serviceAccount:${ADMIN_SA}" \
+              --role=roles/cloudfunctions.invoker >/dev/null; then
+              echo "FAILED to bind $ADMIN_SA as invoker on $FN"; fail=1; echo "::endgroup::"; continue
+            fi
+            policy=$(gcloud functions get-iam-policy "$FN" --region="$REGION" --format=json)
+            if echo "$policy" | grep -qE '"(allUsers|allAuthenticatedUsers)"'; then
+              echo "$policy"; echo "STILL PUBLIC after remediation: $FN"; fail=1
+            elif ! echo "$policy" | grep -q "$ADMIN_SA"; then
+              echo "$policy"; echo "MISSING portal-admin invoker binding: $FN"; fail=1
+            else
+              echo "$FN OK — private, portal-admin invoker only"
+            fi
+            echo "::endgroup::"
+          done
+          if [ "$fail" -ne 0 ]; then
+            echo "Admin IAM hardening failed — admin endpoints may be publicly invocable."
+            exit 1
+          fi
+      - name: Post-deploy health gate (functions live and reachable)
+        if: always()
+        env:
+          PROJECT_ID: ${{ secrets.FIREBASE_PROJECT_PRODUCTION }}
+        run: |
+          set +e -uo pipefail
+          BASE="https://us-central1-${PROJECT_ID}.cloudfunctions.net"
+          # Explicit list of v1 HTTP (onRequest) functions that return the D-010 JSON envelope.
+          # Path B read CFs get appended here in their own PR. Do NOT add: callable fns,
+          # scheduled/trigger fns (no URL), twilioWebhook (signature endpoint, non-JSON),
+          # or v2 https fns (different Cloud Run URL format).
+          # adminIssueInvite/adminRevokeInvite/adminSetPortalAccess/adminGetPortalAccess are intentionally excluded: IAM-restricted (invoker-only), so the anonymous probe gets a platform 403 with an HTML body and cannot satisfy the JSON gate.
+          FUNCTIONS=(
+            addProviderToConversation
+            createPatientConversation
+            getConversationMessages
+            getAllergies
+            getMyPatientRecord
+            getPatient
+            getPatients
+            getProblems
+            getAppointments
+            getLabs
+            getImaging
+            getMedicalRecords
+            getLetters
+            getMedications
+            getProviderConversations
+            protectedConversationsApi
+            sendMessage
+            syncElationPatients
+          )
+          FAILED=()
+          for fn in "${FUNCTIONS[@]}"; do
+            url="${BASE}/${fn}"
+            read -r code ctype < <(curl -s -o /dev/null \
+              -w "%{http_code} %{content_type}" \
+              --max-time 30 --retry 3 --retry-delay 2 --retry-connrefused \
+              -X POST "$url" \
+              -H "Authorization: Bearer health-gate-bad-token" \
+              -H "Content-Type: application/json" \
+              -d '{}')
+            if echo "${ctype:-}" | grep -qi "application/json" && echo " 400 401 403 " | grep -q " ${code:-0} "; then
+              echo "PASS  ${fn}  (HTTP ${code:-none}, ${ctype:-none})"
+            else
+              echo "FAIL  ${fn}  (HTTP ${code:-none}, ${ctype:-none})  <-- not reachable / not deployed"
+              FAILED+=("$fn")
+            fi
+          done
+          echo "----------------------------------------"
+          gate_failed=0
+          if [ "${#FAILED[@]}" -gt 0 ]; then
+            echo "HEALTH GATE FAILED. Broken functions: ${FAILED[*]}"
+            echo "Healthy = JSON body with status 400/401/403 (in-function auth/validation gate). FAIL = 404 (never deployed), HTML (missing allUsers invoker binding), 5xx (erroring), or any other code."
+            gate_failed=1
+          else
+            echo "HEALTH GATE PASSED. All ${#FUNCTIONS[@]} HTTP functions are live and reachable."
+          fi
+          echo "========================================"
+          echo "updateTime report (Defect A — report-only per Option 2; text-scan in deploy step is the enforcer):"
+          if [ -f /tmp/fn-updatetime-before.txt ]; then
+            while read -r fn before; do
+              after=$(gcloud functions describe "$fn" --region=us-central1 --project="${PROJECT_ID}" --format="value(updateTime)" 2>/dev/null)
+              if [ "${before}" = "${after:-MISSING}" ]; then
+                echo "UNCHANGED  ${fn}  (updateTime ${before}) — skipped or not redeployed this run"
+              else
+                echo "ADVANCED   ${fn}  (${before} -> ${after:-MISSING})"
+              fi
+            done < /tmp/fn-updatetime-before.txt
+          else
+            echo "WARN: no pre-deploy snapshot found (/tmp/fn-updatetime-before.txt missing) — cannot compare updateTime."
+          fi
+          echo "Note: UNCHANGED is expected for functions with no source change this commit. Investigate only if a function you EXPECTED to change is UNCHANGED."
+          if [ "$gate_failed" -ne 0 ]; then
+            exit 1
+          fi

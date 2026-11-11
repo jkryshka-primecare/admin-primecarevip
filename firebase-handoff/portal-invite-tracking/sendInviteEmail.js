@@ -27,6 +27,7 @@ function claimEmailHtml(claimLink) {
         '<p style="color:#333333;font-size:16px;line-height:1.5;margin:0 0 16px;">For your security, this link is just for you and expires in 30 days. If it expires before you finish, contact us and we\'ll send a new one.</p>' +
         '<p style="color:#333333;font-size:16px;line-height:1.5;margin:0 0 24px;">Need help? Email us at health@primecarevip.com or call 561-948-2020.</p>' +
         '<p style="color:#333333;font-size:16px;line-height:1.5;margin:0;">Warmly,<br />The Prime Care VIP Team</p>' +
+        '<p><a href="<%asm_group_unsubscribe_raw_url%>">Unsubscribe from portal invitations</a></p>' +
       '</div>' +
     '</div>'
   );
@@ -48,6 +49,8 @@ function claimEmailText(claimLink) {
     '',
     'Warmly,',
     'The Prime Care VIP Team',
+    '',
+    'Unsubscribe from portal invitations: <%asm_group_unsubscribe_raw_url%>',
   ].join('\n');
 }
 
@@ -69,10 +72,21 @@ async function initSendgrid() {
  */
 const INVITE_CATEGORY = 'portal_invite';
 
+function inviteAsmGroupId() {
+  const raw = process.env.SENDGRID_PORTAL_INVITE_ASM_GROUP_ID;
+  if (typeof raw !== 'string' || !/^[1-9]\d*$/.test(raw)) {
+    throw new Error('sendInviteEmail: valid SENDGRID_PORTAL_INVITE_ASM_GROUP_ID required');
+  }
+  const id = Number(raw);
+  if (!Number.isSafeInteger(id)) throw new Error('sendInviteEmail: ASM group ID out of range');
+  return id;
+}
+
 async function sendInviteEmail({ to, token }) {
   const recipient = typeof to === 'string' ? to.trim() : '';
   if (!recipient) throw new Error('sendInviteEmail: recipient required');
   if (!token) throw new Error('sendInviteEmail: token required');
+  const groupId = inviteAsmGroupId();
 
   await initSendgrid();
   await sgMail.send({
@@ -81,15 +95,19 @@ async function sendInviteEmail({ to, token }) {
     subject: 'Your Prime Care VIP patient portal is ready',
     // Non-PHI tag so emailEvents can be filtered to invite sends (wave gate math).
     categories: [INVITE_CATEGORY],
-    // Mailbox requests are staff-processed; no RFC8058 HTTPS POST handler exists.
-    // Never put the account-claim token or patient identifiers in this header.
-    headers: {
-      'List-Unsubscribe': '<mailto:health@primecarevip.com?subject=Unsubscribe%20from%20portal%20invitations>',
-    },
+    // SendGrid owns unsubscribe URLs and headers; no custom mailto or endpoint.
+    asm: { groupId, groupsToDisplay: [groupId] },
     // Keep branded claim URLs intact; retain opens for invite wave checks.
     trackingSettings: {
       clickTracking: { enable: false, enableText: false },
       openTracking: { enable: true },
+      // Subscription tracking is GLOBAL to this SendGrid account. The ASM
+      // footer above is group-scoped; label the global footer truthfully.
+      subscriptionTracking: {
+        enable: true,
+        html: '<p>To unsubscribe from all emails sent through this mailing account, <% click here %>.</p>',
+        text: 'To unsubscribe from all emails sent through this mailing account, <% click here %>.',
+      },
     },
     content: [
       { type: 'text/plain', value: claimEmailText(`${CLAIM_BASE}?t=${token}`) },
