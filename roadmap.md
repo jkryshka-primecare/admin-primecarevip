@@ -1,5 +1,10 @@
 # Roadmap
 
+## Nov 11 — group-only invitation opt-out
+- [x] Amended PR #596 at c299b2a: configured ASM group with concrete 36716 tests, global subscription tracking explicitly disabled, clicks off/opens on; three published files byte-verified.
+- [x] Nine focused sender/receiver classification tests pass; group_unsubscribe still yields hard emailSuppression. Review documentation updated; local suppression remains portal address-wide, no SendGrid global-list write.
+- [ ] BLOCKED: owning release plus authorized live opt-out must prove membership in ASM group 36716, no new global unsubscribe, genuine signed event/emailSuppression and next-invite denial; no SendGrid access available here.
+
 ## Nov 11 — invite MIME and unsubscribe headers
 - [x] Replace raw mailto proposal with configured SendGrid ASM group + group links in both alternatives + per-message subscription tracking; preserve clicks off/opens on and existing receiver.
 - [x] PR #596 amended 3dc8e974; four files read back byte-verified; nine focused tests pass. Production variable wiring added; no configured ID or live integration claimed.

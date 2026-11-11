@@ -101,12 +101,10 @@ async function sendInviteEmail({ to, token }) {
     trackingSettings: {
       clickTracking: { enable: false, enableText: false },
       openTracking: { enable: true },
-      // Subscription tracking is GLOBAL to this SendGrid account. The ASM
-      // footer above is group-scoped; label the global footer truthfully.
+      // Explicitly override any account-wide subscription tracking for this
+      // send. Only the ASM group unsubscribe links above are offered.
       subscriptionTracking: {
-        enable: true,
-        html: '<p>To unsubscribe from all emails sent through this mailing account, <% click here %>.</p>',
-        text: 'To unsubscribe from all emails sent through this mailing account, <% click here %>.',
+        enable: false,
       },
     },
     content: [

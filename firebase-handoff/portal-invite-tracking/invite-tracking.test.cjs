@@ -4,7 +4,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const vm = require('node:vm');
 
-function loadSender(env = { SENDGRID_PORTAL_INVITE_ASM_GROUP_ID: '12345' }) {
+function loadSender(env = { SENDGRID_PORTAL_INVITE_ASM_GROUP_ID: '36716' }) {
   let message;
   const sandbox = {
     process: { env }, module: { exports: {} },
@@ -61,22 +61,28 @@ test('invite provides plain-text and HTML alternatives with the same claim link'
 test('invite uses the configured ASM group, not a custom unsubscribe header', async () => {
   const sender = loadSender();
   await sender.send({ to: 'synthetic@example.com', token: 'synthetic-token' });
-  assert.equal(sender.message().asm.groupId, 12345);
-  assert.deepEqual(Array.from(sender.message().asm.groupsToDisplay), [12345]);
+  assert.equal(sender.message().asm.groupId, 36716);
+  assert.deepEqual(Array.from(sender.message().asm.groupsToDisplay), [36716]);
   assert.equal(sender.message().headers, undefined);
   for (const part of sender.message().content) {
     assert.ok(part.value.includes('<%asm_group_unsubscribe_raw_url%>'));
   }
 });
 
-test('invite enables per-message subscription tracking without a replacement tag', async () => {
+test('invite explicitly disables global subscription tracking while retaining group-only opt-out', async () => {
   const sender = loadSender();
   await sender.send({ to: 'synthetic@example.com', token: 'synthetic-token' });
   const settings = sender.message().trackingSettings.subscriptionTracking;
-  assert.equal(settings.enable, true);
-  assert.ok(settings.html.includes('<% click here %>'));
-  assert.ok(settings.text.includes('<% click here %>'));
+  assert.equal(settings.enable, false);
+  assert.equal(settings.html, undefined);
+  assert.equal(settings.text, undefined);
   assert.equal(settings.substitutionTag, undefined);
+  assert.equal(sender.message().asm.groupId, 36716);
+  for (const part of sender.message().content) {
+    assert.ok(part.value.includes('<%asm_group_unsubscribe_raw_url%>'));
+    assert.equal(part.value.includes('<% click here %>'), false);
+    assert.equal(part.value.includes('<%asm_global_unsubscribe'), false);
+  }
 });
 
 test('invite refuses absent or invalid ASM configuration before transport', async () => {

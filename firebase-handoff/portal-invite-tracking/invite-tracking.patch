@@ -1,14 +1,18 @@
 --- a/functions/core/services/email/sendInviteEmail.js
 +++ b/functions/core/services/email/sendInviteEmail.js
-@@ -63,6 +63,11 @@
-     subject: 'Your Prime Care VIP patient portal is ready',
-     // Non-PHI tag so emailEvents can be filtered to invite sends (wave gate math).
-     categories: [INVITE_CATEGORY],
-+    // Keep branded claim URLs intact; retain opens for invite wave checks.
-+    trackingSettings: {
-+      clickTracking: { enable: false, enableText: false },
-+      openTracking: { enable: true },
-+    },
-     content: [{ type: 'text/html', value: claimEmailHtml(`${CLAIM_BASE}?t=${token}`) }],
-   });
- }
+@@ -101,12 +101,10 @@
+     trackingSettings: {
+       clickTracking: { enable: false, enableText: false },
+       openTracking: { enable: true },
+-      // Subscription tracking is GLOBAL to this SendGrid account. The ASM
+-      // footer above is group-scoped; label the global footer truthfully.
++      // Explicitly override any account-wide subscription tracking for this
++      // send. Only the ASM group unsubscribe links above are offered.
+       subscriptionTracking: {
+-        enable: true,
+-        html: '<p>To unsubscribe from all emails sent through this mailing account, <% click here %>.</p>',
+-        text: 'To unsubscribe from all emails sent through this mailing account, <% click here %>.',
++        enable: false,
+       },
+     },
+     content: [
