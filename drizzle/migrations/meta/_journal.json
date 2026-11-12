@@ -15,6 +15,13 @@
       "when": 1792275026855,
       "tag": "0001_elation_rx_sync",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1794510877934,
+      "tag": "0002_scope_audit_log_insert",
+      "breakpoints": true
     }
   ]
 }
