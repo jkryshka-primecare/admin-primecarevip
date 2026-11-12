@@ -1,8 +1,13 @@
 # Roadmap
 
+## Nov 12 — Recovery proof and synthetic live claim setup
+- [x] Live Recovery enabled/maxPerTick 1; September case complete Nov 11 23:05:56 UTC, clean reports/letters result, queue/pending/eligible zero. Successful ticks Nov 12 00:16, 00:46, 01:16 UTC. Driver ACTIVE v31, Tick ACTIVE v30; scheduler listing alone denied.
+- [ ] Test Kieffer chart 816455979040769 verified in Elation with 8 reports and 24 letters (16 deleted), DOB 1980-02-28; existing portal binding/hydration complete. Unclaimed invite BLOCKED: current diagnostic identity cannot inspect Auth or reset/create; no mutations/sends attempted. Needs authorized synthetic-only operator provisioning.
+- [x] Report Recovery evidence and precise test-link blocker; wave-one certification still awaits owner-operated live claim verification.
+
 ## Nov 11 22:27 — hydration remediation before wave one
 - [x] Prepare review-only durable async claim hydration and Hub loading/polling patches; 19 new queue/worker/domain tests PASS and both patch dry-runs PASS. Not applied, emulator/CI/client-denial rules pending; issue create denied 403, no issue or PR claimed.
-- [ ] Enable and verify bounded Recovery, including September deferred member — awaiting temporary live log/function read access and scoped config execution; no wave approval.
+- [x] Recovery enabled by operator; Nov 12 fresh read/logs confirm September member complete, queue empty and successful 30-minute ticks. No config execution by this agent; no wave approval.
 - [x] Refreshed read-only 1036 active / 764 candidates: 500 adult account candidates (497 expired + 3 live), 66 no-account adults held, 195 minors held, 1 age review, 1 adult correction, 1 claimed setup fix; zero suppression exclusions. Across candidates 2 corrections + 1 risky overlap holds. ID-keyed Files outputs validated; no imports/sends.
 - [ ] Attribute Nicholas's actual failure using authorized logs/Auth; reissue by patient ID only after activation/recovery fixes are live, then owner-operated claim/read walkthrough.
 - [ ] Verify normal claim and forced-deferred Recovery end-to-end in authorized hosted state; cannot certify through mocks or signed-out pages.
