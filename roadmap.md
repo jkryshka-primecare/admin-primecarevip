@@ -1,5 +1,10 @@
 # Roadmap
 
+## Nov 14 — C4 pre-revoke safeguards
+- [ ] Add fail-closed suppression guard before revocation, retaining inviteOne defense-in-depth.
+- [ ] Add live-pending-invite cooldown (default 72h), force override only for cooldown; update integration contract.
+- [ ] Run acceptance emulator tests and claim-hydration gate; open owning-portal feature-branch PR. Issue numbers were placeholders; GitHub Issues read denied.
+
 ## Nov 12 — Recovery proof and synthetic live claim setup
 - [x] Live Recovery enabled/maxPerTick 1; September case complete Nov 11 23:05:56 UTC, clean reports/letters result, queue/pending/eligible zero. Successful ticks Nov 12 00:16, 00:46, 01:16 UTC. Driver ACTIVE v31, Tick ACTIVE v30; scheduler listing alone denied.
 - [ ] Test Kieffer chart 816455979040769 verified in Elation with 8 reports and 24 letters (16 deleted), DOB 1980-02-28; existing portal binding/hydration complete. Unclaimed invite BLOCKED: current diagnostic identity cannot inspect Auth or reset/create; no mutations/sends attempted. Needs authorized synthetic-only operator provisioning.
