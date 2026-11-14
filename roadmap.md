@@ -5,6 +5,7 @@
 - [x] PR #604 claim-hydration-gate run 43621112458 SUCCESS; twelve real emulator client-denial tests plus queue/worker/recovery/drain regressions pass. No main write, merge/deploy/send/arming.
 - [x] PR #605 (2c15ba5b), stacked on #604: new_invite subset -> first mint without revoke; historical token/audit guard, current-wave audit evidence, same gates/cap/pacing. Eighteen invitation emulator tests plus twelve hydration-rule tests pass; contract updated.
 - [x] PR #605 hosted claim-hydration-gate run 43621346792 SUCCESS; both PR file blobs byte-verified. Owner merges #604 first, then retargets #605/rechecks; no merge/deploy/send/arming performed.
+- [x] PR #605 rebased onto main c8dd2422 (squashed #604 tree identical to 72155eeb); single commit 60f5d572, conflict-free, #603-only diff; all 13 checks incl. claim-hydration-gate 43626836455 SUCCESS. Not merged/deployed.
 
 ## Nov 12 — Recovery proof and synthetic live claim setup
 - [x] Live Recovery enabled/maxPerTick 1; September case complete Nov 11 23:05:56 UTC, clean reports/letters result, queue/pending/eligible zero. Successful ticks Nov 12 00:16, 00:46, 01:16 UTC. Driver ACTIVE v31, Tick ACTIVE v30; scheduler listing alone denied.
