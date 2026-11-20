@@ -3,7 +3,9 @@
 ## Nov 20 — discovery minor exclusion: review only
 - [x] Read current portal source, family-model brief, live discovery config/reports/cursor, and the two named chart records; no production mutations or sends.
 - [x] Confirm missing discovery age gate and Cynthia's cold-start trailing-edge loss; prepare review plan with tests, contract amendment, and single-record quarantine recommendation.
-- [ ] Implementation/issue/feature branch/PR awaits Claude's review and owner approval; no code, configuration, cleanup, deployment, or invitation action authorized.
+- [x] Approved implementation published as draft portal PR #615 on fix/discovery-minor-dob-hold-20261120, commit 3a1ea145; eight source/test/documentation files verified. No portal main write, merge, deployment, cleanup, invitations or config changes.
+- [x] Discovery units/provisioner regressions, 19 real discovery emulator tests, 39 hydration/C4 emulator tests and 11 hydration units pass; hosted claim-hydration-gate 44648025285 and roster-discovery-test 44648025294 SUCCESS; all 13 Actions runs green, conflict-free draft.
+- [ ] GitHub issue creation AND listing denied 403; user correctly notes GitHub assigns number. Draft awaits owner/authorized issue creation so a genuine Closes #N can be added; never invent issue number. Cold-start/cap follow-ups and production quarantine remain separately unapproved.
 
 ## Nov 17 — #607 rolling invitation reputation gate
 - [x] PR #608 on fix/c4-rolling-reputation-607, commit 942a3b9e: bounce-only tally and latest whole-wave rolling sample reaching 150 sends; immediate-prior settlement and evaluateGate byte-unchanged.
