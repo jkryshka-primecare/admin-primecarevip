@@ -1,7 +1,7 @@
 # Discovery minor exclusion and cold-start gap — review plan
 
 ## Decision requested
-Approve a narrowly scoped discovery age/DOB safeguard after Claude reviews this plan. No implementation, issue creation, branch, PR, production cleanup, configuration change, deployment, or invitation has occurred. Track D remains parked; AUTOSEND and all invitation gates remain unchanged.
+Approve a narrowly scoped discovery age/DOB safeguard after Claude reviews this plan. No code, production changes, issues, PRs, deployments or sends. Track D stays parked; invitation gates unchanged.
 
 ## 1. Verified defect and current production evidence
 
@@ -90,8 +90,8 @@ After review, add/adjust:
 
 ## 6. Approval and delivery sequence
 
-1. Claude reviews this plan; owner approves implementation scope.
+1. Claude reviews; owner approves scope.
 2. Open **one GitHub issue for the age/DOB defect**, create a new feature branch from current portal main, and make a narrowly scoped PR with `Closes #N`; never commit to portal main.
 3. Include the integration-contract amendment and unit/emulator tests in that PR. Run the full emulator suite through required **claim-hydration-gate**, plus discovery unit tests; require green CI before reporting ready.
 4. Do not merge, deploy, arm invitations, alter discovery config, or quarantine/delete any production record without separate authorization.
-5. Keep the proven cold-start loss and potential cap continuation defect explicit follow-up items rather than silently bundling a cursor/backlog redesign into this patch.
+5. Keep window loss and cap continuation as separate follow-ups.
