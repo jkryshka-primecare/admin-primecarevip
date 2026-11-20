@@ -1,5 +1,10 @@
 # Roadmap
 
+## Nov 20 — discovery minor exclusion: review only
+- [x] Read current portal source, family-model brief, live discovery config/reports/cursor, and the two named chart records; no production mutations or sends.
+- [x] Confirm missing discovery age gate and Cynthia's cold-start trailing-edge loss; prepare review plan with tests, contract amendment, and single-record quarantine recommendation.
+- [ ] Implementation/issue/feature branch/PR awaits Claude's review and owner approval; no code, configuration, cleanup, deployment, or invitation action authorized.
+
 ## Nov 17 — #607 rolling invitation reputation gate
 - [x] PR #608 on fix/c4-rolling-reputation-607, commit 942a3b9e: bounce-only tally and latest whole-wave rolling sample reaching 150 sends; immediate-prior settlement and evaluateGate byte-unchanged.
 - [x] 39 real Firestore emulator tests pass (9 new runner gate cases); invitation safety, cooldown/batch and hydration regressions pass. Contract amended; all seven published blobs verified. Required claim-hydration-gate 43995671382 and invite-send-safety 43995671375 SUCCESS; conflict-free, one #607-only commit. No merge/deploy/send/config changes.
