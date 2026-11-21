@@ -1,6 +1,7 @@
 # Roadmap
 
 ## Nov 21 — PR1 claim/account security #617 + #618
+- [x] PR621 follow-up on head 98b4a1c3: reset-start detection + reset-only resume, clean claim losers, awaited soft-deferral drain; production social master=false/default practice=true/five ACTIVE callables. FULL hosted hydration44922627234 and social44922627275 passed; updated full/incremental diffs delivered. No merge/deploy/arming.
 - [x] Read-only count: 0 of 1,625 patients have firebaseUid without authUid; no backfill needed. Contract proposes proof-checked patient-ID backfill only if future candidates appear; shared-email manual. No production writes.
 - [x] Feature branch from current portal main: exact-UID fail-closed reset, patient-scoped hydration serialization/cleanup, evidence-backed orphan recovery and admin-visible masked reconciliation holds; PR #621, head 1ae33673.
 - [x] Preserve UID duality, #615 and #611/#613 gate name/docs-only behavior; 26 real Auth+Firestore tests, historical contract amendment, PR #621 and review diff. Hosted claim-hydration-gate 44920131876 passed on head 1ae33673; sender tests 18/18.

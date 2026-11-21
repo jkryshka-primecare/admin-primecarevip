@@ -2,7 +2,7 @@ diff --git a/functions/core/services/patient/accountLifecycle.js b/functions/cor
 new file mode 100644
 --- /dev/null
 +++ b/functions/core/services/patient/accountLifecycle.js
-@@ -0,0 +1,177 @@
+@@ -0,0 +1,205 @@
 +// #617/#618: patient-scoped identity operations, never an invitation reservation.
 +const crypto = require('crypto');
 +const key = () => crypto.randomBytes(32).toString('base64url'); // Firebase UID: 43 printable characters, <=128.
@@ -19,7 +19,7 @@ new file mode 100644
 +    // Unknown/crashed ownership is not quiescence. Never steal a clock-expired lease.
 +    if (p.accountWork || ['pending','reconciliation'].includes(social.get('state'))) throw fail('RESET_BUSY');
 +    if (rawUid && (p.authUid !== rawUid || p.firebaseUid !== rawUid.toLowerCase())) throw fail('BINDING_MISMATCH');
-+    const work = { owner, kind, rawUid: rawUid || null, generation: generation(p) };
++    const work = { owner, kind, rawUid: rawUid || null, generation: generation(p), startedAtMs: Date.now() };
 +    tx.update(ref, { accountWork: work });
 +    return work;
 +  });
@@ -90,7 +90,8 @@ new file mode 100644
 +    catch (e) {
 +      // An explicit collision is never recovery evidence; no email ownership lookup.
 +      if (['auth/email-already-exists', 'auth/uid-already-exists'].includes(e.code)) { work.authUncertain = false; throw fail('IDENTITY_CONFLICT'); }
-+      // Ambiguous create retains preselected UID/provenance; caller never deletes another account.
++      // Persist uncertainty before returning; a duplicate cannot be mistaken for live benign work.
++      await markWorkUncertain(db, patientId, work);
 +      throw e;
 +    }
 +  }
@@ -99,6 +100,23 @@ new file mode 100644
 +    tx.update(ref, { claimAccountIntent: { rawUid, generation: work.generation, operationId: work.owner, state: p.claimAccountIntent?.state === 'credential_pending' ? 'credential_pending' : 'created' } });
 +  });
 +  return { user, adopted };
++}
++
++async function markWorkUncertain(db, patientId, work) {
++  const ref = db.collection('patients').doc(String(patientId));
++  await db.runTransaction(async tx => {
++    const s = await tx.get(ref); assertWork(s.data(), work);
++    tx.update(ref, { 'accountWork.uncertain': true });
++  });
++}
++
++// Resume only the existing patient-scoped reset; never remint or send an invitation.
++async function resumePatientReset(args) {
++  const p = (await args.db.collection('patients').doc(String(args.patientId)).get()).data();
++  if (!p || !p.accountReset?.owner) throw fail('NO_RESET_TO_RESUME');
++  if (p.accountReset.state === 'done') return { alreadyDone: true };
++  if (p.accountReset.state !== 'running') throw fail('IDENTITY_UNVERIFIED');
++  return resetPatientAccount(args);
 +}
 +
 +async function resetPatientAccount({ db, auth, FieldValue, patientId, actor, reason }) {
@@ -123,7 +141,7 @@ new file mode 100644
 +  let user;
 +  try { user = await auth.getUser(rawUid); } catch (e) { if (e.code !== 'auth/user-not-found') throw e; }
 +  if (user) patientAccount(user);
-+  const op = p.accountReset?.state === 'running' ? p.accountReset : { owner: key(), rawUid, generation: generation(p), state: 'running' };
++  const op = p.accountReset?.state === 'running' ? p.accountReset : { owner: key(), rawUid, generation: generation(p), state: 'running', startedAtMs: Date.now() };
 +  if (op.rawUid !== rawUid) throw fail('IDENTITY_CONFLICT');
 +  const jobRef = db.collection('claim_hydration_jobs').doc(String(patientId));
 +  // R1: identity lock and queue/run reads share one transaction with worker acquisition.
@@ -144,6 +162,12 @@ new file mode 100644
 +      const r = x.data(); return (r.pending || []).includes(String(patientId)) && (r.leaseOwner || Number(r.leaseExpiresAt) > 0);
 +    })) throw fail('RESET_BUSY');
 +    tx.update(ref, { accountReset: op });
++    // Written at R1, not in a catch: a process crash still leaves an admin-visible signal.
++    tx.set(db.collection('portalAccountReconciliation').doc(String(patientId)), {
++      patientId: String(patientId), state: 'reset_in_progress', reason: 'RESET_IN_PROGRESS',
++      resumeAvailable: true, reviewAfterMs: (op.startedAtMs || Date.now()) + 60000,
++      updatedAt: FieldValue.serverTimestamp(),
++    }, { merge: true });
 +  });
 +  // Auth is outside Firestore: confirmation failure never clears binding.
 +  if (user) {
@@ -175,11 +199,15 @@ new file mode 100644
 +    for (const k of ['firebaseUid','authUid','boundAt','claimedAt','webAccessVerifiedAt','claimAccountIntent','hydrationPendingAt','hydrationDeferredAt','hydrationDeferReason','hydrationRunId','hydrationLastRunId']) cleared[k] = FieldValue.delete();
 +    if (d.hydrationStatus !== 'complete') { cleared.hydrationStatus = FieldValue.delete(); cleared.hydrationCompletedAt = FieldValue.delete(); cleared.hydrationLastSource = FieldValue.delete(); }
 +    tx.update(ref, { ...cleared, identityGeneration: op.generation + 1, status: 'not_invited', accountReset: { ...op, state: 'done' }, claimReset: { at: FieldValue.serverTimestamp(), by: actor, reason, previousUid: rawUid } });
++    tx.set(db.collection('portalAccountReconciliation').doc(String(patientId)), {
++      patientId: String(patientId), state: 'resolved', reason: 'RESET_COMPLETED',
++      resumeAvailable: false, updatedAt: FieldValue.serverTimestamp(),
++    }, { merge: true });
 +    tx.set(db.collection('portalAdminAudit').doc(), { action: 'claim_reset', elationPatientId: String(patientId), actor, reason, ok: true, at: FieldValue.serverTimestamp() });
 +  });
 +  return { rawUid };
 +}
-+module.exports = { key, generation, fail, acquireWork, releaseWork, assertWork, reconciliation, uniqueBinding, prepareClaimAccount, resetPatientAccount };
++module.exports = { key, generation, fail, acquireWork, releaseWork, assertWork, reconciliation, uniqueBinding, prepareClaimAccount, resetPatientAccount, resumePatientReset, markWorkUncertain };
 diff --git a/functions/core/services/patient/identityExecution.js b/functions/core/services/patient/identityExecution.js
 new file mode 100644
 --- /dev/null
@@ -201,7 +229,7 @@ diff --git a/functions/claimAccount.js b/functions/claimAccount.js
  const { runPostClaimSteps } = require('./core/services/patient/postClaim');
  const { queueClaimHydration } = require('./core/services/patient/claimHydrationQueue');
  const { setCors } = require('./core/config/allowedOrigins');
-+const { acquireWork, releaseWork, prepareClaimAccount, reconciliation } = require('./core/services/patient/accountLifecycle');
++const { acquireWork, releaseWork, prepareClaimAccount, reconciliation, markWorkUncertain } = require('./core/services/patient/accountLifecycle');
  
  const DOB_RE = /^\d{4}-\d{2}-\d{2}$/;
  const PW_MIN = 12;
@@ -215,7 +243,7 @@ diff --git a/functions/claimAccount.js b/functions/claimAccount.js
      log('claimAccount', 'already-claimed', { elationPatientId });
      return jsonError(res, 409, 'ALREADY_EXISTS', 'ALREADY_CLAIMED', 'This account is already set up. Please sign in.');
    }
-@@ -230,39 +232,26 @@
+@@ -230,38 +232,44 @@
    try { await audit('claim_dob_verified'); }
    catch (err) { logError('claimAccount', 'audit-failed', err, { elationPatientId }); return jsonError(res, 500, 'INTERNAL', 'LOG_WRITE_ERROR', 'Failed to write access log.'); }
  
@@ -230,7 +258,23 @@ diff --git a/functions/claimAccount.js b/functions/claimAccount.js
 +  }
 +  try {
 +    work = await acquireWork(admin.firestore(), FieldValue, elationPatientId, 'claim');
-+  } catch (_) { return hold('CLAIM_IDENTITY_UNVERIFIED'); }
++  } catch (err) {
++    if (err.lifecycleReason === 'RESET_BUSY') {
++      // A double-submit is not a reconciliation anomaly. Read back the winner.
++      for (let attempt = 0; attempt < 10; attempt++) {
++        let current;
++        try { current = (await docRef.get()).data() || {}; } catch (_) { break; }
++        const completed = typeof current.authUid === 'string' && current.firebaseUid === current.authUid.toLowerCase() &&
++          current.accountReset?.state !== 'running' && (!current.claimAccountIntent || current.claimAccountIntent.state === 'complete');
++        if (completed) return jsonError(res, 409, 'ALREADY_EXISTS', 'ALREADY_CLAIMED', 'This account is already set up. Please sign in.');
++        const live = current.accountWork;
++        if (!live || live.kind !== 'claim' || live.uncertain || !live.startedAtMs || Date.now() - live.startedAtMs > 180000) break;
++        if (attempt === 9) return jsonError(res, 409, 'ALREADY_EXISTS', 'CLAIM_IN_PROGRESS', 'Account setup is already in progress. Please wait, then sign in.');
++        await new Promise(resolve => setTimeout(resolve, 50));
++      }
++    }
++    return hold('CLAIM_IDENTITY_UNVERIFIED');
++  }
 +  try {
    let userRecord;
 -  let adopted = false; // D-118: true when we adopt a pre-existing orphan Auth user (never rollback-delete it)
@@ -263,18 +307,19 @@ diff --git a/functions/claimAccount.js b/functions/claimAccount.js
 -      logError('claimAccount', 'create-user-failed', err, { elationPatientId, code: err && err.code });
 -      return jsonError(res, 500, 'INTERNAL', 'ACCOUNT_CREATE_ERROR', 'Could not create your account. Try again shortly.');
 -    }
--  }
 +  let adopted = false;
 +  try {
 +    ({ user: userRecord, adopted } = await prepareClaimAccount({
 +      db: admin.firestore(), auth: admin.auth(), FieldValue, patientId: elationPatientId,
 +      email, password, work,
 +    }));
-+  } catch (_) { return hold('CLAIM_IDENTITY_UNVERIFIED'); }
++  } catch (err) {
++    if (err.lifecycleReason === 'ALREADY_CLAIMED') return jsonError(res, 409, 'ALREADY_EXISTS', 'ALREADY_CLAIMED', 'This account is already set up. Please sign in.');
++    return hold('CLAIM_IDENTITY_UNVERIFIED');
+   }
    const uid = String(userRecord.uid).toLowerCase();
  
-   // 9) Bind the uid onto the roster doc via bindMember — the SOLE writer of
-@@ -282,7 +271,6 @@
+@@ -282,7 +290,6 @@
    //    (adopted flag) so the winner's account survives. bindMember throws
    //    HttpsError (D-010 shape); we catch and translate to this endpoint's
    //    jsonError envelope, never bubbling raw.
@@ -282,7 +327,7 @@ diff --git a/functions/claimAccount.js b/functions/claimAccount.js
    let bindResult;
    try {
      bindResult = await bindMember({
-@@ -291,37 +279,10 @@
+@@ -291,37 +298,10 @@
        elationPatientId,
        rawUid: userRecord.uid,
        actor: 'claimAccount',
@@ -322,7 +367,7 @@ diff --git a/functions/claimAccount.js b/functions/claimAccount.js
    }
  
    // D-118: If bindMember reported an IDEMPOTENT same-uid rebind (bindResult.alreadyBound),
-@@ -330,7 +291,7 @@
+@@ -330,7 +310,7 @@
    //   (Firebase backend behavior), which would forcibly sign out the legitimate first
    //   claimant and let a second submitter overwrite their password. Route to login (409),
    //   same posture as the other already-claimed paths. Only a genuinely NEW bind proceeds.
@@ -331,7 +376,7 @@ diff --git a/functions/claimAccount.js b/functions/claimAccount.js
      log('claimAccount', 'bind-idempotent-rebind', { elationPatientId, uid });
      return jsonError(res, 409, 'ALREADY_EXISTS', 'ALREADY_CLAIMED', 'This account is already set up. Please sign in.');
    }
-@@ -341,8 +302,10 @@
+@@ -341,8 +321,10 @@
    //   resetting the password can never touch a stranger's account. A freshly-CREATED
    //   user (adopted=false) already had its password set at createUser; skip.
    if (adopted) {
@@ -342,7 +387,7 @@ diff --git a/functions/claimAccount.js b/functions/claimAccount.js
        log('claimAccount', 'auth-orphan-password-reset', { elationPatientId, uid });
      } catch (pwErr) {
        // Bind succeeded but the password update failed. The patient is now bound
-@@ -351,10 +314,11 @@
+@@ -351,10 +333,12 @@
        //   non-generic error so this is diagnosable and the patient is told to contact
        //   support rather than looping. Do NOT unbind (bindMember is sole writer,
        //   D-083; unbinding re-opens a race). Non-fatal to the bind; logged loudly.
@@ -350,6 +395,7 @@ diff --git a/functions/claimAccount.js b/functions/claimAccount.js
 -      return jsonError(res, 500, 'INTERNAL', 'ADOPT_PASSWORD_RESET_FAILED', 'Your account is linked but the password could not be set. Please contact support.');
 -    }
 -  }
++      await markWorkUncertain(admin.firestore(), elationPatientId, work).catch(() => {});
 +      return hold('CLAIM_CREDENTIAL_UNCERTAIN');
 +    }
 +  }
@@ -358,7 +404,7 @@ diff --git a/functions/claimAccount.js b/functions/claimAccount.js
  
    // 9b / 9b-i / 9c) Shared post-bind steps (status active, guardian bind,
    //     first-claim hydration). Moved verbatim to core/services/patient/postClaim.js
-@@ -366,7 +330,7 @@
+@@ -366,7 +350,7 @@
      logError('claimAccount', 'hydration-queue-failed', err, { elationPatientId });
      return jsonError(res, 503, 'UNAVAILABLE', 'SETUP_FINISHING', 'Your account is linked. Please sign in while setup finishes.');
    }
@@ -367,7 +413,7 @@ diff --git a/functions/claimAccount.js b/functions/claimAccount.js
  
    try { await clearThrottle(tokenId); }
    catch (err) { logError('claimAccount', 'throttle-clear-failed', err, { elationPatientId }); /* non-fatal: TTL cleans up */ }
-@@ -398,4 +362,12 @@
+@@ -398,4 +382,12 @@
  
    log('claimAccount', 'ok', { elationPatientId, uid, oneStep: !!loginToken });
    return res.status(200).json({ uid, loginToken });
@@ -387,11 +433,11 @@ diff --git a/functions/adminIssueInvite.js b/functions/adminIssueInvite.js
  // group, clicks off/opens on, multipart) and the shared fail-closed opt-out gate.
  const { sendInviteEmail } = require('./core/services/email/sendInviteEmail');
  const { isInviteSuppressed } = require('./core/services/email/suppression');
-+const { resetPatientAccount, reconciliation } = require('./core/services/patient/accountLifecycle');
++const { resetPatientAccount, resumePatientReset, reconciliation } = require('./core/services/patient/accountLifecycle');
  
  
  function jsonError(res, status, code, reason, message) {
-@@ -113,35 +114,18 @@
+@@ -113,35 +114,28 @@
        }
      }
  
@@ -399,20 +445,21 @@ diff --git a/functions/adminIssueInvite.js b/functions/adminIssueInvite.js
 -      if (!resetClaim) {
 -        return jsonError(res, 409, 'ALREADY_EXISTS', 'ALREADY_CLAIMED',
 -          'This member has already activated their portal account.');
++    if (body.resumeReset === true) {
++      try {
++        const result = await resumePatientReset({ db: admin.firestore(), auth: admin.auth(), FieldValue: admin.firestore.FieldValue, patientId: elationPatientId, actor, reason });
++        return res.status(200).json({ ok: true, elationPatientId, resetState: 'done', alreadyDone: result.alreadyDone === true });
++      } catch (e) {
++        try { await reconciliation(admin.firestore(), admin.firestore.FieldValue, elationPatientId, 'RESET_RESUME_REQUIRED'); } catch (_) {}
++        return jsonError(res, e.lifecycleReason === 'RESET_BUSY' ? 409 : 503, 'FAILED_PRECONDITION', e.lifecycleReason === 'RESET_BUSY' ? 'RESET_BUSY' : 'RESET_RESUME_FAILED', 'The reset cannot safely finish yet. Contact support if this persists.');
+       }
+-      const previousUid = String(patient.firebaseUid);
++    }
++
 +    if (patient.firebaseUid || patient.authUid || patient.accountReset?.state === 'running') {
 +      if (!resetClaim) return jsonError(res, 409, 'ALREADY_EXISTS', 'ALREADY_CLAIMED', 'This member has already activated their portal account.');
 +      if (!rosterEmail) return jsonError(res, 422, 'FAILED_PRECONDITION', 'NO_EMAIL_ON_ROSTER');
-+      try {
-+        await resetPatientAccount({ db: admin.firestore(), auth: admin.auth(), FieldValue: admin.firestore.FieldValue,
-+          patientId: elationPatientId, actor, reason });
-+      } catch (e) {
-+        const busy = e.lifecycleReason === 'RESET_BUSY';
-+        try { await reconciliation(admin.firestore(), admin.firestore.FieldValue, elationPatientId, busy ? 'RESET_BUSY' : 'RESET_UNVERIFIED'); } catch (_) {}
-+        return jsonError(res, busy ? 409 : 503, 'FAILED_PRECONDITION', busy ? 'RESET_BUSY' : 'CLAIM_RESET_FAILED',
-+          busy ? 'Setup or records work is still running. Retry after it finishes; if this persists, contact support.' : 'The account reset could not be verified. Please contact support.');
-       }
--      const previousUid = String(patient.firebaseUid);
--      try {
+       try {
 -        try {
 -          await admin.auth().deleteUser(previousUid);
 -        } catch (e) {
@@ -429,10 +476,16 @@ diff --git a/functions/adminIssueInvite.js b/functions/adminIssueInvite.js
 -            previousUid,
 -          },
 -        });
--      } catch (e) {
++        await resetPatientAccount({ db: admin.firestore(), auth: admin.auth(), FieldValue: admin.firestore.FieldValue,
++          patientId: elationPatientId, actor, reason });
+       } catch (e) {
 -        logError('adminIssueInvite', 'claim-reset-failed', { elationPatientId, message: e.message });
 -        return jsonError(res, 500, 'INTERNAL', 'CLAIM_RESET_FAILED');
--      }
++        const busy = e.lifecycleReason === 'RESET_BUSY';
++        try { await reconciliation(admin.firestore(), admin.firestore.FieldValue, elationPatientId, busy ? 'RESET_BUSY' : 'RESET_UNVERIFIED'); } catch (_) {}
++        return jsonError(res, busy ? 409 : 503, 'FAILED_PRECONDITION', busy ? 'RESET_BUSY' : 'CLAIM_RESET_FAILED',
++          busy ? 'Setup or records work is still running. Retry after it finishes; if this persists, contact support.' : 'The account reset could not be verified. Please contact support.');
+       }
 -      await audit({ action: 'claim_reset', elationPatientId, actor, reason, previousUid, ok: true });
 -      log('adminIssueInvite', 'claim-reset', { elationPatientId });
      }
@@ -441,7 +494,7 @@ diff --git a/functions/adminIssueInvite.js b/functions/adminIssueInvite.js
 diff --git a/functions/claimHydrationWorker.js b/functions/claimHydrationWorker.js
 --- a/functions/claimHydrationWorker.js
 +++ b/functions/claimHydrationWorker.js
-@@ -1,34 +1,54 @@
+@@ -1,34 +1,56 @@
 -// REVIEW ONLY. A durable Firestore trigger, not work started after an HTTP response.
 +// #617: delayed events cannot mutate a replacement patient's hydration job.
  const functions = require('firebase-functions');
@@ -477,6 +530,8 @@ diff --git a/functions/claimHydrationWorker.js b/functions/claimHydrationWorker.
 +      const p = await db.collection('patients').doc(id).get();
 +      // Reset/deleted identity/old event is terminal, not a retry storm.
 +      if (p.get('accountReset')?.state === 'running' || p.get('authUid') !== job.rawUid) return;
++      const live = p.get('accountWork');
++      if (live?.kind === 'claim' && !live.uncertain && live.startedAtMs && Date.now() - live.startedAtMs <= 180000) throw e;
 +      await reconciliation(db, FieldValue, id, 'HYDRATION_BUSY');
 +      throw e;
 +    }
@@ -614,22 +669,31 @@ diff --git a/functions/core/services/patient/claimHydrationQueue.js b/functions/
 diff --git a/functions/core/services/patient/postClaim.js b/functions/core/services/patient/postClaim.js
 --- a/functions/core/services/patient/postClaim.js
 +++ b/functions/core/services/patient/postClaim.js
-@@ -9,6 +9,8 @@
+@@ -9,12 +9,16 @@
  // Never throws (every step was already fail-soft in claimAccount).
  
  const admin = require('firebase-admin');
 +const { acquireWork, releaseWork, assertWork, reconciliation } = require('./accountLifecycle');
++const { awaitHydrationDrain } = require('./hydrationExecutionDrain');
 +const { withIdentityExecution } = require('./identityExecution');
  const { log, logError } = require('../../../middleware/logger');
  const { bindGuardianUid } = require('./guardians');
  const { backfillElationReports } = require('../../../backfillElationReports');
-@@ -30,7 +32,29 @@
+ const { backfillElationLetters } = require('../../../backfillElationLetters');
+ const {
+   CLAIM_SOFT_BUDGET_MS,
++  CLAIM_CAP_MS,
+   DEFER_REASON_SOFT_BUDGET,
+   STATUS_DEFERRED,
+   SOURCE_CLAIM,
+@@ -30,7 +34,30 @@
    GUARDIAN_BIND_MAX_CHILDREN,
  } = require('./claimTimeGuardianBind');
  
 -async function runPostClaimSteps({ elationPatientId, uid, actor = 'claimAccount', skipHydration = false, ownsPending = false }) {
 +async function runPostClaimSteps(opts) {
 +  const { elationPatientId, uid } = opts;
++  const executionStartedAtMs = Date.now();
 +  const db = admin.firestore(); const FieldValue = admin.firestore.FieldValue;
 +  let work = opts.accountWork;
 +  const own = !work;
@@ -640,7 +704,7 @@ diff --git a/functions/core/services/patient/postClaim.js b/functions/core/servi
 +      work = await acquireWork(db, FieldValue, elationPatientId, 'postClaim', p.get('authUid'));
 +    }
 +    assertWork((await db.collection('patients').doc(String(elationPatientId)).get()).data(), work);
-+    await withIdentityExecution(work, () => runOwnedPostClaimSteps({ ...opts, accountWork: work }));
++    await withIdentityExecution(work, () => runOwnedPostClaimSteps({ ...opts, accountWork: work, executionStartedAtMs }));
 +  } finally {
 +    // A soft-budget return does not prove the underlying writes stopped.
 +    // Keep the fence if the invocation dies with unknown in-flight work.
@@ -650,19 +714,23 @@ diff --git a/functions/core/services/patient/postClaim.js b/functions/core/servi
 +    }
 +  }
 +}
-+async function runOwnedPostClaimSteps({ elationPatientId, uid, actor = 'claimAccount', skipHydration = false, ownsPending = false, accountWork }) {
++async function runOwnedPostClaimSteps({ elationPatientId, uid, actor = 'claimAccount', skipHydration = false, ownsPending = false, accountWork, softBudgetMs = CLAIM_SOFT_BUDGET_MS, drainBudgetMs = 30000, executionStartedAtMs }) {
    // 9b) Flip lifecycle status invited -> active (#303). bindMember owns identity
    //     (firebaseUid), NOT lifecycle — so the CF writes status. Ordered AFTER a
    //     successful bind and idempotent (merge). A failure HERE leaves the patient
-@@ -160,6 +184,7 @@
-           softTimer = setTimeout(() => resolve({ __deferred: true }), CLAIM_SOFT_BUDGET_MS);
+@@ -157,9 +184,10 @@
+ 
+         let softTimer = null;
+         const softBudget = new Promise((resolve) => {
+-          softTimer = setTimeout(() => resolve({ __deferred: true }), CLAIM_SOFT_BUDGET_MS);
++          softTimer = setTimeout(() => resolve({ __deferred: true }), softBudgetMs);
            if (softTimer && typeof softTimer.unref === 'function') softTimer.unref();
          });
 +        accountWork.inFlight = true;
          const hydrate = (async () => {
            const reportsRes = await backfillElationReports(admin.firestore(), admin.firestore.FieldValue, [String(elationPatientId)]);
            const lettersRes = await backfillElationLetters(admin.firestore(), admin.firestore.FieldValue, [String(elationPatientId)]);
-@@ -167,7 +192,7 @@
+@@ -167,7 +195,7 @@
              reports: (reportsRes && reportsRes.perPatient && reportsRes.perPatient[0]) || {},
              letters: (lettersRes && lettersRes.perPatient && lettersRes.perPatient[0]) || {},
            };
@@ -671,6 +739,16 @@ diff --git a/functions/core/services/patient/postClaim.js b/functions/core/servi
  
          const outcome = await Promise.race([hydrate, softBudget]);
          if (softTimer) clearTimeout(softTimer);
+@@ -178,6 +206,9 @@
+           await markDeferred(admin.firestore(), admin.firestore.FieldValue, elationPatientId, {
+             reason: DEFER_REASON_SOFT_BUDGET,
+           });
++          // Expected deferral: join underlying writes before handing off to Recovery.
++          // A drain timeout or nested mutation deadline is a genuine uncertainty hold.
++          if (!await awaitHydrationDrain(hydrate, Math.min(drainBudgetMs, Math.max(0, CLAIM_CAP_MS - (Date.now() - executionStartedAtMs) - 10000)))) accountWork.uncertain = true;
+           log(actor, 'hydration-deferred', {
+             elationPatientId, uid, softBudgetMs: CLAIM_SOFT_BUDGET_MS,
+           });
 diff --git a/functions/core/services/elation/resolvePatientForCaller.js b/functions/core/services/elation/resolvePatientForCaller.js
 --- a/functions/core/services/elation/resolvePatientForCaller.js
 +++ b/functions/core/services/elation/resolvePatientForCaller.js
@@ -786,7 +864,7 @@ diff --git a/functions/test/unit/claim-hydration-worker.test.cjs b/functions/tes
 new file mode 100644
 --- /dev/null
 +++ b/functions/test/unit/account-lifecycle.emulator.test.cjs
-@@ -0,0 +1,231 @@
+@@ -0,0 +1,261 @@
 +// #617/#618: real Auth + Firestore, isolated transports, no production identities/requests.
 +const { test, before, after } = require('node:test');
 +const assert = require('node:assert/strict');
@@ -923,6 +1001,8 @@ new file mode 100644
 +  await clear();await patient();const token=await claimLink();const results=await Promise.all([runClaim(token),runClaim(token)]);
 +  assert.equal(results.filter(r=>r.code===200).length,1);assert.equal((await auth.listUsers()).users.length,1);
 +  assert.ok((await db.doc('patients/'+pid).get()).get('authUid'));
++  const loser=results.find(r=>r.code!==200);assert.equal(loser.code,409);assert.equal(loser.value.error.details.reason,'ALREADY_CLAIMED');
++  assert.equal((await db.doc('portalAccountReconciliation/'+pid).get()).exists,false);
 +});
 +test('fresh UID generation uses valid Firebase shape and preserved case duality',async()=>{
 +  await clear();for(let i=0;i<30;i++){const uid=key();assert.match(uid,/^[A-Za-z0-9_-]{43}$/);assert.ok(uid.length<=128);}
@@ -1018,6 +1098,34 @@ new file mode 100644
 +  await held(token);await assert.rejects(reset(),/RESET_BUSY/);await deferred();
 +  assert.equal((await db.doc('patients/'+pid).get()).get('accountWork').owner,p.accountWork.owner);
 +});
++test('normal reset records detection at R1 and returns with done synchronously',async()=>{
++  await clear();await bound();const remove=auth.deleteUser.bind(auth);let observed=false;
++  auth.deleteUser=async id=>{assert.equal((await db.doc('patients/'+pid).get()).get('accountReset').state,'running');assert.equal((await db.doc('portalAccountReconciliation/'+pid).get()).get('state'),'reset_in_progress');observed=true;return remove(id);};
++  try{await reset();}finally{delete auth.deleteUser;}
++  assert.equal(observed,true);assert.equal((await db.doc('patients/'+pid).get()).get('accountReset').state,'done');assert.equal((await db.doc('portalAccountReconciliation/'+pid).get()).get('state'),'resolved');
++});
++test('reset-only admin resume completes a stuck reset without mint/send, then is idempotent',async()=>{
++  await clear();const old=await bound();const proxy=new Proxy(auth,{get(t,k){if(k==='revokeRefreshTokens')return async()=>{throw Error('crashed reset')};const v=t[k];return typeof v==='function'?v.bind(t):v;}});
++  await assert.rejects(reset(proxy),/crashed reset/);
++  const body={elationPatientId:pid,actor:'synthetic-admin',resumeReset:true};
++  assert.equal((await run(invite,body)).code,200);await absence(old);assert.equal(sends,0);assert.equal((await db.collection('claimTokens').get()).size,0);
++  await auth.createUser({uid:'SuccessorAfterReset',email:EMAIL,password:PW});await db.doc('patients/'+pid).update({authUid:'SuccessorAfterReset',firebaseUid:'successorafterreset'});
++  const repeated=await run(invite,body);assert.equal(repeated.value.alreadyDone,true);assert.ok(await auth.getUser('SuccessorAfterReset'));assert.equal(sends,0);
++});
++test('normal soft-budget deferral drains actual writes and leaves Recovery eligible, not reconciliation',async()=>{
++  await clear();const uid=await bound();const original=Module._load;
++  Module._load=function(name,parent,...rest){
++    if(name==='../../../backfillElationReports')return {backfillElationReports:async()=>{await new Promise(r=>setTimeout(r,25));await db.doc('patients/'+pid+'/labs/drained').set({written:true});return {perPatient:[{errors:0}]};}};
++    if(name==='../../../backfillElationLetters')return {backfillElationLetters:async()=>({perPatient:[{errors:0,stored:0,listed:0}]})};
++    return original.call(this,name,parent,...rest);
++  };
++  const path=require.resolve('../../core/services/patient/postClaim');delete require.cache[path];let runPost;
++  try{runPost=require(path).runPostClaimSteps;}finally{Module._load=original;}
++  await runPost({elationPatientId:pid,uid:uid.toLowerCase(),softBudgetMs:1,drainBudgetMs:200});
++  const p=(await db.doc('patients/'+pid).get()).data();assert.equal(p.hydrationStatus,'deferred');assert.equal(p.accountWork,undefined);
++  assert.equal((await db.doc('portalAccountReconciliation/'+pid).get()).exists,false);assert.equal((await db.doc('patients/'+pid+'/labs/drained').get()).get('written'),true);
++  assert.ok((await db.doc('hydration_runs/hydration-recovery-standing').get()).get('queued').includes(pid));
++});
 diff --git a/.github/workflows/claim-hydration-gate.yml b/.github/workflows/claim-hydration-gate.yml
 --- a/.github/workflows/claim-hydration-gate.yml
 +++ b/.github/workflows/claim-hydration-gate.yml
@@ -1058,14 +1166,23 @@ diff --git a/AGENTS.md b/AGENTS.md
  
  ## OPERATING RULES
 +
-+- Claim/reset identity work uses patient-scoped ownership and durable exact-UID proof, never email ownership; uncertain Auth or hydration execution holds visibly because deletion and binding changes cross service boundaries.
++- Claim/reset identity work uses patient-scoped ownership and durable exact-UID proof, never email ownership; uncertain Auth or hydration execution holds visibly because deletion and binding changes cross service boundaries. Reset-start signals commit with the fence, resumes never send, and soft deferrals release only after actual awaited drain because expected timeout budgets are not proof of abandoned work.
  
  - Discovery validates calendar DOB/age before provisioning and email safeguards, retaining excluded charts in collision context because minor holds must not weaken adult shared-mailbox protection.
  
 diff --git a/plans/INTEGRATION-CONTRACT.md b/plans/INTEGRATION-CONTRACT.md
 --- a/plans/INTEGRATION-CONTRACT.md
 +++ b/plans/INTEGRATION-CONTRACT.md
-@@ -1,3 +1,20 @@
+@@ -1,3 +1,29 @@
++# PR621 reset-resume and expected-deferral clarification — 2026-11-21
++
++- Normal reset commits `accountReset.state:done` in R2 BEFORE its awaited promise resolves; resolver denial applies only during `running`. R1 atomically creates admin-readable `portalAccountReconciliation/{patientId}` with `state:reset_in_progress`, `resumeAvailable:true` and a 60-second `reviewAfterMs` deadline. A crash after R1 cannot omit that signal. Operators inspect overdue entries; no new scheduler or automatic fence stealing is added. R2 resolves the entry synchronously.
++- Existing authenticated `adminIssueInvite` accepts `resumeReset:true` with explicit `elationPatientId` and `actor` (optional audit reason). This is reset-only: it resumes the SAME exact UID/owner/generation with all existing quiescence and suppression checks, returns `{ok:true,resetState:"done"}`, and exits BEFORE revoke/remint/send code. Already-done resume is a no-op even if a successor has claimed. It does not clear unknown work or bypass RESET_BUSY. Example owner/backend payload: `{"elationPatientId":"<patient ID from reset queue>","actor":"<operator>","resumeReset":true,"reason":"resume interrupted reset"}`. Call through existing authenticated admin transport, not a public browser request. Missing reset fails closed.
++- Double-submit losers re-read the patient's exact, consistent binding. Completed setup returns clean 409 `ALREADY_CLAIMED` / sign in without reconciliation. A known fresh claim still in progress returns 409 `CLAIM_IN_PROGRESS`, also without reconciliation; stale, unreadable or durably uncertain ownership keeps generic support/hold semantics. Auth transport uncertainty is recorded on the existing ownership document BEFORE returning, so it cannot masquerade as benign concurrency.
++- Expected soft-budget deferral writes deferred + Recovery queue, then joins actual hydration inside the current awaited invocation with a bounded drain (default up to 30 seconds, capped for invocation headroom). If underlying work actually settles and no nested mutation deadline occurred, release owner with NO reconciliation; Recovery can take the deferred patient. A drain that cannot establish quiescence or a nested non-cancelling mutation deadline remains a genuine anomaly, retains ownership, and emits reconciliation. No detached release or clock-based takeover; the existing scheduled Recovery decision helper is unchanged.
++- Social status read-only on 2026-11-21: production master `config/socialSignIn.enabled=false`; default practice gate=true; five social callables deployed ACTIVE. Thus deployed but OFF for users. No provider, practice, master, registration or runtime settings changed. Full social gate includes nonce/no-mutation/deploy units, Auth+Firestore+Functions callable flows and lifecycle fence/generation tests; Elation/Twilio/provider identities remain synthetic adapters in these emulator tests.
++- Full hydration gate still executes modified worker units, queue/Recovery/drain units, existing C4/rules suites AND lifecycle emulator tests; workflow name, behavior and docs-only predicate unchanged. `adminRevokeInvite`, claim token service and claimAccount consumption block remain unchanged by this follow-up. #619 is separate after PR1 merge. No merge/deploy/arming/live reset or send.
++
 +# Claim reset/adoption security amendment — 2026-11-21 (Closes #617, Closes #618)
 +
 +- `adminIssueInvite(resetClaim:true)` resolves by patient ID, deletes only the verified true-case `authUid`, disables/revokes refresh tokens and confirms exact Auth absence before clearing binding. Legacy email lookup discovers only a candidate; unique roster email, matching normalized stored binding, unique patient ownership and independent patient-ID `member_bound` evidence are mandatory. Shared/unknown/conflicting legacy identity holds for reconciliation. Privileged/unexpected provider identities hold rather than being deleted.
@@ -1086,3 +1203,36 @@ diff --git a/plans/INTEGRATION-CONTRACT.md b/plans/INTEGRATION-CONTRACT.md
  # Discovery age/DOB hold amendment — 2026-11-20
  
  - Provision-only `rosterDiscoveryTick` validates DOB before `buildRosterDoc` and email/membership safeguards; existing-document/dedup handling remains first and never rewrites patients.
+diff --git a/functions/core/services/patient/hydrationExecutionDrain.js b/functions/core/services/patient/hydrationExecutionDrain.js
+new file mode 100644
+--- /dev/null
++++ b/functions/core/services/patient/hydrationExecutionDrain.js
+@@ -0,0 +1,12 @@
++// A normal soft budget defers records, not proof of an abandoned mutation.
++// Join the real work inside this invocation; never release from a detached callback.
++async function awaitHydrationDrain(hydrate, budgetMs = 30000) {
++  let timer;
++  try {
++    return await Promise.race([
++      hydrate.then(() => true, () => true),
++      new Promise(resolve => { timer = setTimeout(() => resolve(false), budgetMs); }),
++    ]);
++  } finally { clearTimeout(timer); }
++}
++module.exports = { awaitHydrationDrain };
+diff --git a/functions/test/logical-social/logical-link.emulator.test.cjs b/functions/test/logical-social/logical-link.emulator.test.cjs
+--- a/functions/test/logical-social/logical-link.emulator.test.cjs
++++ b/functions/test/logical-social/logical-link.emulator.test.cjs
+@@ -97,4 +97,12 @@
+   const p=await post('signInWithPassword',{ email:'fixture@example.test',password:'FixturePass2468',returnSecureToken:true });assert.equal(p.localId,uid);
+   const c=await post('signInWithCustomToken',{ token:await auth.createCustomToken(uid),returnSecureToken:true });assert.equal((await auth.verifyIdToken(c.idToken)).uid,uid);
+   assert.deepEqual((await auth.getUser(uid)).providerData.map(p=>p.providerId),['password']);
+-});+});for(const fence of [{accountReset:{state:'running'}},{accountWork:{owner:'live-hydration'}}])test('lifecycle fence refuses logical link with no identity writes: '+Object.keys(fence)[0],async()=>{
++  await db.doc('patients/'+pid).update(fence);await assert.rejects(S.link(db,uid,id,pid),/RESET_BUSY/);assert.equal((await db.collection('socialIdentityLinks').get()).size,0);
++});
++test('social claim rejects pre-reset generation but accepts a fresh post-reset lease',async()=>{
++  const newUid='AfterResetTrueUid';await auth.createUser({uid:newUid});await db.doc('patients/NEW').set({identityGeneration:1,accountReset:{state:'done'}});
++  await db.doc('socialClaimLocks/NEW').set({state:'pending',pendingUid:newUid,generation:'social-lease',identityGeneration:0,leaseUntilMs:Date.now()+120000});
++  await assert.rejects(S.link(db,newUid,id,'NEW',{claimUid:newUid,generation:'social-lease'}),/RESET_RECONCILIATION_REQUIRED/);assert.equal((await db.collection('socialIdentityLinks').get()).size,0);
++  await db.doc('socialClaimLocks/NEW').update({identityGeneration:1});await S.link(db,newUid,id,'NEW',{claimUid:newUid,generation:'social-lease'});assert.equal((await db.doc('patients/NEW').get()).get('authUid'),newUid);
++});
