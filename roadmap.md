@@ -1,5 +1,11 @@
 # Roadmap
 
+## Nov 21 — PR1 claim/account security #617 + #618
+- [x] Read-only count: 0 of 1,625 patients have firebaseUid without authUid; no backfill needed. Contract proposes proof-checked patient-ID backfill only if future candidates appear; shared-email manual. No production writes.
+- [x] Feature branch from current portal main: exact-UID fail-closed reset, patient-scoped hydration serialization/cleanup, evidence-backed orphan recovery and admin-visible masked reconciliation holds; PR #621, commit 5433d027.
+- [ ] Preserve UID duality, #615 and #611/#613 gate name/docs-only behavior; add real Auth + Firestore tests and contract amendment; open Closes #617/#618 PR and return diff.
+- [ ] PR2 #619 waits for PR1 merge and separate implementation turn; C2 grant boundary locked, no project-wide logout/post-C2 undo. No merges/deploys/arming authorized.
+
 ## Nov 20 — discovery minor exclusion: review only
 - [x] Read current portal source, family-model brief, live discovery config/reports/cursor, and the two named chart records; no production mutations or sends.
 - [x] Confirm missing discovery age gate and Cynthia's cold-start trailing-edge loss; prepare review plan with tests, contract amendment, and single-record quarantine recommendation.
