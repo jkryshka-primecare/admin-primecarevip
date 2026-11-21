@@ -391,15 +391,7 @@ diff --git a/functions/adminIssueInvite.js b/functions/adminIssueInvite.js
  
  
  function jsonError(res, status, code, reason, message) {
-@@ -78,6 +79,7 @@
- 
-     if (!elationPatientId) return jsonError(res, 400, 'INVALID_ARGUMENT', 'PATIENT_ID_REQUIRED');
-     if (!actor) return jsonError(res, 400, 'INVALID_ARGUMENT', 'ACTOR_REQUIRED');
-+    if (resetClaim && !reason) return jsonError(res, 400, 'INVALID_ARGUMENT', 'REASON_REQUIRED');
- 
-     // Roster doc is the only source for the recipient address. There is no
-     // caller-supplied override: the emailed link is a single-use account-claim
-@@ -113,35 +115,18 @@
+@@ -113,35 +114,18 @@
        }
      }
  
