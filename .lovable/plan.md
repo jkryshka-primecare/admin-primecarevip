@@ -46,11 +46,14 @@ The Membership tab links a patient to their Stripe billing account by email. Tha
 - The Stripe records already in the member app likely reflect the 25% group. That needs confirming.
 
 ## Open questions
-- Is the member app's Stripe data from your own Stripe account, written by Hint or by our member app?
-- Will Rainforest export saved cards to Stripe, and on what terms?
+- Where the member app's Stripe data comes from is unknown. We will investigate by comparing what Stripe and Hint each hold.
+- Card transfer is triggered by ending the Hint account: Hint then contacts Rainforest to transfer saved cards. Cancellation timing must be planned so no billing cycle is missed.
 
 ## Suggested next steps (when you're ready)
-1. Ask Rainforest about card export; inventory your Stripe account and the member app's billing writer.
-2. Map each Hint function above to a Stripe feature or something we build.
-3. Fix the email-based billing link to use patient record IDs.
-4. Move pharmacy charges first (small, already well-guarded), then memberships.
+1. Confirm the Hint cancellation and Rainforest card-transfer process; inventory your Stripe account and the member app's billing writer.
+2. Screenshot every Hint screen and build our own replacement on top of Stripe.
+3. Create patient charts directly in Elation. Hint creates them today through its Elation connection, so this must be ready before Hint is turned off. Also switch the email-based billing link to patient record IDs.
+4. Move pharmacy charges first (small, already well-guarded), then memberships. (Agreed.)
+
+## After approval
+Turn this into a Markdown roadmap file and a GitHub issue so the multi-month transition has an actionable, trackable plan.
