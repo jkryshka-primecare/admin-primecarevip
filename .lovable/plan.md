@@ -34,13 +34,23 @@ The Membership tab links a patient to their Stripe billing account by email. Tha
 - Revenue and membership reporting
 - Membership status feeding portal access and invite eligibility
 
-## Open questions before a real plan
-- Which system writes the Stripe records in the member app today, and whose Stripe account it is.
-- Whether Hint itself processes cards through Stripe for us, which could let us keep customer and card data during a move.
-- Whether to use Lovable's built-in Stripe or connect your existing Stripe account. That depends on the answer above.
+## How payments actually flow today (from you)
+- Prime Care VIP has its own Stripe account.
+- Hint is the subscription brain; it has never been the card processor.
+- About 25% of members are still charged through Stripe; about 75% moved to Rainforest when Hint switched a year ago.
+- Detaching from Hint means going back to Stripe directly, using your own account (not Lovable's built-in Stripe).
+
+## What this means for a move
+- The 25% on Stripe: customers and saved cards likely already sit in your Stripe account, so they may move with little member effort.
+- The 75% on Rainforest: the hardest part. Saved cards would need a processor-to-processor card transfer from Rainforest to Stripe, or members re-enter cards. Confirming whether Rainforest supports that transfer is the first thing to ask.
+- The Stripe records already in the member app likely reflect the 25% group. That needs confirming.
+
+## Open questions
+- Is the member app's Stripe data from your own Stripe account, written by Hint or by our member app?
+- Will Rainforest export saved cards to Stripe, and on what terms?
 
 ## Suggested next steps (when you're ready)
-1. Inventory the existing Stripe account and the member app's billing writer.
+1. Ask Rainforest about card export; inventory your Stripe account and the member app's billing writer.
 2. Map each Hint function above to a Stripe feature or something we build.
 3. Fix the email-based billing link to use patient record IDs.
 4. Move pharmacy charges first (small, already well-guarded), then memberships.
