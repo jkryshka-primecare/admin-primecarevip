@@ -1,16 +1,17 @@
 # Roadmap
 
-## Nov 22 — #619 token reservation: plan only
+## Nov 22 — #619 token reservation
+- [x] Implemented PR #623 on fix/claim-token-reservation-619 off main 44b97be0; final head 2172575567f637c499a37d1c8135ead705c67e99. C1/disabled-create/C2 bind+consume/original-only mint; backend-only no-mint/no-password resumes, atomic settled cleanup and uncertain holds. 67 real lifecycle/reservation, 39 C4/rules, 11 hydration, 33 sender/social units and 27 social emulator tests pass. Full hosted hydration45052802082 and social45052801972 SUCCESS with real steps executed and no-op skipped. Review diff/evidence delivered; no merge/deploy/arming.
 - [x] Revised backend-only no-mint-on-spent-resume plan; dropped Hub proof/admin-resume surface; verified admin/reissue/C4 shared revoke and script binding callers. Social runtime uses Session.link, preserved. Replay cannot overwrite adopted credentials; uncertain work retains #621 hold. Awaiting Claude review, no code.
 - [x] Reviewed portal main 44b97be0 and prepared C1/C2 reservation, revoke, recovery, tests and contract plan for Claude; no implementation until review. Issue body read denied 403; owner-provided scope used.
-- [ ] After approval only: separate #619 branch off then-current main, Closes #619, full claim-hydration-gate including Auth+Firestore lifecycle coverage; no merge/deploy/arming.
+- [x] Approved separate #619 feature branch, Closes #619 PR and full real-head hosted claim-hydration-gate including lifecycle/reservation coverage; no merge/deploy/arming.
 
 ## Nov 21 — PR1 claim/account security #617 + #618
 - [x] PR621 follow-up on head 98b4a1c3: reset-start detection + reset-only resume, clean claim losers, awaited soft-deferral drain; production social master=false/default practice=true/five ACTIVE callables. FULL hosted hydration44922627234 and social44922627275 passed; updated full/incremental diffs delivered. No merge/deploy/arming.
 - [x] Read-only count: 0 of 1,625 patients have firebaseUid without authUid; no backfill needed. Contract proposes proof-checked patient-ID backfill only if future candidates appear; shared-email manual. No production writes.
 - [x] Feature branch from current portal main: exact-UID fail-closed reset, patient-scoped hydration serialization/cleanup, evidence-backed orphan recovery and admin-visible masked reconciliation holds; PR #621, head 1ae33673.
 - [x] Preserve UID duality, #615 and #611/#613 gate name/docs-only behavior; 26 real Auth+Firestore tests, historical contract amendment, PR #621 and review diff. Hosted claim-hydration-gate 44920131876 passed on head 1ae33673; sender tests 18/18.
-- [ ] PR2 #619: owner reports PR1 merged/deployed; Nov22 plan awaits Claude review before separate implementation. C2 grant boundary locked, no project-wide logout/post-C2 undo. No merges/deploys/arming authorized.
+- [x] PR2 #619 implemented after plan approval as PR #623; C2 grant boundary locked, no project-wide logout/post-C2 undo. No merges/deploys/arming authorized.
 
 ## Nov 20 — discovery minor exclusion: review only
 - [x] Read current portal source, family-model brief, live discovery config/reports/cursor, and the two named chart records; no production mutations or sends.
