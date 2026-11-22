@@ -1,11 +1,15 @@
 # Roadmap
 
+## Nov 22 — #619 token reservation: plan only
+- [x] Reviewed portal main 44b97be0 and prepared C1/C2 reservation, revoke, recovery, tests and contract plan for Claude; no implementation until review. Issue body read denied 403; owner-provided scope used.
+- [ ] After approval only: separate #619 branch off then-current main, Closes #619, full claim-hydration-gate including Auth+Firestore lifecycle coverage; no merge/deploy/arming.
+
 ## Nov 21 — PR1 claim/account security #617 + #618
 - [x] PR621 follow-up on head 98b4a1c3: reset-start detection + reset-only resume, clean claim losers, awaited soft-deferral drain; production social master=false/default practice=true/five ACTIVE callables. FULL hosted hydration44922627234 and social44922627275 passed; updated full/incremental diffs delivered. No merge/deploy/arming.
 - [x] Read-only count: 0 of 1,625 patients have firebaseUid without authUid; no backfill needed. Contract proposes proof-checked patient-ID backfill only if future candidates appear; shared-email manual. No production writes.
 - [x] Feature branch from current portal main: exact-UID fail-closed reset, patient-scoped hydration serialization/cleanup, evidence-backed orphan recovery and admin-visible masked reconciliation holds; PR #621, head 1ae33673.
 - [x] Preserve UID duality, #615 and #611/#613 gate name/docs-only behavior; 26 real Auth+Firestore tests, historical contract amendment, PR #621 and review diff. Hosted claim-hydration-gate 44920131876 passed on head 1ae33673; sender tests 18/18.
-- [ ] PR2 #619 waits for PR1 merge and separate implementation turn; C2 grant boundary locked, no project-wide logout/post-C2 undo. No merges/deploys/arming authorized.
+- [ ] PR2 #619: owner reports PR1 merged/deployed; Nov22 plan awaits Claude review before separate implementation. C2 grant boundary locked, no project-wide logout/post-C2 undo. No merges/deploys/arming authorized.
 
 ## Nov 20 — discovery minor exclusion: review only
 - [x] Read current portal source, family-model brief, live discovery config/reports/cursor, and the two named chart records; no production mutations or sends.
