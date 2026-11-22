@@ -1,0 +1,954 @@
+diff --git a/.github/workflows/claim-hydration-gate.yml b/.github/workflows/claim-hydration-gate.yml
+index 01a2c35..5103ec1 100644
+--- a/.github/workflows/claim-hydration-gate.yml
++++ b/.github/workflows/claim-hydration-gate.yml
+@@ -60,6 +60,7 @@ jobs:
+           functions/test/unit/claim-hydration-worker.test.cjs
+           functions/test/unit/hydration-recovery.test.cjs
+           functions/test/unit/hydration-drain-d319.test.cjs
++          functions/test/unit/invite-age.test.cjs
+       - name: Install isolated emulator tooling (no production credentials)
+         if: steps.decide.outputs.run_real == 'true'
+         run: npm install --prefix /tmp/hydration-test --no-save firebase-tools@13.29.2 @firebase/rules-unit-testing@3.0.4 firebase@10.14.1 firebase-admin@12.7.0
+@@ -79,4 +80,4 @@ jobs:
+           GCLOUD_PROJECT: demo-portal-claim-hydration
+         run: |
+           printf '%s' '{"firestore":{"rules":"firestore.rules"},"emulators":{"auth":{"port":9099},"firestore":{"port":8086},"ui":{"enabled":false}}}' > account-test.firebase.json
+-          node /tmp/hydration-test/node_modules/firebase-tools/lib/bin/firebase.js emulators:exec --config account-test.firebase.json --project demo-portal-claim-hydration --only auth,firestore 'node --test --test-concurrency=1 functions/test/unit/account-lifecycle.emulator.test.cjs functions/test/unit/claim-reservation.emulator.test.cjs'
++          node /tmp/hydration-test/node_modules/firebase-tools/lib/bin/firebase.js emulators:exec --config account-test.firebase.json --project demo-portal-claim-hydration --only auth,firestore 'node --test --test-concurrency=1 functions/test/unit/account-lifecycle.emulator.test.cjs functions/test/unit/claim-reservation.emulator.test.cjs functions/test/unit/invite-age.emulator.test.cjs'
+diff --git a/AGENTS.md b/AGENTS.md
+index 7caa548..322e1b9 100644
+--- a/AGENTS.md
++++ b/AGENTS.md
+@@ -44,6 +44,8 @@ Continue working until the task is fully implemented, tested, and validated.
+ 
+ ## OPERATING RULES
+ 
++- Invitation mint/send/pre-revoke and pre-C1 claim eligibility reuse the existing NY-calendar discovery evaluator; gate the shared token writer and direct sender bypasses because inviteOne is not universal, while keeping reset and C1/C2 ownership unchanged.
++
+ - Invite claims reserve under existing patient work at C1, stage only proven disabled identities, and consume plus bind atomically in bindMember at C2; mint eligibility is invocation-local to the acknowledged original owner because spent retries must never replay credentials or grant sessions. Claim cleanup atomically releases reservation/work and uncertain execution retains the existing fence.
+ 
+ - Claim/reset identity work uses patient-scoped ownership and durable exact-UID proof, never email ownership; uncertain Auth or hydration execution holds visibly because deletion and binding changes cross service boundaries. Reset-start signals commit with the fence, resumes never send, and soft deferrals release only after actual awaited drain because expected timeout budgets are not proof of abandoned work.
+diff --git a/functions/adminBatchInvite.js b/functions/adminBatchInvite.js
+index b1a711e..fd0efa1 100644
+--- a/functions/adminBatchInvite.js
++++ b/functions/adminBatchInvite.js
+@@ -45,6 +45,7 @@ const {
+   DEFAULT_COHORT,
+   SOFT_CAP,
+ } = require('./core/services/patient/batchInvite');
++const { evaluateInviteAge, AGE_REFUSALS } = require('./core/services/patient/inviteAge');
+ const { inviteOne } = require('./core/services/patient/inviteOne');
+ 
+ const ELATION_CLIENT_ID = functions.params.defineSecret('ELATION_CLIENT_ID');
+@@ -235,6 +236,11 @@ exports.adminBatchInvite = functions
+             results.skippedAtSend['no-roster-doc'] = (results.skippedAtSend['no-roster-doc'] || 0) + 1;
+             continue;
+           }
++          const age = evaluateInviteAge({ doc: docNow });
++          if (!age.ok) {
++            results.skippedAtSend[age.reason] = (results.skippedAtSend[age.reason] || 0) + 1;
++            continue;
++          }
+           const recipient = normalizeEmail(docNow.email);
+           if (!recipient) {
+             results.skippedAtSend['no-email'] = (results.skippedAtSend['no-email'] || 0) + 1;
+@@ -260,7 +266,9 @@ exports.adminBatchInvite = functions
+             sentIds.push(cand.elationPatientId);
+           } catch (e) {
+             const r = e.inviteReason || 'SEND_ERROR';
+-            if (r === 'LIVE_TOKEN_EXISTS') {
++            if (AGE_REFUSALS.has(r)) {
++              results.skippedAtSend[r] = (results.skippedAtSend[r] || 0) + 1;
++            } else if (r === 'LIVE_TOKEN_EXISTS') {
+               results.skippedAtSend['live-token'] = (results.skippedAtSend['live-token'] || 0) + 1;
+             } else {
+               results.failed += 1;
+diff --git a/functions/adminBatchReissue.js b/functions/adminBatchReissue.js
+index 6f842bb..8bc0935 100644
+--- a/functions/adminBatchReissue.js
++++ b/functions/adminBatchReissue.js
+@@ -39,6 +39,7 @@ const {
+   SOFT_CAP,
+   MAX_LIST,
+ } = require('./core/services/patient/batchReissue');
++const { assertInviteAge, AGE_REFUSALS } = require('./core/services/patient/inviteAge');
+ const { inviteOne } = require('./core/services/patient/inviteOne');
+ const { revokeLiveTokens } = require('./adminRevokeInvite');
+ const { reissuePreflight } = require('./core/services/patient/reissuePreflight');
+@@ -203,6 +204,7 @@ exports.adminBatchReissue = functions
+           }
+ 
+           try {
++            await assertInviteAge({ db, patientId: cand.elationPatientId });
+             // REVOKE then MINT — in that order, so a member never holds two
+             // live links. revokeLiveTokens marks every unused, unexpired
+             // claimTokens doc used+revoked. It does NOT touch the auth user:
+@@ -218,8 +220,8 @@ exports.adminBatchReissue = functions
+             reissued += 1;
+             reissuedIds.push(cand.elationPatientId);
+           } catch (e) {
+-            failed += 1;
+             const r = e.inviteReason || 'REISSUE_ERROR';
++            if (!AGE_REFUSALS.has(r)) failed += 1;
+             skippedByReason[r] = (skippedByReason[r] || 0) + 1;
+             logError('adminBatchReissue', 'member-failed', e, { elationPatientId: cand.elationPatientId });
+           }
+diff --git a/functions/adminIssueInvite.js b/functions/adminIssueInvite.js
+index 887d3b3..be1f016 100644
+--- a/functions/adminIssueInvite.js
++++ b/functions/adminIssueInvite.js
+@@ -18,6 +18,7 @@ const functions = require('firebase-functions');
+ const admin = require('firebase-admin');
+ const { log, logError } = require('./middleware/logger');
+ const { requireAdminCaller, selfAudience } = require('./middleware/requireAdminCaller');
++const { evaluateInviteAge, assertInviteAge, AGE_REFUSALS } = require('./core/services/patient/inviteAge');
+ const { issueClaimToken } = require('./core/services/patient/claimToken');
+ const { revokeLiveTokens } = require('./adminRevokeInvite');
+ const { markInvited } = require('./core/services/patient/markInvited');
+@@ -95,6 +96,13 @@ exports.adminIssueInvite = functions
+       return jsonError(res, 500, 'INTERNAL', 'ROSTER_READ_FAILED');
+     }
+ 
++    // Invite eligibility, before suppression/reset/revoke. Reset-only resume is not an invite.
++    if (body.resumeReset !== true) {
++      const age = evaluateInviteAge({ doc: patient });
++      if (!age.ok) return jsonError(res, 409, 'FAILED_PRECONDITION', age.reason,
++        age.reason === 'MINOR' ? 'Independent portal invitations are for adults age 18 and older.' : 'A valid date of birth is required before inviting.');
++    }
++
+     // #597 OPT-OUT GATE — before claim reset, revoke or mint. An address on
+     // emailSuppression (invite group unsubscribe, hard bounce, spam report)
+     // is never re-invited from the admin button. Fails closed.
+@@ -127,6 +135,8 @@ exports.adminIssueInvite = functions
+     if (patient.firebaseUid || patient.authUid || patient.accountReset?.state === 'running') {
+       if (!resetClaim) return jsonError(res, 409, 'ALREADY_EXISTS', 'ALREADY_CLAIMED', 'This member has already activated their portal account.');
+       if (!rosterEmail) return jsonError(res, 422, 'FAILED_PRECONDITION', 'NO_EMAIL_ON_ROSTER');
++      try { await assertInviteAge({ db: admin.firestore(), patientId: elationPatientId }); }
++      catch (e) { return jsonError(res, AGE_REFUSALS.has(e.inviteReason) ? 409 : 503, 'FAILED_PRECONDITION', e.inviteReason); }
+       try {
+         await resetPatientAccount({ db: admin.firestore(), auth: admin.auth(), FieldValue: admin.firestore.FieldValue,
+           patientId: elationPatientId, actor, reason });
+@@ -142,6 +152,8 @@ exports.adminIssueInvite = functions
+     if (!recipient) return jsonError(res, 422, 'FAILED_PRECONDITION', 'NO_EMAIL_ON_ROSTER');
+ 
+     if (reissue || resetClaim) {
++      try { await assertInviteAge({ db: admin.firestore(), patientId: elationPatientId }); }
++      catch (e) { return jsonError(res, AGE_REFUSALS.has(e.inviteReason) ? 409 : 503, 'FAILED_PRECONDITION', e.inviteReason); }
+       try {
+         await revokeLiveTokens(elationPatientId, actor, `reissue: ${reason}`);
+       } catch (e) {
+@@ -154,6 +166,7 @@ exports.adminIssueInvite = functions
+     try {
+       ({ rawToken } = await issueClaimToken(elationPatientId, 'existing'));
+     } catch (e) {
++      if (AGE_REFUSALS.has(e.inviteReason)) return jsonError(res, 409, 'FAILED_PRECONDITION', e.inviteReason);
+       if (e.code === 'LIVE_TOKEN_EXISTS') {
+         return jsonError(res, 409, 'ALREADY_EXISTS', 'LIVE_TOKEN_EXISTS',
+           'A live invitation link already exists for this member. Reissue to replace it.');
+@@ -165,6 +178,7 @@ exports.adminIssueInvite = functions
+     try {
+       await sendInviteEmail({ to: recipient, token: rawToken });
+     } catch (e) {
++      if (AGE_REFUSALS.has(e.inviteReason)) return jsonError(res, 409, 'FAILED_PRECONDITION', e.inviteReason);
+       logError('adminIssueInvite', 'send-failed', { elationPatientId, message: e.message });
+       // The token is live but undelivered. Revoke it so a half-sent invite
+       // never leaves a dangling claim link behind.
+diff --git a/functions/autoInviteTick.js b/functions/autoInviteTick.js
+index b624fc8..8d24d0e 100644
+--- a/functions/autoInviteTick.js
++++ b/functions/autoInviteTick.js
+@@ -47,6 +47,7 @@ const {
+   selectInviteCandidates,
+   invitedIdsFromAudit,
+ } = require('./core/services/patient/autoInvite');
++const { evaluateInviteAge, AGE_REFUSALS } = require('./core/services/patient/inviteAge');
+ const { inviteOne } = require('./core/services/patient/inviteOne');
+ // SHARED suppression source — written by the #362 / D-408 receiver, read here.
+ // Importing the common module (not the receiver) is what lets #362 deploy alone.
+@@ -430,6 +431,18 @@ async function runAutoInviteForPractice({
+       }
+       if (stats.sent >= cap) { stats.abortReason = 'CAP_REACHED'; break; }
+ 
++      let freshDoc;
++      try { freshDoc = (await db.collection('patients').doc(cand.elationPatientId).get()).data(); }
++      catch (_) {
++        stats.skippedAtSend.ROSTER_READ_FAILED = (stats.skippedAtSend.ROSTER_READ_FAILED || 0) + 1;
++        continue;
++      }
++      const freshAge = evaluateInviteAge({ doc: freshDoc });
++      if (!freshAge.ok) {
++        stats.skippedAtSend[freshAge.reason] = (stats.skippedAtSend[freshAge.reason] || 0) + 1;
++        continue;
++      }
++
+       let owned = false;
+       try {
+         owned = await claimForSend(db, cand.elationPatientId, nowMs);
+@@ -483,7 +496,9 @@ async function runAutoInviteForPractice({
+       } catch (e) {
+         const r = e.inviteReason || 'SEND_ERROR';
+         await markSendResult(db, cand.elationPatientId, false, r);
+-        if (r === 'LIVE_TOKEN_EXISTS') {
++        if (AGE_REFUSALS.has(r)) {
++          stats.skippedAtSend[r] = (stats.skippedAtSend[r] || 0) + 1;
++        } else if (r === 'LIVE_TOKEN_EXISTS') {
+           stats.skippedAtSend['live-token'] = (stats.skippedAtSend['live-token'] || 0) + 1;
+         } else {
+           stats.failed += 1;
+diff --git a/functions/claimAccount.js b/functions/claimAccount.js
+index 5503223..74d3ac2 100644
+--- a/functions/claimAccount.js
++++ b/functions/claimAccount.js
+@@ -53,6 +53,8 @@ const { acquireWork, prepareClaimAccount, reconciliation, markWorkUncertain, pat
+ 
+ const { reserveClaim, checkClaim, advanceClaim, releaseReservation, receiptMatches } = require('./core/services/patient/claimReservation');
+ 
++const { evaluateInviteAge } = require('./core/services/patient/inviteAge');
++
+ const DOB_RE = /^\d{4}-\d{2}-\d{2}$/;
+ const PW_MIN = 12;
+ const PW_MAX = 64;
+@@ -172,9 +174,9 @@ exports.claimAccount = functions.runWith({ timeoutSeconds: 180, memory: '512MB',
+   }
+ 
+   // 4) Fail closed if the roster doc has no DOB to second-factor against.
+-  if (!onFileDob) {
++  if (!onFileDob || !DOB_RE.test(onFileDob)) {
+     logError('claimAccount', 'dob-unavailable', new Error('no dob on roster doc'), { elationPatientId });
+-    return jsonError(res, 403, 'PERMISSION_DENIED', 'DOB_UNAVAILABLE', 'We cannot verify your identity right now. Contact the practice.');
++    return jsonError(res, 403, 'PERMISSION_DENIED', 'DOB_UNKNOWN', 'We cannot verify your identity right now. Contact the practice.');
+   }
+ 
+   // 5) DOB throttle — token-keyed (tokenId = sha256(rawToken)). Check BEFORE compare.
+@@ -233,6 +235,16 @@ exports.claimAccount = functions.runWith({ timeoutSeconds: 180, memory: '512MB',
+   try { await audit('claim_dob_verified'); }
+   catch (err) { logError('claimAccount', 'audit-failed', err, { elationPatientId }); return jsonError(res, 500, 'INTERNAL', 'LOG_WRITE_ERROR', 'Failed to write access log.'); }
+ 
++  // Age is a precondition only; the #619 C1/C2/lease implementation below is untouched.
++  let ageDoc;
++  try {
++    const latest = await admin.firestore().collection('patients').doc(elationPatientId).get();
++    ageDoc = latest.exists ? latest.data() : {};
++  } catch (_) { return jsonError(res, 503, 'UNAVAILABLE', 'DOB_UNKNOWN', 'We cannot verify your date of birth right now. Contact the practice.'); }
++  const claimAge = evaluateInviteAge({ doc: ageDoc });
++  if (!claimAge.ok) return jsonError(res, 403, 'PERMISSION_DENIED', claimAge.reason,
++    claimAge.reason === 'MINOR' ? 'Independent portal accounts are for adults age 18 and older. Contact the practice.' : 'We cannot verify your date of birth right now. Contact the practice.');
++
+   // #618: patient-ID creation provenance, not email-derived ownership or token reservation.
+   const FieldValue = admin.firestore.FieldValue;
+   let work;
+diff --git a/functions/core/services/email/sendInviteEmail.js b/functions/core/services/email/sendInviteEmail.js
+index 4cd9cc1..b895219 100644
+--- a/functions/core/services/email/sendInviteEmail.js
++++ b/functions/core/services/email/sendInviteEmail.js
+@@ -9,6 +9,8 @@
+ // in the link inside the message body.
+ 
+ const sgMail = require('@sendgrid/mail');
++const admin = require('firebase-admin');
++const { assertInviteTokenAge } = require('../patient/inviteAge');
+ const { SecretManagerServiceClient } = require('@google-cloud/secret-manager');
+ 
+ const PROJECT_ID = process.env.GCLOUD_PROJECT || 'prive-care-vip';
+@@ -89,6 +91,7 @@ async function sendInviteEmail({ to, token }) {
+   const groupId = inviteAsmGroupId();
+ 
+   await initSendgrid();
++  await assertInviteTokenAge({ db: admin.firestore(), token });
+   await sgMail.send({
+     to: recipient,
+     from: { email: 'health@primecarevip.com', name: 'Prime Care VIP' },
+diff --git a/functions/core/services/patient/autoInvite.js b/functions/core/services/patient/autoInvite.js
+index 4cf2653..bfce812 100644
+--- a/functions/core/services/patient/autoInvite.js
++++ b/functions/core/services/patient/autoInvite.js
+@@ -28,6 +28,7 @@
+ // per practice. One office being armed, halted or breaker-tripped cannot move
+ // another office's state.
+ 
++const { evaluateInviteAge } = require('./inviteAge');
+ const { classifyPatient, normalizeEmail } = require('./onboardingClassifier');
+ 
+ /** Hard ceilings the operator cannot exceed from Firestore config. */
+@@ -159,6 +160,9 @@ function evaluateAutoInviteCandidate({
+   // Classifier exclusions — deceased/inactive, minors, shared email, no email,
+   // already active, already invited, unknown status.
+   const { bucket, reason } = classifyPatient({ elation, doc, hasLiveToken, sharedEmail, now });
++  if (bucket === 'excluded_deceased_inactive') return { eligible: false, reason, email };
++  const age = evaluateInviteAge({ doc, nowMs: now.getTime() });
++  if (!age.ok) return { eligible: false, reason: age.reason, email };
+   if (bucket !== 'needs_access') return { eligible: false, reason, email };
+ 
+   // Belt and braces on top of the classifier — the never-invited pool only.
+diff --git a/functions/core/services/patient/batchInvite.js b/functions/core/services/patient/batchInvite.js
+index dff0f61..b1b81f4 100644
+--- a/functions/core/services/patient/batchInvite.js
++++ b/functions/core/services/patient/batchInvite.js
+@@ -16,6 +16,7 @@
+ //   * exclusions are re-evaluated per patient at send time from live data,
+ //     never trusted from a caller-supplied id list
+ 
++const { evaluateInviteAge } = require('./inviteAge');
+ const { classifyPatient } = require('./onboardingClassifier');
+ 
+ const DEFAULT_COHORT = 'never_invited';
+@@ -76,6 +77,9 @@ function evaluateCandidate({
+   if (!doc) return { eligible: false, reason: 'no-roster-doc', bucket: 'needs_access' };
+ 
+   const { bucket, reason } = classifyPatient({ elation, doc, hasLiveToken, sharedEmail, docReadFailed, now });
++  if (docReadFailed || bucket === 'excluded_deceased_inactive') return { eligible: false, reason, bucket };
++  const age = evaluateInviteAge({ doc, nowMs: now.getTime() });
++  if (!age.ok) return { eligible: false, reason: age.reason, bucket: age.reason === 'MINOR' ? 'excluded_minor' : 'needs_review' };
+ 
+   // Terminal / non-invitable buckets keep their classifier reason verbatim so
+   // the run report's skip breakdown lines up with the classifier report.
+diff --git a/functions/core/services/patient/batchReissue.js b/functions/core/services/patient/batchReissue.js
+index 27b2709..8bb7101 100644
+--- a/functions/core/services/patient/batchReissue.js
++++ b/functions/core/services/patient/batchReissue.js
+@@ -21,6 +21,8 @@
+ // default, confirm:true for live, soft cap + force, deploy-time env guard,
+ // fail-closed Firestore runtime kill switch re-read every loop iteration.
+ 
++const { evaluateInviteAge } = require('./inviteAge');
++
+ const SOFT_CAP = 50;
+ const MAX_LIST = 1000;
+ const ID_RE = /^[0-9]{5,32}$/;
+@@ -112,6 +114,9 @@ function rosterEmail(doc) {
+ function evaluateReissueCandidate({ doc }) {
+   if (!doc) return { eligible: false, reason: 'NO_ROSTER_DOC', recipient: '' };
+ 
++  const age = evaluateInviteAge({ doc });
++  if (!age.ok) return { eligible: false, reason: age.reason, recipient: '' };
++
+   if (doc.firebaseUid || doc.authUid) {
+     return { eligible: false, reason: 'ALREADY_CLAIMED', recipient: '' };
+   }
+diff --git a/functions/core/services/patient/claimToken.js b/functions/core/services/patient/claimToken.js
+index b553edb..d75c252 100644
+--- a/functions/core/services/patient/claimToken.js
++++ b/functions/core/services/patient/claimToken.js
+@@ -28,6 +28,7 @@ const crypto = require('crypto');
+ const admin = require('firebase-admin');
+ 
+ const COLLECTION = 'claimTokens';
++const { requireInviteAge } = require('./inviteAge');
+ 
+ // Derive the doc id / throttle key from the raw token. Hex output is already
+ // lowercase, so it passes through the shared dobThrottle key-lowercasing with
+@@ -59,6 +60,8 @@ async function issueClaimToken(elationPatientId, cohort) {
+   // index needed) read and the mint .set() happen atomically, so two concurrent
+   // runs cannot both pass the guard and both mint a live token for this patient.
+   await admin.firestore().runTransaction(async (tx) => {
++    const patient = await tx.get(admin.firestore().collection('patients').doc(pid));
++    requireInviteAge(patient.exists ? patient.data() : null);
+     const existing = await tx.get(
+       admin.firestore().collection(COLLECTION).where('elationPatientId', '==', pid)
+     );
+diff --git a/functions/core/services/patient/inviteAge.js b/functions/core/services/patient/inviteAge.js
+new file mode 100644
+index 0000000..236b57c
+--- /dev/null
++++ b/functions/core/services/patient/inviteAge.js
+@@ -0,0 +1,34 @@
++// Invite/claim eligibility only. #615 is the one calendar-age implementation.
++const { createHash } = require('node:crypto');
++const { evaluateDiscoveryAge } = require('./rosterDiscovery');
++const AGE_REFUSALS = new Set(['MINOR', 'DOB_UNKNOWN']);
++function evaluateInviteAge({ doc, nowMs = Date.now() } = {}) {
++  if (!doc) return { ok: false, reason: 'NO_ROSTER_DOC' };
++  if (doc.dependent?.isMinor === true) return { ok: false, reason: 'MINOR' };
++  const age = evaluateDiscoveryAge({ dob: doc.dob, nowMs });
++  return age;
++}
++function ageError(reason) {
++  return Object.assign(new Error(reason), { code: reason, inviteReason: reason });
++}
++function requireInviteAge(doc, nowMs = Date.now()) {
++  const result = evaluateInviteAge({ doc, nowMs });
++  if (!result.ok) throw ageError(result.reason);
++  return result;
++}
++async function assertInviteAge({ db, patientId }) {
++  let snap;
++  try { snap = await db.collection('patients').doc(String(patientId)).get(); }
++  catch (_) { throw ageError('ROSTER_READ_FAILED'); }
++  return requireInviteAge(snap.exists ? snap.data() : null);
++}
++async function assertInviteTokenAge({ db, token }) {
++  const id = createHash('sha256').update(String(token)).digest('hex');
++  let snap;
++  try { snap = await db.collection('claimTokens').doc(id).get(); }
++  catch (_) { throw ageError('INVITE_TOKEN_UNREADABLE'); }
++  const pid = snap.exists && snap.get('elationPatientId');
++  if (!pid) throw ageError('INVITE_TOKEN_UNREADABLE');
++  return assertInviteAge({ db, patientId: pid });
++}
++module.exports = { evaluateInviteAge, requireInviteAge, assertInviteAge, assertInviteTokenAge, AGE_REFUSALS };
+diff --git a/functions/core/services/patient/inviteOne.js b/functions/core/services/patient/inviteOne.js
+index 8a73e17..2bfcd01 100644
+--- a/functions/core/services/patient/inviteOne.js
++++ b/functions/core/services/patient/inviteOne.js
+@@ -18,6 +18,7 @@ const { issueClaimToken } = require('./claimToken');
+ const { sendInviteEmail } = require('../email/sendInviteEmail');
+ const { revokeLiveTokens } = require('../../../adminRevokeInvite');
+ const { markInvited } = require('./markInvited');
++const { assertInviteAge, AGE_REFUSALS } = require('./inviteAge');
+ const { isInviteSuppressed } = require('../email/suppression');
+ 
+ /** Typed failure so callers can map to the existing reason strings. */
+@@ -61,6 +62,7 @@ async function inviteOne({
+   const pid = String(elationPatientId || '').trim();
+   const to = String(recipient || '').trim();
+   if (!pid) throw inviteError('PATIENT_ID_REQUIRED');
++  await assertInviteAge({ db: admin.firestore(), patientId: pid });
+   if (!to) throw inviteError('NO_EMAIL_ON_ROSTER');
+ 
+   // SUPPRESSION CHECK — before any mint. Fails closed: if the suppression row
+@@ -77,6 +79,7 @@ async function inviteOne({
+   try {
+     ({ rawToken } = await issueClaimToken(pid, cohort));
+   } catch (e) {
++    if (AGE_REFUSALS.has(e.inviteReason) || e.inviteReason === 'NO_ROSTER_DOC') throw e;
+     if (e.code === 'LIVE_TOKEN_EXISTS') throw inviteError('LIVE_TOKEN_EXISTS');
+     logError('inviteOne', 'mint-failed', { elationPatientId: pid, message: e.message });
+     throw inviteError('MINT_FAILED');
+@@ -85,6 +88,7 @@ async function inviteOne({
+   try {
+     await sendInviteEmail({ to, token: rawToken });
+   } catch (e) {
++    if (AGE_REFUSALS.has(e.inviteReason)) throw e;
+     logError('inviteOne', 'send-failed', { elationPatientId: pid, message: e.message });
+     try { await revokeLiveTokens(pid, actor, 'send failed'); } catch (_) { /* noop */ }
+     await writeAudit({ action: 'invite_send_failed', elationPatientId: pid, actor, reason, sentTo: to, ok: false });
+diff --git a/functions/core/services/patient/onboardingClassifier.js b/functions/core/services/patient/onboardingClassifier.js
+index fe6edd2..bc74787 100644
+--- a/functions/core/services/patient/onboardingClassifier.js
++++ b/functions/core/services/patient/onboardingClassifier.js
+@@ -19,23 +19,7 @@ const BUCKETS = [
+   'needs_review',
+ ];
+ 
+-/** Age in whole years from an ISO-ish dob string, or null when unknown. */
+-function ageFromDob(dob, now = new Date()) {
+-  if (!dob) return null;
+-  const s = String(dob).trim();
+-  const m = s.match(/^(\d{4})-(\d{2})-(\d{2})/);
+-  if (!m) return null;
+-  const y = Number(m[1]);
+-  const mo = Number(m[2]);
+-  const d = Number(m[3]);
+-  if (!y || !mo || !d || mo > 12 || d > 31) return null;
+-  let age = now.getUTCFullYear() - y;
+-  const beforeBirthday =
+-    now.getUTCMonth() + 1 < mo || (now.getUTCMonth() + 1 === mo && now.getUTCDate() < d);
+-  if (beforeBirthday) age -= 1;
+-  if (age < 0 || age > 130) return null;
+-  return age;
+-}
++const { evaluateDiscoveryAge } = require('./rosterDiscovery');
+ 
+ // Chart-email helpers come from the ONE shared module (D-406 amendment).
+ const { normalizeEmail, elationEmail } = require('../email/chartEmail');
+@@ -74,9 +58,9 @@ function classifyPatient({ elation, doc, hasLiveToken = false, sharedEmail = fal
+     return { bucket: 'excluded_minor', reason: 'dependent-isMinor' };
+   }
+   const dob = (doc && doc.dob) || (elation && elation.dob) || null;
+-  const age = ageFromDob(dob, now);
+-  if (age === null) return { bucket: 'needs_review', reason: 'dob-unknown' };
+-  if (age < 18) return { bucket: 'excluded_minor', reason: 'age-under-18' };
++  const age = evaluateDiscoveryAge({ dob, nowMs: now.getTime() });
++  if (age.reason === 'DOB_UNKNOWN') return { bucket: 'needs_review', reason: 'dob-unknown' };
++  if (age.reason === 'MINOR') return { bucket: 'excluded_minor', reason: 'age-under-18' };
+ 
+   // 3. Claim state.
+   const claimed = Boolean(doc && (doc.firebaseUid || doc.authUid));
+@@ -121,4 +105,4 @@ function buildSharedEmailSet(entries) {
+   return shared;
+ }
+ 
+-module.exports = { BUCKETS, classifyPatient, buildSharedEmailSet, ageFromDob, normalizeEmail, elationEmail };
++module.exports = { BUCKETS, classifyPatient, buildSharedEmailSet, normalizeEmail, elationEmail };
+diff --git a/functions/dependentBirthdaySweep.js b/functions/dependentBirthdaySweep.js
+index 105f8e9..d8f3e66 100644
+--- a/functions/dependentBirthdaySweep.js
++++ b/functions/dependentBirthdaySweep.js
+@@ -82,6 +82,7 @@ async function convertOne(doc, now) {
+         }
+       }
+     } catch (e) {
++      if (e.inviteReason) inviteSkipped = e.inviteReason;
+       // A failed invite must not roll back the consent change: the guardian's
+       // proxy being paused is the security-relevant half.
+       logError('dependentBirthdaySweep', 'invite-failed', { id: doc.id, message: e.message });
+diff --git a/functions/test/unit/auto-invite-d407.test.cjs b/functions/test/unit/auto-invite-d407.test.cjs
+index 0b3b13c..1941cd4 100644
+--- a/functions/test/unit/auto-invite-d407.test.cjs
++++ b/functions/test/unit/auto-invite-d407.test.cjs
+@@ -156,11 +156,11 @@ t('deceased / inactive excluded', () => {
+   assert.strictEqual(ex({ elationStatus: 'Inactive' }).eligible, false);
+ });
+ t('minors excluded — flag and age', () => {
+-  assert.strictEqual(ex({ dependent: { isMinor: true } }).reason, 'dependent-isMinor');
+-  assert.strictEqual(ex({ dob: '2015-01-01' }).reason, 'age-under-18');
++  assert.strictEqual(ex({ dependent: { isMinor: true } }).reason, 'MINOR');
++  assert.strictEqual(ex({ dob: '2015-01-01' }).reason, 'MINOR');
+ });
+ t('unknown dob excluded (ambiguity never sends)', () => {
+-  assert.strictEqual(ex({ dob: null }).reason, 'dob-unknown');
++  assert.strictEqual(ex({ dob: null }).reason, 'DOB_UNKNOWN');
+ });
+ t('shared email excluded', () => {
+   assert.strictEqual(ex({}, { sharedEmail: true }).reason, 'email-on-multiple-records');
+@@ -373,7 +373,7 @@ chain = chain.then(() => t('dry run reports who would be invited and sends nothi
+   assert.strictEqual(stats.wouldSend, 2);
+   assert.strictEqual(sent.length, 0);
+   assert.strictEqual(db.state.writes.length, 0, 'a dry run writes nothing');
+-  assert.strictEqual(stats.skippedByReason['age-under-18'], 1);
++  assert.strictEqual(stats.skippedByReason['MINOR'], 1);
+ }));
+ 
+ chain = chain.then(() => t('live but capless => report-only, still no send', async () => {
+diff --git a/functions/test/unit/batch-reissue-d321.test.cjs b/functions/test/unit/batch-reissue-d321.test.cjs
+index 185d12c..698d45d 100644
+--- a/functions/test/unit/batch-reissue-d321.test.cjs
++++ b/functions/test/unit/batch-reissue-d321.test.cjs
+@@ -84,24 +84,24 @@ t('missing roster doc is NO_ROSTER_DOC (D-316 precondition)', () => {
+   assert.strictEqual(evaluateReissueCandidate({ doc: null }).reason, 'NO_ROSTER_DOC');
+ });
+ t('a bound firebaseUid is ALREADY_CLAIMED', () => {
+-  const v = evaluateReissueCandidate({ doc: { email: 'a@b.com', firebaseUid: 'uid1' } });
++  const v = evaluateReissueCandidate({ doc: { dob: '1980-02-28', email: 'a@b.com', firebaseUid: 'uid1' } });
+   assert.deepStrictEqual([v.eligible, v.reason], [false, 'ALREADY_CLAIMED']);
+ });
+ t('a legacy authUid is ALREADY_CLAIMED too', () => {
+-  assert.strictEqual(evaluateReissueCandidate({ doc: { email: 'a@b.com', authUid: 'uid1' } }).reason, 'ALREADY_CLAIMED');
++  assert.strictEqual(evaluateReissueCandidate({ doc: { dob: '1980-02-28', email: 'a@b.com', authUid: 'uid1' } }).reason, 'ALREADY_CLAIMED');
+ });
+ t('roster status active is ALREADY_CLAIMED even with no uid', () => {
+-  assert.strictEqual(evaluateReissueCandidate({ doc: { email: 'a@b.com', status: 'Active' } }).reason, 'ALREADY_CLAIMED');
++  assert.strictEqual(evaluateReissueCandidate({ doc: { dob: '1980-02-28', email: 'a@b.com', status: 'Active' } }).reason, 'ALREADY_CLAIMED');
+ });
+ t('no roster email is NO_EMAIL', () => {
+-  assert.strictEqual(evaluateReissueCandidate({ doc: { status: 'invited', email: '  ' } }).reason, 'NO_EMAIL');
++  assert.strictEqual(evaluateReissueCandidate({ doc: { dob: '1980-02-28', status: 'invited', email: '  ' } }).reason, 'NO_EMAIL');
+ });
+ t('an unclaimed invited member with an email is eligible, recipient normalized', () => {
+-  const v = evaluateReissueCandidate({ doc: { status: 'invited', email: '  Kelly@AOL.com ' } });
++  const v = evaluateReissueCandidate({ doc: { dob: '1980-02-28', status: 'invited', email: '  Kelly@AOL.com ' } });
+   assert.deepStrictEqual([v.eligible, v.recipient], [true, 'kelly@aol.com']);
+ });
+ t('holding a live token is NOT a skip reason here — it is the point', () => {
+-  const v = evaluateReissueCandidate({ doc: { status: 'invited', email: 'a@b.com', hasLiveToken: true } });
++  const v = evaluateReissueCandidate({ doc: { dob: '1980-02-28', status: 'invited', email: 'a@b.com', hasLiveToken: true } });
+   assert.strictEqual(v.eligible, true);
+ });
+ 
+diff --git a/functions/test/unit/batch-reissue-guards.emulator.test.cjs b/functions/test/unit/batch-reissue-guards.emulator.test.cjs
+index 08ea598..043cf32 100644
+--- a/functions/test/unit/batch-reissue-guards.emulator.test.cjs
++++ b/functions/test/unit/batch-reissue-guards.emulator.test.cjs
+@@ -60,7 +60,7 @@ async function fixture({ suppressed = false, age = 1, expired = false, bound = f
+     const b = db.batch(); rows.docs.forEach(d => b.delete(d.ref)); if (rows.size) await b.commit();
+   }
+   await db.doc('config/batchReissue').set({ enabled: true, ...(cooldown === undefined ? {} : { recentInviteCooldownHours: cooldown }) });
+-  await db.doc('patients/900001').set({ email: 'synthetic@example.invalid', status,
++  await db.doc('patients/900001').set({ dob: '1980-02-28', email: 'synthetic@example.invalid', status,
+     ...(bound ? { authUid: 'synthetic-patient' } : {}) });
+   if (!noToken) await db.doc('claimTokens/original').set(token('900001', age, expired));
+   if (suppressed) await db.doc('emailSuppression/synthetic@example.invalid').set({ reason: 'group_unsubscribe' });
+diff --git a/functions/test/unit/invite-age.emulator.test.cjs b/functions/test/unit/invite-age.emulator.test.cjs
+new file mode 100644
+index 0000000..2570e44
+--- /dev/null
++++ b/functions/test/unit/invite-age.emulator.test.cjs
+@@ -0,0 +1,152 @@
++// All transports synthetic; real isolated Auth/Firestore and real handlers.
++const { test, before, after } = require('node:test');
++const assert = require('node:assert/strict');
++const crypto = require('node:crypto');
++const Module = require('node:module');
++const fs = require('node:fs');
++const os = require('node:os');
++const path = require('node:path');
++const { spawnSync } = require('node:child_process');
++const admin = require('firebase-admin');
++const PROJECT='demo-portal-claim-hydration', PID='1455085200211969', EMAIL='agecheck@example.invalid', PW='StrongSyntheticPass1234';
++let db, auth, FV, claim, manual, batch, catchup, auto, birthday, writer, invite, mail, sends=0, afterMint, atAddress, afterSuppression;
++const stamp=ms=>admin.firestore.Timestamp.fromMillis(ms);
++before(()=>{
++ assert.equal(process.env.GCLOUD_PROJECT,PROJECT);assert.ok(process.env.FIRESTORE_EMULATOR_HOST);assert.ok(process.env.FIREBASE_AUTH_EMULATOR_HOST);
++ process.env.BATCH_REISSUE_ENABLED='true';process.env.BATCH_REISSUE_PACE_MS='1';process.env.BATCH_INVITE_ENABLED='true';process.env.BATCH_INVITE_PACE_MS='1';process.env.AUTOSEND_ENABLED='true';process.env.SENDGRID_PORTAL_INVITE_ASM_GROUP_ID='36716';
++ admin.initializeApp({projectId:PROJECT});db=admin.firestore();auth=admin.auth();FV=admin.firestore.FieldValue;
++ const load=Module._load;
++ Module._load=function(name,parent,...rest){
++  if(name.includes('middleware/requireAdminCaller'))return {requireAdminCaller:async()=>({ok:true}),selfAudience:()=> 'synthetic'};
++  if(name.endsWith('/middleware/verifyAuth'))return {verifyAuth:async()=>({uid:'synthetic-admin',role:'super_admin'}),requireRole:()=>{}};
++  if(name==='@sendgrid/mail')return {setApiKey(){},send:async()=>{sends++;return [{statusCode:202}];}};
++  if(name==='@google-cloud/secret-manager')return {SecretManagerServiceClient:class{async accessSecretVersion(){return [{payload:{data:Buffer.from('synthetic-only')}}];}}};
++  if(name==='./core/services/patient/postClaim')return {runPostClaimSteps:async()=>{}};
++  if(name==='./core/services/elation/rosterFetch')return {ELATION_BASE_URL:'synthetic',getElationToken:async()=> 'synthetic',fetchAllPatients:async()=> (await db.collection('patients').get()).docs.map(d=>({id:d.id,dob:d.get('dob'),emails:[{email:EMAIL}]}))};
++  const real=load.call(this,name,parent,...rest);
++  if(name.endsWith('/email/suppression'))return {...real,isInviteSuppressed:async(...args)=>{const value=await real.isInviteSuppressed(...args);if(afterSuppression)await afterSuppression();return value;}};
++  if(name.endsWith('/patient/claimToken') || name==='./claimToken')return {...real,issueClaimToken:async(...args)=>{const t=await real.issueClaimToken(...args);if(afterMint)await afterMint();return t;}};
++  if(name.endsWith('/patient/memberSafeguards'))return {...real,evaluateSendAddress:async()=>{if(atAddress)await atAddress();return {ok:true};},firestoreDeps:()=>({})};
++  return real;
++ };
++ try{
++  claim=require('../../claimAccount').claimAccount;manual=require('../../adminIssueInvite').adminIssueInvite;batch=require('../../adminBatchReissue').adminBatchReissue;catchup=require('../../adminBatchInvite').adminBatchInvite;
++  auto=require('../../autoInviteTick').runAutoInviteForPractice;birthday=require('../../dependentBirthdaySweep').runSweep;
++  writer=require('../../core/services/patient/claimToken');invite=require('../../core/services/patient/inviteOne').inviteOne;mail=require('../../core/services/email/sendInviteEmail').sendInviteEmail;
++ }finally{Module._load=load;}
++});
++after(async()=>{await db.terminate();await Promise.all(admin.apps.map(a=>a.delete()));});
++async function clear(){
++ for(const c of ['patients','claimTokens','phi_access_log','dobVerifyThrottle','portalAdminAudit','portalAccountReconciliation','claim_hydration_jobs','hydration_runs','emailSuppression','socialClaimLocks','emailEvents','portalAlerts']){
++  const rows=await db.collection(c).get();for(const d of rows.docs)await d.ref.delete();
++ }
++ for(const u of (await auth.listUsers()).users)await auth.deleteUser(u.uid);
++ await db.doc('config/batchReissue').set({enabled:true});await db.doc('config/batchInvite').set({enabled:true});
++ sends=0;afterMint=null;atAddress=null;afterSuppression=null;
++}
++async function patient(over={}){await db.doc('patients/'+PID).set({dob:'2026-01-04',email:EMAIL,status:'not_invited',elationPatientId:PID,...over});}
++async function legacy(){const raw=crypto.randomBytes(32).toString('base64url');await db.doc('claimTokens/'+writer.hashToken(raw)).set({elationPatientId:PID,cohort:'existing',createdAt:stamp(Date.now()-100*3600000),expiresAt:stamp(Date.now()+3600000),usedAt:null});return raw;}
++async function run(handler,body){let code,value;const res={set(){return this;},status(v){code=v;return this;},json(v){value=v;return this;},send(){return this;}};await handler({method:'POST',headers:{},body},res);return {code,value};}
++const runClaim=(token,dob)=>run(claim,{token,password:PW,dob});
++async function noAccount(raw){const p=(await db.doc('patients/'+PID).get()).data();assert.equal(p.accountWork,undefined);assert.equal(p.claimAccountIntent,undefined);assert.equal(p.firebaseUid,undefined);assert.equal(p.authUid,undefined);assert.equal((await auth.listUsers()).users.length,0);assert.equal((await db.collection('claim_hydration_jobs').get()).size,0);assert.equal(sends,0);if(raw){const t=(await db.doc('claimTokens/'+writer.hashToken(raw)).get()).data();assert.equal(t.usedAt,null);assert.equal(t.reservation,undefined);}}
++for(const [label,email] of [['unique',EMAIL],['shared','shared@example.invalid'],['none',null]]){
++ test('shared writer and inviteOne refuse Rhodes minor with '+label+' email before mint',async()=>{
++  await clear();await patient({email});if(label==='shared')await db.doc('patients/920999').set({dob:'1980-02-28',email});
++  await assert.rejects(writer.issueClaimToken(PID,'existing'),e=>e.inviteReason==='MINOR');await assert.rejects(invite({elationPatientId:PID,recipient:email,actor:'synthetic'}),e=>e.inviteReason==='MINOR');assert.equal((await db.collection('claimTokens').get()).size,0);assert.equal(sends,0);
++ });
++ test('manual '+label+' email minor refuses reset-and-reissue without touching account/token',async()=>{
++  await clear();await patient({email,authUid:'ExactExistingAccountUID',firebaseUid:'exactexistingaccountuid'});await auth.createUser({uid:'ExactExistingAccountUID',email:EMAIL,password:PW});const raw=await legacy();const before=(await db.doc('patients/'+PID).get()).data(),t=(await db.doc('claimTokens/'+writer.hashToken(raw)).get()).data();
++  const r=await run(manual,{elationPatientId:PID,actor:'synthetic',reissue:true,resetClaim:true});assert.equal(r.code,409);assert.equal(r.value.error.details.reason,'MINOR');assert.deepEqual((await db.doc('patients/'+PID).get()).data(),before);assert.deepEqual((await db.doc('claimTokens/'+writer.hashToken(raw)).get()).data(),t);assert.equal((await auth.getUser('ExactExistingAccountUID')).disabled,false);assert.equal(sends,0);
++ });
++ test('pre-existing token claim '+label+' email minor refuses before C1',async()=>{
++  await clear();await patient({email});const raw=await legacy();const r=await runClaim(raw,'2026-01-04');assert.equal(r.code,403);assert.equal(r.value.error.details.reason,'MINOR');await noAccount(raw);
++ });
++}
++for(const dob of [null,'','bad','1980-02-31','2101-01-01','2099-02-28']){
++ test('unknown DOB '+String(dob)+' blocks mint, send, manual and legacy claim',async()=>{
++  await clear();await patient({dob});const raw=await legacy();await assert.rejects(writer.issueClaimToken(PID,'existing'),e=>e.inviteReason==='DOB_UNKNOWN');await assert.rejects(mail({to:EMAIL,token:raw}),e=>e.inviteReason==='DOB_UNKNOWN');
++  const m=await run(manual,{elationPatientId:PID,actor:'synthetic',reissue:true});assert.equal(m.code,409);assert.equal(m.value.error.details.reason,'DOB_UNKNOWN');const c=await runClaim(raw,dob||'1980-02-28');assert.equal(c.code,403);assert.equal(c.value.error.details.reason,'DOB_UNKNOWN');await noAccount(raw);assert.equal((await db.collection('claimTokens').get()).size,1);
++ });
++}
++test('wrong DOB keeps existing throttle/mismatch contract before minor disclosure',async()=>{
++ await clear();await patient();const raw=await legacy();const r=await runClaim(raw,'1980-02-28');assert.equal(r.code,403);assert.equal(r.value.error.details.reason,'DOB_MISMATCH');await noAccount(raw);
++});
++test('adult original claim still exchanges a real emulator custom token for exact UID',async()=>{
++ await clear();await patient({dob:'1980-02-28'});const raw=(await writer.issueClaimToken(PID,'existing')).rawToken;const r=await runClaim(raw,'1980-02-28');assert.equal(r.code,200);assert.ok(r.value.loginToken);
++ const response=await fetch('http://'+process.env.FIREBASE_AUTH_EMULATOR_HOST+'/identitytoolkit.googleapis.com/v1/accounts:signInWithCustomToken?key=synthetic',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({token:r.value.loginToken,returnSecureToken:true})});assert.equal(response.status,200);const s=await response.json();assert.equal(JSON.parse(Buffer.from(s.idToken.split('.')[1],'base64url').toString()).user_id,(await db.doc('patients/'+PID).get()).get('authUid'));
++});
++for(const dob of ['2026-01-04',null])for(const first of [false,true])test('batch '+(first?'new_invite':'reissue')+' '+String(dob)+' is canonical skip, no revoke/cap/failure',async()=>{
++ await clear();await patient({dob});const raw=first?null:await legacy();const t=raw?(await db.doc('claimTokens/'+writer.hashToken(raw)).get()).data():null;
++ const r=await run(batch,{patientIds:[PID],...(first?{newInvitePatientIds:[PID]}:{}),cap:1,dryRun:false,confirm:true,force:true,actor:'synthetic'});assert.equal(r.code,200);assert.equal(r.value.skippedByReason[dob?'MINOR':'DOB_UNKNOWN'],1);assert.equal(r.value.reissued,0);assert.equal(r.value.failed,0);assert.equal(r.value.eligible,0);assert.equal(sends,0);if(raw)assert.deepEqual((await db.doc('claimTokens/'+writer.hashToken(raw)).get()).data(),t);
++});
++test('batch catch-up minor and unknown are counted exclusions, adult still sends',async()=>{
++ await clear();await patient();let r=await run(catchup,{cap:1,dryRun:false,confirm:true,actor:'synthetic'});assert.equal(r.value.skippedByReason.MINOR,1);assert.equal(r.value.sent,0);assert.equal(sends,0);
++ await patient({dob:null});r=await run(catchup,{cap:1,dryRun:false,confirm:true,actor:'synthetic'});assert.equal(r.value.skippedByReason.DOB_UNKNOWN,1);
++ await patient({dob:'1980-02-28'});r=await run(catchup,{cap:1,dryRun:false,confirm:true,actor:'synthetic'});assert.equal(r.value.sent,1);assert.equal(sends,1);
++});
++test('adult reissue preserves suppression-before-cooldown and shared helper',async()=>{
++ await clear();await patient({dob:'1980-02-28'});const raw=await legacy();await db.doc('emailSuppression/'+EMAIL).set({reason:'group_unsubscribe'});let r=await run(batch,{patientIds:[PID],cap:1,dryRun:false,confirm:true,force:true,actor:'synthetic'});assert.equal(r.value.skippedByReason.SUPPRESSED_SKIPPED,1);assert.equal((await db.doc('claimTokens/'+writer.hashToken(raw)).get()).get('usedAt'),null);
++ await db.doc('emailSuppression/'+EMAIL).delete();r=await run(batch,{patientIds:[PID],cap:1,dryRun:false,confirm:true,actor:'synthetic'});assert.equal(r.value.reissued,1);assert.equal(sends,1);
++});
++test('DOB corrected after mint cannot pass the actual shared email transport gate',async()=>{
++ await clear();await patient({dob:'1980-02-28'});afterMint=()=>db.doc('patients/'+PID).update({dob:'2026-01-04'});await assert.rejects(invite({elationPatientId:PID,recipient:EMAIL,actor:'synthetic'}),e=>e.inviteReason==='MINOR');assert.equal(sends,0);assert.equal((await db.collection('claimTokens').get()).size,1);
++});
++test('read failure/missing token is fail-closed before actual transport',async()=>{
++ await clear();await patient({dob:'1980-02-28'});await assert.rejects(mail({to:EMAIL,token:'no-such-token'}),e=>e.inviteReason==='INVITE_TOKEN_UNREADABLE');assert.equal(sends,0);
++});
++async function runAuto(){
++ const config=require('../../core/services/patient/autoInvite').configPath('P1'),cursor=require('../../core/services/patient/rosterDiscovery').cursorPath('P1');
++ await db.doc(config).set({enabled:true,dryRun:false,cap:1,scope:'all',paceMs:250});await db.doc(cursor).set({liveRunCount:5});await db.collection('emailEvents').add({receivedAtMs:Date.now()});
++ return auto({db,practiceId:'P1',context:{liveTokenIds:new Set(),invitedIds:new Set(),sharedEmails:new Set(),suppression:{ok:true,emails:new Set()}}});
++}
++test('auto minor/unknown skip does not increment failures or create sending marker',async()=>{
++ await clear();await patient();let r=await runAuto();assert.equal(r.skippedByReason.MINOR,1);assert.equal(r.sent,0);assert.equal(r.failed,0);assert.equal((await db.doc('patients/'+PID).get()).get('autoInvite'),undefined);
++ await patient({dob:null});r=await runAuto();assert.equal(r.skippedByReason.DOB_UNKNOWN,1);assert.equal(sends,0);
++});
++test('late auto age refusal settles owned marker, no failure/auto-stop; corrected adult retries',async()=>{
++ await clear();await patient({dob:'1980-02-28'});atAddress=()=>db.doc('patients/'+PID).update({dob:'2026-01-04'});let r=await runAuto();assert.equal(r.sent,0);assert.equal(r.failed,0);assert.equal(r.skippedAtSend.MINOR,1);assert.equal(r.aborted,false);assert.equal((await db.doc('patients/'+PID).get()).get('autoInvite.state'),'failed');
++ atAddress=null;await db.doc('patients/'+PID).update({dob:'1980-02-28'});r=await runAuto();assert.equal(r.sent,1);assert.equal(r.failed,0);assert.equal(sends,1);
++});
++test('birthday conversion remains intact but direct mint refuses conflicting minor roster DOB',async()=>{
++ await clear();await patient({dependent:{dob:'1980-02-28',isMinor:true,convertsAt:stamp(1)},guardians:[{status:'active',uid:'GuardianUID'}]});const r=await birthday(new Date());assert.equal(r.converted,1);assert.equal(r.invited,0);assert.equal(sends,0);assert.equal((await db.doc('patients/'+PID).get()).get('guardians')[0].status,'pending_adult_consent');assert.equal((await db.collection('portalAdminAudit').get()).docs[0].get('inviteSkipped'),'MINOR');
++});
++function cli(change=false){
++ const dir=fs.mkdtempSync(path.join(os.tmpdir(),'age-cli-'));const preload=path.join(dir,'adapters.cjs');
++ fs.writeFileSync(preload,`const M=require('node:module'),load=M._load;M._load=function(n,p,...r){if(n==='@sendgrid/mail')return{setApiKey(){},send:async()=>{console.log('SYNTHETIC_EMAIL_ACCEPTED');return[{statusCode:202}]}};if(n==='@google-cloud/secret-manager')return{SecretManagerServiceClient:class{async accessSecretVersion(){return[{payload:{data:Buffer.from('synthetic-only')}}]}}};const x=load.call(this,n,p,...r);if(${change}&&n.includes('patient/claimToken'))return{...x,issueClaimToken:async(...a)=>{const t=await x.issueClaimToken(...a);await require('firebase-admin').firestore().doc('patients/${PID}').update({dob:'2026-01-04'});return t}};return x;};`);
++ const root=path.resolve(__dirname,'../../..');const env={PATH:process.env.PATH,NODE_PATH:path.join(root,'functions/node_modules')+':'+(process.env.NODE_PATH||''),GCLOUD_PROJECT:PROJECT,FIREBASE_PROJECT_ID:PROJECT,FIRESTORE_EMULATOR_HOST:process.env.FIRESTORE_EMULATOR_HOST,FIREBASE_AUTH_EMULATOR_HOST:process.env.FIREBASE_AUTH_EMULATOR_HOST};
++ try{return spawnSync(process.execPath,['--require',preload,path.join(root,'scripts/issueInvites.cjs'),'--sandbox','--limit=1'],{env,encoding:'utf8',timeout:30000});}finally{fs.rmSync(dir,{recursive:true,force:true});}
++}
++for(const dob of ['2026-01-04',null,'1980-02-28'])test('CLI sandbox uses shared gate for '+String(dob),async()=>{
++ await clear();await patient({dob,status:'invited'});const r=cli();assert.equal(r.status,0,r.stderr);assert.equal(r.stdout.includes('SYNTHETIC_EMAIL_ACCEPTED'),dob==='1980-02-28');assert.equal((await db.collection('claimTokens').get()).size,dob==='1980-02-28'?1:0);
++});
++test('CLI direct transport refuses DOB correction after adult mint',async()=>{
++ await clear();await patient({dob:'1980-02-28',status:'invited'});const r=cli(true);assert.equal(r.status,0,r.stderr);assert.equal(r.stdout.includes('SYNTHETIC_EMAIL_ACCEPTED'),false);assert.equal((await db.collection('claimTokens').get()).size,1);
++});
++
++for(const reset of [false,true])test('DOB correction during manual suppression prevents '+(reset?'reset':'revoke'),async()=>{
++ await clear();await patient({dob:'1980-02-28',...(reset?{authUid:'ExactExistingAccountUID',firebaseUid:'exactexistingaccountuid'}:{})});if(reset)await auth.createUser({uid:'ExactExistingAccountUID',email:EMAIL,password:PW});const raw=await legacy();
++ afterSuppression=()=>db.doc('patients/'+PID).update({dob:'2026-01-04'});const r=await run(manual,{elationPatientId:PID,actor:'synthetic',reissue:true,resetClaim:reset});
++ assert.equal(r.code,409);assert.equal(r.value.error.details.reason,'MINOR');assert.equal((await db.doc('claimTokens/'+writer.hashToken(raw)).get()).get('usedAt'),null);assert.equal((await db.doc('patients/'+PID).get()).get('accountReset'),undefined);if(reset)assert.equal((await auth.getUser('ExactExistingAccountUID')).disabled,false);assert.equal(sends,0);
++});
++test('DOB correction during final batch preflight preserves existing token',async()=>{
++ await clear();await patient({dob:'1980-02-28'});const raw=await legacy();let calls=0;afterSuppression=async()=>{if(++calls===2)await db.doc('patients/'+PID).update({dob:'2026-01-04'});};const r=await run(batch,{patientIds:[PID],cap:1,dryRun:false,confirm:true,actor:'synthetic'});
++ assert.equal(r.value.skippedByReason.MINOR,1);assert.equal(r.value.failed,0);assert.equal((await db.doc('claimTokens/'+writer.hashToken(raw)).get()).get('usedAt'),null);assert.equal(sends,0);
++});
++test('DOB correction during claim verified audit is refused before C1',async()=>{
++ await clear();await patient({dob:'1980-02-28'});const raw=await legacy();const original=db.collection.bind(db);db.collection=function(n){const ref=original(n);if(n==='phi_access_log'){const add=ref.add.bind(ref);ref.add=async data=>{const result=await add(data);if(JSON.stringify(data).includes('claim_dob_verified'))await db.doc('patients/'+PID).update({dob:'2026-01-04'});return result;};}return ref;};let r;try{r=await runClaim(raw,'1980-02-28');}finally{db.collection=original;}
++ assert.equal(r.code,403);assert.equal(r.value.error.details.reason,'MINOR');await noAccount(raw);
++});
++test('mint transaction abort/retry re-evaluates fresh DOB and leaves zero token writes',async()=>{
++ await clear();await patient({dob:'1980-02-28'});const original=db.runTransaction.bind(db);let attempted=0,correction;
++ db.runTransaction=function(fn,opts){return original(async tx=>{attempted++;const set=tx.set.bind(tx);tx.set=function(...args){set(...args);if(attempted===1){correction=db.doc('patients/'+PID).update({dob:'2026-01-04'});throw Object.assign(new Error('synthetic contention'),{code:10});}return tx;};return fn(tx);},opts);};
++ try{await assert.rejects(writer.issueClaimToken(PID,'existing'),e=>e.inviteReason==='MINOR');await correction;}finally{db.runTransaction=original;}
++ assert.ok(attempted>=2);assert.equal((await db.collection('claimTokens').get()).size,0);assert.equal(sends,0);
++});
++test('auto fresh roster-read failure skips without marker/provider failure',async()=>{
++ await clear();await patient({dob:'1980-02-28'});const original=db.collection.bind(db);db.collection=function(n){const ref=original(n);if(n==='patients'){const doc=ref.doc.bind(ref);ref.doc=id=>{const d=doc(id);d.get=async()=>{throw new Error('synthetic read outage');};return d;};}return ref;};let r;try{r=await runAuto();}finally{db.collection=original;}
++ assert.equal(r.skippedAtSend.ROSTER_READ_FAILED,1);assert.equal(r.failed,0);assert.equal(r.sent,0);assert.equal(sends,0);assert.equal((await db.doc('patients/'+PID).get()).get('autoInvite'),undefined);
++});
++for(const dob of ['2026-01-04',null])test('reset-only resume stays inert for age '+String(dob)+' with mixed invite flags',async()=>{
++ await clear();await patient({dob,authUid:'ExactExistingAccountUID',firebaseUid:'exactexistingaccountuid'});await auth.createUser({uid:'ExactExistingAccountUID',email:EMAIL,password:PW});const lifecycle=require('../../core/services/patient/accountLifecycle');await lifecycle.resetPatientAccount({db,auth,FieldValue:FV,patientId:PID,actor:'synthetic',reason:'synthetic test'});const before=(await db.doc('patients/'+PID).get()).data();
++ const r=await run(manual,{elationPatientId:PID,actor:'synthetic',resumeReset:true,resetClaim:true,reissue:true});assert.equal(r.code,200);assert.equal(r.value.resetState,'done');assert.equal(r.value.alreadyDone,true);assert.deepEqual((await db.doc('patients/'+PID).get()).data(),before);assert.equal(sends,0);assert.equal((await db.collection('claimTokens').get()).size,0);
++});
+diff --git a/functions/test/unit/invite-age.test.cjs b/functions/test/unit/invite-age.test.cjs
+new file mode 100644
+index 0000000..5eb25d6
+--- /dev/null
++++ b/functions/test/unit/invite-age.test.cjs
+@@ -0,0 +1,52 @@
++const { test } = require('node:test');
++const assert = require('node:assert/strict');
++const { evaluateInviteAge, requireInviteAge } = require('../../core/services/patient/inviteAge');
++const { evaluateDiscoveryAge } = require('../../core/services/patient/rosterDiscovery');
++const { classifyPatient } = require('../../core/services/patient/onboardingClassifier');
++const { evaluateReissueCandidate } = require('../../core/services/patient/batchReissue');
++const NOW = Date.parse('2026-11-22T21:59:00Z');
++for (const [dob, reason] of [
++ ['2026-01-04','MINOR'],['2008-11-23','MINOR'],['2008-11-22','ADULT'],['1980-02-28','ADULT'],
++ [null,'DOB_UNKNOWN'],['','DOB_UNKNOWN'],['bad','DOB_UNKNOWN'],['1980-02-31','DOB_UNKNOWN'],
++ ['2025-02-29','DOB_UNKNOWN'],['2026-11-23','DOB_UNKNOWN'],['2101-01-01','DOB_UNKNOWN'],['1899-12-31','DOB_UNKNOWN'],
++]) test('one shared age policy: '+String(dob)+' => '+reason,()=>{
++ const v=evaluateInviteAge({doc:{dob},nowMs:NOW}); assert.equal(v.reason,reason);
++ assert.deepEqual(v,evaluateDiscoveryAge({dob,nowMs:NOW}));
++ if(reason!=='ADULT')assert.throws(()=>requireInviteAge({dob},NOW),e=>e.inviteReason===reason&&e.code===reason);
++});
++test('18th birthday flips exactly at New York midnight, not UTC',()=>{
++ const dob='2008-11-22'; assert.equal(evaluateInviteAge({doc:{dob},nowMs:Date.parse('2026-11-22T04:59:59.999Z')}).reason,'MINOR');
++ assert.equal(evaluateInviteAge({doc:{dob},nowMs:Date.parse('2026-11-22T05:00:00Z')}).reason,'ADULT');
++ const classification=classifyPatient({doc:{dob,email:'synthetic@example.invalid',status:'not_invited'},now:new Date('2026-11-22T02:00:00Z')});
++ assert.equal(classification.bucket,'excluded_minor');assert.equal(classification.reason,'age-under-18');
++});
++test('February 29 birthday follows #615 March 1 policy',()=>{
++ assert.equal(evaluateInviteAge({doc:{dob:'2008-02-29'},nowMs:Date.parse('2026-02-28T17:00:00Z')}).reason,'MINOR');
++ assert.equal(evaluateInviteAge({doc:{dob:'2008-02-29'},nowMs:Date.parse('2026-03-01T17:00:00Z')}).reason,'ADULT');
++});
++test('classifier rejects impossible DOB without changing bucket/reason contract',()=>{
++ const c=classifyPatient({doc:{dob:'1980-02-31',email:'synthetic@example.invalid',status:'not_invited'},now:new Date(NOW)});
++ assert.deepEqual(c,{bucket:'needs_review',reason:'dob-unknown'});
++});
++test('classifier terminal exclusion and explicit dependent-minor exclusion retain ordering',()=>{
++ assert.deepEqual(classifyPatient({doc:{dob:'2026-01-04',deceasedDate:'2026-01-05'},now:new Date(NOW)}),{bucket:'excluded_deceased_inactive',reason:'deceased-or-inactive'});
++ assert.deepEqual(classifyPatient({doc:{dob:'1980-02-28',dependent:{isMinor:true}},now:new Date(NOW)}),{bucket:'excluded_minor',reason:'dependent-isMinor'});
++ assert.equal(evaluateInviteAge({doc:{dob:'1980-02-28',dependent:{isMinor:true}},nowMs:NOW}).reason,'MINOR');
++});
++test('reissue age reason precedes unique/shared/no email; no force opt-out',()=>{
++ for(const email of ['unique@example.invalid','shared@example.invalid',null])assert.equal(evaluateReissueCandidate({doc:{dob:'2026-01-04',email,status:'invited'}}).reason,'MINOR');
++ assert.equal(evaluateReissueCandidate({doc:{email:'adult@example.invalid',status:'invited'}}).reason,'DOB_UNKNOWN');
++});
++
++for(const dob of [null,'bad','2099-02-28'])test('explicit dependent-minor classification wins with DOB '+String(dob),()=>{
++ assert.equal(evaluateInviteAge({doc:{dob,dependent:{isMinor:true}},nowMs:NOW}).reason,'MINOR');
++ assert.deepEqual(classifyPatient({doc:{dob,dependent:{isMinor:true}},now:new Date(NOW)}),{bucket:'excluded_minor',reason:'dependent-isMinor'});
++});
++test('direct invitation writer/transport inventory cannot gain an unreviewed bypass',()=>{
++ const fs=require('node:fs'),path=require('node:path'),root=path.resolve(__dirname,'../../..');
++ const files=[];function walk(p){for(const f of fs.readdirSync(p,{withFileTypes:true})){if(['node_modules','test'].includes(f.name))continue;const n=path.join(p,f.name);if(f.isDirectory())walk(n);else if(/\.(js|cjs)$/.test(f.name))files.push(n);}}
++ walk(path.join(root,'functions'));walk(path.join(root,'scripts'));
++ const mint=[],transport=[];for(const f of files){const s=fs.readFileSync(f,'utf8'),rel=path.relative(root,f);if(/issueClaimToken\s*\(/.test(s)&&!rel.endsWith('/claimToken.js'))mint.push(rel);if(/sgMail\.send\s*\(/.test(s))transport.push(rel);}
++ assert.deepEqual(mint.sort(),['functions/adminIssueInvite.js','functions/core/services/patient/inviteOne.js','functions/dependentBirthdaySweep.js','scripts/issueInvites.cjs'].sort());
++ assert.deepEqual(transport.sort(),['functions/core/services/email/sendInviteEmail.js','scripts/issueInvites.cjs'].sort());
++});
+diff --git a/functions/test/unit/invite-optout-597.test.cjs b/functions/test/unit/invite-optout-597.test.cjs
+index 4cb0e13..150e2a9 100644
+--- a/functions/test/unit/invite-optout-597.test.cjs
++++ b/functions/test/unit/invite-optout-597.test.cjs
+@@ -11,7 +11,7 @@ const FN = path.join(__dirname, '../..');
+ function harness({ suppressed = [], suppressionThrows = false, patient = null } = {}) {
+   const calls = { sends: [], mints: 0, revokes: 0, deletes: 0, audits: [] };
+   const docs = new Map();
+-  if (patient) docs.set('patients/p1', { ...patient });
++  if (patient) docs.set('patients/p1', { dob: '1980-02-28', ...patient });
+   for (const e of suppressed) docs.set(`emailSuppression/${e}`, { email: e, severity: 'hard', reason: 'unsubscribe' });
+   const db = {
+     collection(name) {
+diff --git a/functions/test/unit/invite-tracking.test.cjs b/functions/test/unit/invite-tracking.test.cjs
+index 325f3c3..f561ecf 100644
+--- a/functions/test/unit/invite-tracking.test.cjs
++++ b/functions/test/unit/invite-tracking.test.cjs
+@@ -9,6 +9,8 @@ function loadSender(env = { SENDGRID_PORTAL_INVITE_ASM_GROUP_ID: '36716' }) {
+   const sandbox = {
+     process: { env }, module: { exports: {} },
+     require(name) {
++      if (name === 'firebase-admin') return { firestore: () => ({ collection: collection => ({ doc: () => ({ get: async () => ({ exists: true, data: () => ({ dob: '1980-02-28' }), get: field => field === 'elationPatientId' ? '900001' : undefined }) }) }) }) };
++      if (name === '../patient/inviteAge') return require('../../core/services/patient/inviteAge');
+       if (name === '@sendgrid/mail') return {
+         setApiKey() {}, async send(value) { message = value; },
+       };
+diff --git a/functions/test/unit/invite-wave-gate.emulator.test.cjs b/functions/test/unit/invite-wave-gate.emulator.test.cjs
+index 9680d72..180a504 100644
+--- a/functions/test/unit/invite-wave-gate.emulator.test.cjs
++++ b/functions/test/unit/invite-wave-gate.emulator.test.cjs
+@@ -33,7 +33,7 @@ async function fixture(sizes = [50, 50, 50], priorEnd = NOW - 72 * HOUR) {
+     const batch = db.batch(); docs.forEach(d => batch.delete(d.ref));
+     if (docs.size) await batch.commit();
+   }
+-  await db.doc('patients/900607').set({ email: 'candidate@example.invalid', status: 'not_invited' });
++  await db.doc('patients/900607').set({ dob: '1980-02-28', email: 'candidate@example.invalid', status: 'not_invited' });
+   const waves = {};
+   sizes.forEach((sent, i) => { waves[String(i + 1)] = {
+     sent, startedAtMs: NOW - (200 - i * 20) * HOUR,
+diff --git a/plans/INTEGRATION-CONTRACT.md b/plans/INTEGRATION-CONTRACT.md
+index 829a901..adefb9b 100644
+--- a/plans/INTEGRATION-CONTRACT.md
++++ b/plans/INTEGRATION-CONTRACT.md
+@@ -1,3 +1,14 @@
++# Invite and pre-C1 claim age exclusion — 2026-11-22
++
++- Invitation/activation eligibility uses the unchanged #615 `evaluateDiscoveryAge` calendar policy through inviteAge: patient-ID roster DOB only, America/New_York, adult on the 18th birthday, existing leap-day/date/year semantics. Valid under-18 or retained explicit dependent-minor marker yields MINOR; missing/unusable/impossible/future DOB yields DOB_UNKNOWN. No caller age/email identity fallback or force/config bypass.
++- `issueClaimToken(patientId,cohort)` retains its signature, response/TTL/schema/live-token contract; its mint transaction now reads the patient and checks age with fresh server time on each retry before token creation. All mint callers are covered: inviteOne, direct adminIssueInvite, birthday sweep and CLI. Shared sendInviteEmail resolves patient ID from the server token row and repeats the same age check immediately before transport; CLI direct transport uses that same preflight.
++- Manual and batch invite eligibility runs before reset-and-invite preparation/revocation; pure resumeReset and reset implementation remain untouched. #601/#602 suppression-before-cooldown order, force restrictions, new_invite routing, caps and wave gates stay unchanged. Initial minor/unknown refusal does not revoke existing invitations. DOB correction between an adult mint and send can block delivery; no promise of atomic mail recall or retrospective prevention of an already-authorized adult mint.
++- Manual age refusal: existing error envelope, HTTP409 FAILED_PRECONDITION with details.reason MINOR/DOB_UNKNOWN. Batch/auto canonical skip counters exclude age refusals from sends/reissues/failures/cap; late auto skips settle the current sending marker without incrementing consecutive failures or auto-stop. Birthday conversion/guardian consent code is unchanged; inviteSkipped records refusal. CLI dry/live/sandbox exclude/count holds, with existing confirmation, transport and override semantics.
++- `onboardingClassifier` removes its weaker UTC/impossible-date arithmetic and uses #615. Existing buckets, terminal/claim/shared-email ordering, dependent-minor exclusion and lowercase classifier report reasons remain compatible; invite adapters expose canonical uppercase reasons. Separate social age policy is unchanged.
++- **Claim addition approved with this same release:** after existing DOB match/audit and BEFORE any acquireWork/C1 reservation, claimAccount applies the same age precondition to roster DOB. Correct-DOB minors and valid-shaped unknown calendar DOB return HTTP403 PERMISSION_DENIED with MINOR/DOB_UNKNOWN. Missing/malformed roster DOB fails closed as DOB_UNKNOWN because identity verification cannot proceed. Incorrect submitted DOB keeps existing mismatch/throttle behavior. No account creation/credential update/enable/bind/token consume/session/hydration on age refusal, including pre-existing live-token claims. #619 C1/C2/receipt/lease/mint ownership logic, #617/#618 reset/provenance/holds and all claim-security helpers remain unchanged.
++- Live audit at 2026-11-22T22:32:59.711824Z read all 2475 token docs and 1625 patient docs: 387 unused/unexpired tokens, **0 minor**, **0 unknown-DOB**, **0 adult-DOB explicit dependent-minor**. No token revocation needed/executed; no production patient change or send. The audit is a timestamped snapshot, not a permanent guarantee.
++- Required gate keeps name/docs-only predicate and all existing queue/worker/Recovery/drain, C4/rules and Auth+Firestore lifecycle/reservation coverage; adds invite-age units and real Auth+Firestore invitation/legacy-claim suite. Final head SHA and executed hosted steps must accompany the review; emulators use synthetic transports, not live-provider certification. No merge/deploy/arming authorized.
++
+ # Claim reservation / C2 authorization amendment — 2026-11-22 (Closes #619)
+ 
+ This amendment supersedes only the historical post-create, non-fatal invite-consumption behavior. #617/#618 ownership, reset, identity proof, exact UID, uncertainty masking and settled-hydration rules remain authoritative.
+diff --git a/recaps/daily-recap-invite-claim-age-gate-2026-11-22.md b/recaps/daily-recap-invite-claim-age-gate-2026-11-22.md
+new file mode 100644
+index 0000000..2af23d4
+--- /dev/null
++++ b/recaps/daily-recap-invite-claim-age-gate-2026-11-22.md
+@@ -0,0 +1,47 @@
++# Invite/claim age-gate implementation — 2026-11-22
++
++## Shared surface
++MINOR/DOB_UNKNOWN invite skip reasons and pre-C1 claim refusals; contract amended in this branch.
++
++## Session
++Lovable; fix/invite-claim-age-gate; base 59caed7d0378d22f5deb345b976d64f55ca92c22. No main commit, merge, deployment, arming or invitation. Issue creation denied (GitHub issues permission); owner-created issue number awaited.
++
++## Completed
++Shared #615 age source; transactional writer/final shared and CLI send checks; manual/batch pre-reset/pre-revoke freshness; canonical batch/auto skips; classifier reconciliation; early fresh pre-C1 legacy-token claim refusal. Existing C1/C2/reset/security/operational gates unchanged. Reviewer findings addressed with correction-race tests.
++
++## Validation
++21 age policy/inventory units; 107 Auth+Firestore lifecycle/reservation/invite-age tests; 39 C4/rules emulator tests; 80 combined sender/read/social/hydration units; unchanged discovery/provision/auto/webhook direct scripts; 27 actual social Auth+Firestore+Functions tests passed. Required hosted evidence pending PR run and will be attached to review report; no docs-only result accepted.
++
++## Live audit
++2026-11-22T22:32:59.711824Z: all 2475 claim-token/1625 patient docs; 387 unused/unexpired; zero minor, unknown-DOB or adult-DOB dependent-minor live tokens. No revocation needed; read-only snapshot.
++
++## Files
++- .github/workflows/claim-hydration-gate.yml
++- AGENTS.md
++- functions/adminBatchInvite.js
++- functions/adminBatchReissue.js
++- functions/adminIssueInvite.js
++- functions/autoInviteTick.js
++- functions/claimAccount.js
++- functions/core/services/email/sendInviteEmail.js
++- functions/core/services/patient/autoInvite.js
++- functions/core/services/patient/batchInvite.js
++- functions/core/services/patient/batchReissue.js
++- functions/core/services/patient/claimToken.js
++- functions/core/services/patient/inviteAge.js
++- functions/core/services/patient/inviteOne.js
++- functions/core/services/patient/onboardingClassifier.js
++- functions/dependentBirthdaySweep.js
++- functions/test/unit/auto-invite-d407.test.cjs
++- functions/test/unit/batch-reissue-d321.test.cjs
++- functions/test/unit/batch-reissue-guards.emulator.test.cjs
++- functions/test/unit/invite-age.emulator.test.cjs
++- functions/test/unit/invite-age.test.cjs
++- functions/test/unit/invite-optout-597.test.cjs
++- functions/test/unit/invite-tracking.test.cjs
++- functions/test/unit/invite-wave-gate.emulator.test.cjs
++- plans/INTEGRATION-CONTRACT.md
++- scripts/issueInvites.cjs
++
++## Remaining
++Owner issue number for Closes #N. Human review then separate merge/deploy approval. External-operation freshness checks are not a cross-service atomicity guarantee; C2 remains the grant boundary.
+diff --git a/scripts/issueInvites.cjs b/scripts/issueInvites.cjs
+index 46d30ea..ba4104a 100644
+--- a/scripts/issueInvites.cjs
++++ b/scripts/issueInvites.cjs
+@@ -52,6 +52,7 @@ const fs = require('fs');
+ const path = require('path');
+ const os = require('os');
+ const { SecretManagerServiceClient } = require('@google-cloud/secret-manager');
++const { evaluateInviteAge, assertInviteTokenAge, AGE_REFUSALS } = require('../functions/core/services/patient/inviteAge');
+ const { issueClaimToken } = require('../functions/core/services/patient/claimToken.js');
+ 
+ // ---------------------------------------------------------------------------
+@@ -281,6 +282,14 @@ async function main() {
+     return !p.firebaseUid && !p.authUid && !everTokened.has(String(p.elationPatientId || d.id));
+   });
+   console.log(`[invites] excluded ${before - docs.length} already-contacted or claimed patient(s).`);
++  const ageSkipped = {};
++  docs = docs.filter(d => {
++    const age = evaluateInviteAge({ doc: d.data() });
++    if (age.ok) return true;
++    ageSkipped[age.reason] = (ageSkipped[age.reason] || 0) + 1;
++    return false;
++  });
++  console.log('[invites] age-skipped='+JSON.stringify(ageSkipped));
+   if (LIMIT) docs = docs.slice(0, LIMIT);
+ 
+   const recipientCount = docs.length;
+@@ -322,6 +331,10 @@ async function main() {
+     try {
+       ({ rawToken, tokenId } = await issueClaimToken(elationPatientId, 'existing'));
+     } catch (e) {
++      if (AGE_REFUSALS.has(e.inviteReason)) {
++        ageSkipped[e.inviteReason] = (ageSkipped[e.inviteReason] || 0) + 1;
++        continue;
++      }
+       if (e.code === 'LIVE_TOKEN_EXISTS') {
+         skippedLiveToken++;
+         console.log(`[skipped-live-token] elationPatientId=${elationPatientId}`);
+@@ -345,6 +358,7 @@ async function main() {
+     };
+ 
+     try {
++      await assertInviteTokenAge({ db, token: rawToken });
+       const [response] = await sgMail.send(msg);
+       if (response.statusCode === 200 || response.statusCode === 202) {
+         sent++;
+@@ -362,6 +376,10 @@ async function main() {
+         console.error(`[error] elationPatientId=${elationPatientId} unexpected status ${response.statusCode}`);
+       }
+     } catch (e) {
++      if (AGE_REFUSALS.has(e.inviteReason)) {
++        ageSkipped[e.inviteReason] = (ageSkipped[e.inviteReason] || 0) + 1;
++        continue;
++      }
+       errors++;
+       console.error(`[error] elationPatientId=${elationPatientId} send-failed: ${e.message}`);
+     }
+@@ -370,7 +388,7 @@ async function main() {
+   console.log(
+     `[invites] done. attempted=${attempted} sent=${sent} skippedLiveToken=${skippedLiveToken} errors=${errors} mode=${mode} override=${TO_OVERRIDE ? 'on' : 'off'}`
+   );
+-  audit('result', { attempted, sent, skippedLiveToken, errors });
++  audit('result', { attempted, sent, skippedLiveToken, errors, ageSkipped });
+   process.exit(errors > 0 ? 1 : 0);
+ }
+ 
