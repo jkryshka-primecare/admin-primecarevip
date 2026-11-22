@@ -1,6 +1,7 @@
 # Roadmap
 
 ## Nov 22 — #619 token reservation: plan only
+- [x] Revised backend-only no-mint-on-spent-resume plan; dropped Hub proof/admin-resume surface; verified admin/reissue/C4 shared revoke and script binding callers. Social runtime uses Session.link, preserved. Replay cannot overwrite adopted credentials; uncertain work retains #621 hold. Awaiting Claude review, no code.
 - [x] Reviewed portal main 44b97be0 and prepared C1/C2 reservation, revoke, recovery, tests and contract plan for Claude; no implementation until review. Issue body read denied 403; owner-provided scope used.
 - [ ] After approval only: separate #619 branch off then-current main, Closes #619, full claim-hydration-gate including Auth+Firestore lifecycle coverage; no merge/deploy/arming.
 
