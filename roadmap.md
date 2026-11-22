@@ -1,5 +1,9 @@
 # Roadmap
 
+## Nov 22 — invite-layer minor exclusion: plan only
+- [x] Reviewed portal main 59caed7d0378d22f5deb345b976d64f55ca92c22: inviteOne is not universal; issueClaimToken is shared by admin, inviteOne, birthday sweep and CLI. Plan uses unchanged #615 evaluator, writer transaction/pre-revoke/final-send age checks, canonical minor/unknown skips, caller adapters and full hosted-gate requirements. Pure evaluation of Rhodes MRN's previously verified DOB returns MINOR; no fresh live chart or invite operation. Claude-review plan saved; no application code, portal writes, send, merge/deploy/arming.
+- [ ] Implementation awaits Claude approval: create actual GitHub issue, own feature branch/Closes #N PR, tests and real-head full hosted gate; no implementation authorized yet.
+
 ## Nov 22 — #619 token reservation
 - [x] Implemented PR #623 on fix/claim-token-reservation-619 off main 44b97be0; final head 2172575567f637c499a37d1c8135ead705c67e99. C1/disabled-create/C2 bind+consume/original-only mint; backend-only no-mint/no-password resumes, atomic settled cleanup and uncertain holds. 67 real lifecycle/reservation, 39 C4/rules, 11 hydration, 33 sender/social units and 27 social emulator tests pass. Full hosted hydration45052802082 and social45052801972 SUCCESS with real steps executed and no-op skipped. Review diff/evidence delivered; no merge/deploy/arming.
 - [x] Revised backend-only no-mint-on-spent-resume plan; dropped Hub proof/admin-resume surface; verified admin/reissue/C4 shared revoke and script binding callers. Social runtime uses Session.link, preserved. Replay cannot overwrite adopted credentials; uncertain work retains #621 hold. Awaiting Claude review, no code.

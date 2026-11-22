@@ -1,89 +1,86 @@
-# #619 — reserve before creation; authorize atomically at C2
+# Invite-layer age gate — Claude review before coding
 
-**Claude review first; no code/branch/PR/merge/deploy/arming now.**
+**Plan only. No application code, issue/branch/PR creation, send, merge, deployment or arming in this turn.**
 
-## Scope and verified baseline
+## Scope and baseline
 
-Baseline: portal main `44b97be05542ef5865e6e1b734a58aa622b8831d` includes #621. Owner reports deployed; not independently audited. Issue read 403; supplied scope used.
+Reviewed portal main `59caed7d0378d22f5deb345b976d64f55ca92c22`. #615 is live per owner; this review checks source, not deployed function provenance. Scope: invitation eligibility/report adapters only. Leave discovery, AUTOSEND/config/wave gates, reset/claim/security, social, guardian/Track-D, schedules and matching unchanged.
 
-After Claude approval: `fix/claim-token-reservation-619` off current main; PR **Closes #619**. Preserve #617/#618 proof/UID/holds/reset/409/deferral. No discovery/auto-invite/wave/config/suppression/age/social changes.
+## 1. Chokepoint and caller-coverage proof
 
-Fix sites under functions/: claimAccount.js:124–134,235–269,294–303,323–381; core/services/patient/accountLifecycle.js:7–32,54–97; bindMember.js:49–100; claimToken.js:169–186; adminRevokeInvite.js:27–53,88–110. Creation currently enabled, late consume non-fatal. Full workflow: .github/workflows/claim-hydration-gate.yml:56–82.
+**`inviteOne` is not universal today.** The actual common token writer is `functions/core/services/patient/claimToken.js:47–85`, `issueClaimToken()`. Put the non-bypassable age check inside its existing mint transaction, before the token write at lines 76–82. This changes only the invite-issuance portion; validation, consumption and #619 receipt/reservation behavior remain untouched.
 
-## Locked boundary
+| Sender / entry | Verified current path | Required coverage |
+|---|---|---|
+| Prime Care OS | `supabase/functions/portal-admin/index.ts:55` forwards invite to `adminIssueInvite` | Covered by downstream checks; no admin-app changes |
+| Manual admin | `functions/adminIssueInvite.js:144–166`: revoke, direct `issueClaimToken`, direct `sendInviteEmail` | Bypasses inviteOne; writer gate plus pre-revoke invite eligibility |
+| C4 reissue / new_invite | `functions/adminBatchReissue.js:155–160,198–217` → `inviteOne` → writer | Gate selection and immediate pre-revoke; shared writer final check |
+| C4 runner | `functions/scripts/invite-wave-runner.js:134–139` POSTs batch endpoint | Same batch path; no runner/cohort/wave changes |
+| Other batch invites | `functions/adminBatchInvite.js:180–202,220–257` → `inviteOne` | Gate selection and fresh send; shared writer final check |
+| Auto-invite | `functions/autoInviteTick.js:50,287–289,470–478`: production `send` defaults to `inviteOne` | Existing classifier plus fresh invitation checks; leave governance intact |
+| Existing birthday sweep | `functions/dependentBirthdaySweep.js:75–80`: direct writer + shared email sender | Covered despite inviteOne bypass; change only invite eligibility/reporting, not birthday conversion or guardians |
+| Human CLI | `scripts/issueInvites.cjs:323–348`: direct writer + direct `sgMail.send` | Shared writer blocks mint; same eligibility preflight before its direct send, including sandbox mode |
 
-**C1 reserves; C2 atomically binds and spends.** Revoke/expiry before C2 blocks authorization. If C2 wins first, the token is spent; suspend/reset is the control afterward. No project-wide session kill, post-C2 undo, unconsume, bind rollback or winner deletion.
+Source search found four writer call sites: inviteOne, adminIssueInvite, birthday sweep and CLI; no alternate production claim-token creator. Re-inventory the implementation base and add a boundary regression test requiring checked primitives.
 
-Sequence: **verification → C1 → disabled account → C2 → credentials/enable → mint**. Auth and Firestore are not atomic. Reservation precedes creation; consumption at C2 requires exact existing account.
+Preserve existing recipient/response/audit/transport contracts rather than refactoring all callers into inviteOne.
 
-## Technical design
+## 2. One calendar-correct age source
 
-### Metadata and retry authority
+Reuse **`evaluateDiscoveryAge({dob,nowMs})`**, `functions/core/services/patient/rosterDiscovery.js:124–146`, unchanged: valid NY-calendar DOB, 18th birthday, leap-day policy, unknown/future holds and existing supported-year/date-prefix rules. No third calculation.
 
-Use existing accountWork/identityGeneration/claimAccountIntent plus server-only token reservation (attempt/owner/generation/UID/checkpoint). Phases reserved → account_ready → committed → credentials_ready → enabled → complete; release/invalidation pre-C2; uncertain work held. No client secret/Hub/mobile changes/new lock/password persistence.
+The classifier is weaker: `functions/core/services/patient/onboardingClassifier.js:23–38,72–79` uses UTC birthdays and permits impossible calendar dates. Read-only examples confirmed:
+- DOB `2008-11-22` at `2026-11-22T02:00:00Z`: classifier says needs_access, #615 says MINOR (still November 21 in New York).
+- DOB `1980-02-31`: classifier says needs_access, #615 says DOB_UNKNOWN.
 
-**Only original invocation's acknowledged first C2 commit + still-live matching ownership permits mint.** Local eligibility starts false; retry/receipt-read/reacquisition/idempotent C2 NEVER restores it. EVERY spent resume/ack recovery returns {uid,loginToken:null}, zero mint; Hub sign-in fallback unchanged.
+Replace classifier arithmetic with #615 evaluation; preserve buckets, other ordering, explicit dependent-minor exclusion and report reasons (`age-under-18`, `dob-unknown`, `dependent-isMinor`). Invite adapters expose uppercase reasons. Remove obsolete ageFromDob/export after repository-wide caller verification (no other reviewed functions/scripts caller). Social age logic stays untouched.
 
-Resume requires exact C2 receipt/binding/generation/existing verification. Revoked usedAt without claim receipt stays INVALID_TOKEN. Finish only safe acknowledged checkpoints: no replay password/reset/create/bind/grant. Completed revisit 409/sign-in. Client-proof proposals belong in a separate Hub/mobile-coordinated issue.
+Direct import has no reviewed cycle: rosterDiscovery → pure rosterProvision, not onboardingClassifier. No discovery extraction/change.
 
-### C1 — reserve after existing verification
+## 3. Shared eligibility and side-effect ordering
 
-Keep password/DOB throttle/audit checks. C1 reads token/patient/uniqueness after #621 acquisition: correct patient, unused/unrevoked, expiresAt > fresh now per retry; assertWork owner/generation/no reset, unchanged inputs/guards. Same server attempt idempotent; healthy loser 409, uncertainty held. Spent receipt continuation never enters fresh C1/create/mint.
+One invite-only adapter calls the evaluator without arithmetic. Resolve exact patient ID and `patients/{id}.dob`; no email matching, Hint age, caller DOB or cross-chart fallback.
 
-Atomically persist reservation/preselected UID intent. No usedAt/bind/credential mutation/create/enable/mint before C1. Rejected C1 releases only quiescent work.
+- **MINOR:** valid DOB under 18; retain explicit dependent-minor exclusion on conflicting adult DOB. No guardian conversion.
+- **DOB_UNKNOWN:** missing/blank/unparseable/impossible/future/unsupported DOB. Age precedes email/shared-email checks: no-email minors still return MINOR. No force/config bypass.
+- **ADULT:** age passes only; existing suppression/status/duplicate/claim/operational exclusions remain.
+- Missing/read-error patient evidence stays distinctly fail-closed.
 
-### C1–C2 — prepare without granting
+Enforcement:
+1. **Mint transaction:** issueClaimToken reads patient + existing tokens, evaluates age using fresh server time on each retry, rejects before writing. Preserve two-argument signature, successful response, TTL/schema/live-token semantics; no production override.
+2. **Pre-revoke:** manual and batch selection/send-time checks use the same age decision before revoke/remint. Preserve #601/#602 suppression-before-cooldown ordering. Pure resumeReset bypasses invite checks; reset-and-invite checks age before invoking unchanged reset helpers/fences.
+3. **inviteOne:** fresh patient-ID age check before email/mint; propagate MINOR/DOB_UNKNOWN, not MINT_FAILED. Cached selection is insufficient.
+4. **Final send:** sendInviteEmail resolves patient ID from server-side token record, repeats age check before transport; CLI uses the identical adapter before sgMail.send. Catch corrected DOB after mint. Preserve delivery-failure cleanup, consumption/security and tracking/ASM; age refusals are skips, not provider failures.
 
-Reuse #621 provenance/uniqueness/provider checks; explicit invite-only staging leaves non-invite callers unchanged. New Auth account uses disabled:true and submitted password; acknowledge exact existence/disabled state under owner/generation. Disabled recovery requires exact patient intent, never email adoption. Safely stage only a proven enabled orphan disabled; unrelated/completed accounts untouched. Unknown create/disable retains existing fence/hold, not a universal logout promise. Preserve adopted-password-after-bind: no adopted credential overwrite before C2. Late create after revoke/expiry remains disabled.
+Checks protect each stage's fresh snapshot, not atomic email delivery/recall. DOB changing after an adult mint can block send, not retroactively prevent that mint. No proactive old-token revocation, suspension, cleanup or claim-path changes.
 
-### C2 — authorization within bindMember
+## 4. Caller results and reporting
 
-Invite-only optional context; non-claim paths unchanged. Read patient/token/reservation/uniqueness before writes. Require owner/generation/UID/attempt, no reset, account-ready, unchanged inputs/bind guards. Recheck unused/unrevoked/live reservation/patient/strict expiry against fresh now EVERY retry; missing/malformed fails closed.
+- Manual: HTTP 409 / FAILED_PRECONDITION, details.reason MINOR or DOB_UNKNOWN; clear operator message, unchanged success/auth. Refusal audits use patient ID/reason only.
+- Batch: canonical skippedByReason/skippedAtSend; no sent/reissued/failed or wouldSend/wouldReissue/cap consumption. Late refusal is not a provider failure.
+- Auto: canonical skips, not failure/consecutive-failure/auto-stop. Settle any existing send marker through current outcome handling; no lease/queue/governance change.
+- Birthday sweep: inviteSkipped carries age reason; existing consent-conversion logic is not rolled back or rewritten.
+- CLI: exclude/count holds in dry/live/sandbox; unchanged confirmation/transport/override/other opt-out behavior.
 
-Atomically commit true-case authUid, normalized firebaseUid, write-once boundAt, existing binding audit, token usedAt + consumed attempt/UID/generation and committed receipt/intent. Remove late best-effort consume. Abort writes neither bind nor claim spend. Lost acknowledgment requires exact receipt read-back; uncertainty holds, no success assumption/deletion.
+## 5. Rhodes acceptance, without a real invite
 
-### After C2 — finish, do not reauthorize
+Target **patient ID 1455085200211969**. Prior Nov 20 read: DOB `2026-01-04`, unbound/not_invited, no tokens. #615 pure evaluation at `2026-11-22T21:59:00Z` returns **MINOR**. Proposed verdict verified; gate not implemented/live-tested, and live chart not refreshed. No send endpoint called.
 
-Original invocation updates adopted password after disabled bind (#618 holds preserved). Confirm ready/enable with owner/generation/reset/access fences; no invite reauthorization. Spent resume NEVER mutates password; incomplete adopted credentials stay held.
+Acceptance: synthetic emulator document with this exact MRN/DOB; direct admin, writer/inviteOne and batch return MINOR, zero tokens/mail calls, existing invite/account unchanged. Never invoke the real patient's invite/reset/revoke or copy their email.
 
-Keep enqueue-before-response/finishing/Recovery/deferral. Mint requires confirmed enable + original live ownership. ALL spent resumes/ack recovery/known mint failure: loginToken:null; no password/spend/mint replay.
+## 6. Tests and required evidence
 
-## Release/recovery: do not trap the member
+Add invite-age unit/emulator suites; update adapters with valid DOB/patient-bound tokens, not bypasses.
+- Unique-email, shared-email and no-email minors: MINOR; zero mint/send/revoke/claim/reset side effects. Unknown DOB variants: DOB_UNKNOWN; zero mint/send. Adult eligible: exactly one normal invite; other exclusions still work.
+- Exact NY midnight/18th birthday, UTC disagreement, February-29/March-1, invalid/future/missing DOB/bounds; parity through classifier/gate.
+- Every listed entry; direct writer, first/reissue, force refusal, Rhodes MRN.
+- DOB corrections after selection/before mint, transaction retry and before mail; no transport. Existing blocked/recent links remain intact; no auto failure-counter/marker trap.
+- Existing adult responses/audits, suppression/tracking/ASM, CLI confirmation/sandbox and birthday-conversion regressions; reset-only resume and full #617/#618/#619 regression suites stay green.
 
-- Settled pre-C2 failure: transactionally release only matching reservation/checkpoints/work. Release never writes usedAt or erases revoke. Live retry reuses proven disabled UID; no speculative orphan deletion.
-- Created account/C2 denied: retain disabled UID evidence for safe reuse/reconciliation; revoked/expired links require newly authorized invite, never revival.
-- Crash/non-canceling deadline: retain work and durable checkpoint/review deadline in existing portalAccountReconciliation. Deadline/Auth read is not quiescence or takeover permission.
-- No admin-resume op: settled retries self-heal without mint; crashed/uncertain work stays reconciled, never lease-stealing. resumeReset unchanged.
-- Pre-C2 retry rechecks live token; post-C2 uses exact receipt/credentials-ready, never unconsume/unbind/delete/mint. Missing account/unfinished adopted credentials/unknown mutation retains #618 hold: fail-closed exception to self-healing, never replay password.
+Register new suites in **claim-hydration-gate**; preserve name/docs-only predicate and all queue/modified-worker/Recovery/drain, C4/rules and Auth+Firestore lifecycle/reservation suites. Also run classifier/auto/discovery/sender regressions. Report final head SHA, hosted run/job URLs and **executed** steps—not docs-only green. No new tests/CI claimed run now.
 
-Consumed claims always have exact existing account plus atomic binding. Interrupted enablement remains completable, not a token spent before creation.
+## 7. Integration contract and implementation workflow
 
-## adminRevokeInvite
+Append dated INTEGRATION-CONTRACT amendment: shared #615 age source, mint/send/pre-revoke guards, DOB authority, canonical reasons/counters/callers, unchanged gates/security/reset and no old-token claim enforcement. Preserve history/numbering; record approved structure in AGENTS.md on implementation.
 
-Replace query-outside/batch with transaction reading patient and matching token query. Include unused live tokens AND active pre-C2 reservations even if expiry elapsed. Recheck used/committed state; write existing usedAt/revokedAt/revokedBy/revokeReason and invalidate matching reservation/intent atomically. Never clear work, bump generation, mutate Auth or undo C2. C2-first → skip spent claim; revoke-first → C2 rejects. Count once, repeats idempotent; transaction limits/errors → existing REVOKE_FAILED, never partial success.
-
-Preserve admin auth/audience/validation, response {ok, elationPatientId, revoked}, invite_revoked audit/best-effort audit failure and shared callers’ suppression-first/gate/cap/pacing behavior. Endpoint currently has no suppression lookup: invent none.
-
-### Shared compatibility verified
-
-- revokeLiveTokens retains (patientId,actor,reason) → NUMBER; admin endpoint retains {ok,elationPatientId,revoked}/invite_revoked audit. adminIssueInvite:97–114,144–149 suppression then revoke; adminBatchReissue:196–211 preflight then same helper (new_invite skips revoke). Runner:134–139 calls batch endpoint. Preserve failure-before-send, gates/cap/pacing/report.
-- bindMember absent optional invite context: no token access/mutation/error/result change; script keeps args. Social uses Session.link (socialSignIn.js:237–269), not historical header’s bindMember; leave untouched. No new claim identity writer.
-
-## Tests and INTEGRATION-CONTRACT
-
-Add real Auth+Firestore claim-reservation.emulator.test.cjs exercising claim/revoke handlers with synthetic external adapters and deterministic barriers. Assert actual Auth/password-disabled refusal/custom-token exchange, durable token/bind/intent/audit/work:
-- Used/revoked/expired/missing before C1 and exact expiry equality: generic rejection; zero create/bind/enable/mint.
-- Revoke/expiry C1–C2, including pending create: no grant, late account disabled. C2-first then revoke/expiry: committed finishing, no undo.
-- Double-use/two tokens/patient/wrong receipt/generation: one grant, healthy 409/no extra UID. ALL spent resumes: loginToken:null, zero mint/exchange; original acknowledged C2 owner alone mints.
-- Crashes reserve/create-before-ack/account-ready: no spend/bind; exact retry or hold, no lease stealing.
-- C2 abort/ack loss/immediate crash: atomic bind+spend or neither; receipt read-back, existing disabled account resumable.
-- Credential/enable crash/ack loss: exact UID/hold; replay never changes password including credential_pending. Ready enable resumes with loginToken:null.
-- Mint failure/after-mint crash: no second consume/destruction/password rewrite; known failure sign-in fallback.
-- Release/revoke/spent retry/late execution: no revival/successor alteration/mint privilege; no new admin-resume.
-- Rules/suppression/audit/errors/healthy concurrency/deferral unchanged. Test 3 revoke callers/count/envelope/audit/firstInvite/failure-before-send; omitted bind context causes no token access/mutation; script/social regressions.
-
-Full claim-hydration-gate: queue/modified-worker/Recovery/drain units; hydration-rules/batch-reissue/invite-wave emulator suites; unchanged Auth+Firestore lifecycle plus new reservation suite. Preserve workflow/job name and docs-only predicate. Run affected token/binding/sender tests and full social regression gate for shared helpers. Report head SHA/hosted URLs/real executed steps: docs-only green is insufficient. No tests claimed run now.
-
-Append #619 INTEGRATION-CONTRACT amendment: C1/C2/server reservation/disabled staging/bind+spend, original-only mint/null on ALL spent resumes/no replay password or client/admin op, release/holds, revoke-before versus suspend/reset-after, shared contracts/full gate. Preserve history/numbering.
-
-**Next:** Claude review; then recheck main, Closes #619 PR/diff/full gate evidence. No merge/deploy/arming.
+After Claude approves: re-read then-current main; create a GitHub issue titled **“Block minor and unknown-DOB portal invitations across every sender”**, then its own `fix/invite-age-exclusion-<issue-number>` branch and PR **Closes #N**. Use the actual returned issue number; if issue creation is denied, obtain owner-created issue before claiming Closes. Return diff and full hosted evidence for separate review. **No merge/deploy/arming or real-patient invitation authorization.**
