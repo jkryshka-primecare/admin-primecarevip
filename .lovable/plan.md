@@ -1,6 +1,6 @@
-# Discovery retention — revised design for Claude review
+# Discovery retention — approved design, implementation held
 
-Workstream A is implemented in draft PR #626; its approved scope is preserved in `.lovable/reviews/pipeline-a-approved-scope.md`. No B code until A merges and Claude approves. No merge/deploy/arming, patient writes, sends or counter start.
+Workstream A is implemented in draft PR #626; its approved scope is preserved in `.lovable/reviews/pipeline-a-approved-scope.md`. B design approved as-is on November 23 at 16:40 UTC. No B code until A merges; B requires its own issue/branch/PR and review. No merge/deploy/arming, patient writes, sends or counter start.
 
 ## Workstream B — durable discovery retention (design only)
 
@@ -62,8 +62,8 @@ Recovery is a separate, previewed, exact-ID one-time bootstrap from that verifie
 - Existing real Auth+Firestore discovery suite and the full actual hosted claim-hydration-gate on the eventual exact head SHA, including #617/#618/#619 lifecycle/reservation and #615/#624 age regressions. A no-op gate is not evidence.
 - Append INTEGRATION-CONTRACT amendment for the anchor's dry-run bookkeeping, hold/progress/counter semantics and additive report compatibility, preserving historical text. No pending schema/index change unless separately justified and reviewed.
 
-## Next approval
+## Approved sequence
 
 Workstream A code is in draft PR #626 on fix/deploy-pipeline-reliability; issue creation is still owner-only (403), so the genuine issue number/Closes reference is pending. Hosted evidence is tracked separately from this B design.
 
-Claude reviews this narrowed Workstream B design. Approval does not authorize B implementation before A merges. No full pending collection, automatic bootstrap, patient changes, merge/deploy/arming, invitation sends, nudge release, or counter start.
+B design is approved as-is: anchor plus cursor discipline, no pending collection. Investigate paging-truncation first; propose narrow exact-ID overflow separately only if a real loss is proven. B implementation waits for A to merge, then proceeds through its own issue/branch/PR review. Cynthia remains a separate previewed owner-approved bootstrap. No automatic bootstrap, patient changes, merge/deploy/arming, invitation sends, nudge release, or counter start.
