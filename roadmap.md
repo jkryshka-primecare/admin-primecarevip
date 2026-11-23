@@ -1,10 +1,16 @@
 # Roadmap
 
+## Nov 23 — approved Rhodes execution and minor account audit
+- [ ] BLOCKED ON AUTHORIZED OWNER WRITER: verified real Prime Care OS super_admin UID and fresh Rhodes DOB/MINOR/version; attempted approved scoped patient+create-only audit atomic batch once, rejected 403 PERMISSION_DENIED. Read-back confirms no patient/audit write. No retry/permission changes.
+- [x] Exact-ID manual-list preview: zero Rhodes rows in 12 available reviewed CSVs; before/after identical, bytes unchanged. Repository has no manual cohort CSVs; external inputs not certified.
+- [x] Read-only snapshot 2026-11-23T00:12:24.348873Z: 175 minors; one UID-bound account (1189873388814337, DOB2023-07-28), zero live tokens, zero both. 1,625 patients/2,475 tokens scanned; no account/token remediation.
+- [x] AUTOSEND/nudge/counter holds untouched; Cynthia and pipeline work unstarted. Report delivered; patient execution remains owner-writer blocked.
+
 ## Nov 22 — production status, DOB audit and Rhodes plan
 - [x] Read-only fixed-snapshot audit at 2026-11-22T23:59:47.843210Z: all 1,625 patients; DOB_UNKNOWN 0, ADULT 1,450, MINOR 175. No unknown-DOB sample exists; no patient edit or send.
 - [x] Proposed exact conditional single-doc Rhodes flag + embedded audit hold, preserving other fields, and exact-ID manual-list exclusion; Claude review and separate execution approval required. No production write/code/list edit.
 - [x] Owner reports #624 merged/deployed green and #615/#617/#618/#619 safety arc live; not independently deployment-verified in this request.
-- [ ] BLOCKED ON REVIEW/OWNER: Rhodes execution and manual-list edits need separate approval; Cynthia/pipeline work remains held and unstarted until after items 1 and 2.
+- [ ] BLOCKED ON WRITE AUTHORITY: owner approved Rhodes hold + immutable audit on Nov23; current execution credential denied writes. Cynthia/pipeline remain held and unstarted.
 
 ## Nov 22 — invite and pre-C1 claim age gate
 - [x] Implemented draft portal PR #624 on fix/invite-claim-age-gate, head 35f5f7736ddd1220f7b700747f60439535bfd512, one commit ahead/zero behind main baseline 59caed7d. Universal transactional writer, shared/CLI final-send, manual/C4 fresh pre-reset/pre-revoke and pre-C1 claim gates share #615; C1/C2/security/reset/gates unchanged. Contract, 21 age units and 40 new emulator cases included.

@@ -1,6 +1,6 @@
-# DOB audit and single-patient Rhodes quarantine — Claude review
+# DOB audit and Rhodes quarantine — execution status
 
-**Read/plan only. No production writes or implementation code authorized.** Owner reports #624 merged/deployed green; no independent deployment verification was requested/performed. Keep AUTOSEND off, nudges held, invites/sends off; do not start clean-run counting before the next clean live discovery run. No merge/deploy/arming.
+**Owner approved the scoped quarantine plus create-only audit event on Nov 23; execution is permission-blocked.** The atomic two-write request was rejected with 403 PERMISSION_DENIED; read-back confirmed neither document changed. No retry or permission change. Owner reports #624 merged/deployed green; no independent deployment verification was requested/performed. Keep AUTOSEND off, nudges held, invites/sends off; do not start clean-run counting before the next clean live discovery run. No merge/deploy/arming.
 
 ## 1. Completed read-only DOB audit
 
@@ -25,19 +25,22 @@ Source: `functions/core/services/patient/rosterDiscovery.js:124–146`; blob `ad
 - Document version: `2026-11-19T23:21:05.777222Z`.
 - #624 already refuses invitation mint/send and pre-C1 claim for this DOB. The proposed stamp is marking/cleanup, **not a safety dependency**.
 
-## 3. Proposed change — one patient document only
+## 3. Approved change — one patient document plus one audit event
 
-After Claude review and separate owner execution approval:
-1. Re-read this exact ID. Confirm DOB still exactly `2026-01-04`, evaluator still MINOR, and hold fields/version remain as reviewed. If anything changed, stop and return a revised proposal; do not silently refresh the precondition and continue.
-2. Resolve `verifiedOperatorUid` from the executing administrator's verified identity. Do not guess a UID, match by email, or accept unauthenticated caller text.
-3. Apply the single conditional write below. It changes only `dependent.isMinor` and embedded hold/audit metadata; it does not replace the dependent map.
-4. Read back those exact fields and server timestamp. Verify DOB and every unrelated field remain unchanged. Do not run an invite/claim/reset as a test.
+An authorized owner writer is required; current service credential cannot commit this operation.
+1. Re-read this exact ID. Confirm DOB still exactly `2026-01-04`, evaluator still MINOR, and hold fields/version remain as reviewed. Use the freshly read updateTime. If anything changed, stop and return a revised proposal; do not silently refresh the precondition and continue.
+2. Resolve `verifiedOperatorUid` from the executing administrator's verified identity. The attempted operation used `653aa1b8-8c54-49e4-9990-7afb065000ad`, independently verified through Prime Care OS hosted auth and protected super_admin role; do not reuse it to impersonate a different executor.
+3. Atomically commit the conditional patient write below AND a create-only `portalAdminAudit` event. Change only `dependent.isMinor` and embedded hold/audit metadata; do not replace the dependent map. Audit action: minor_quarantine; same patient ID, reason, gateReason, dobAtHold, verified actorUid, ok:true and server timestamp; create precondition exists:false, never update/delete an event.
+4. Read back patient and event. Verify server timestamps, DOB and every unrelated patient field; no invite/claim/reset test. On uncertain commit, inspect the exact event ID and patient version before any retry.
 
-### Exact write proposal (not executed)
+### Approved two-write shape (atomic attempt rejected)
 
-The object below is the request body for Firestore `documents:commit`; **one write, one document**. `verifiedOperatorUid` is the verified executor value supplied at approved execution, not a fabricated literal.
+The patient write below must be batched with the approved create-only audit event: **two writes, two documents, one atomic commit**. `verifiedOperatorUid` is the verified executor; `currentRhodesUpdateTime` comes from the immediately preceding re-read, never an unchecked literal. No write succeeded.
 
 ```js
+const auditEventDocumentName =
+  'projects/prive-care-vip/databases/(default)/documents/portalAdminAudit/' +
+  'minor-quarantine-1455085200211969-' + crypto.randomUUID();
 const proposedCommit = {
   writes: [{
     update: {
@@ -63,23 +66,42 @@ const proposedCommit = {
       'dependent.minorHold.source',
       'dependent.minorHold.actorUid'
     ] },
-    currentDocument: { updateTime: '2026-11-19T23:21:05.777222Z' },
+    currentDocument: { updateTime: currentRhodesUpdateTime },
     updateTransforms: [{
       fieldPath: 'dependent.minorHold.recordedAt',
+      setToServerValue: 'REQUEST_TIME'
+    }]
+  }, {
+    update: {
+      name: auditEventDocumentName,
+      fields: {
+        action: { stringValue: 'minor_quarantine' },
+        elationPatientId: { stringValue: '1455085200211969' },
+        reason: { stringValue: 'MINOR_ROSTER_DOB_QUARANTINE' },
+        gateReason: { stringValue: 'MINOR' },
+        dobAtHold: { stringValue: '2026-01-04' },
+        actorUid: { stringValue: verifiedOperatorUid },
+        actorIdentitySource: { stringValue: 'prime_care_os_verified_auth' },
+        ok: { booleanValue: true }
+      }
+    },
+    currentDocument: { exists: false },
+    updateTransforms: [{
+      fieldPath: 'createdAt',
       setToServerValue: 'REQUEST_TIME'
     }]
   }]
 };
 ```
 
-**Audit scope:** reason, executor UID, original DOB, source and server timestamp are embedded on this same document. This does not claim a separate immutable `portalAdminAudit` event was written. Such an event would be a second-document write and requires expanding this single-doc proposal explicitly.
+**Audit addition approved:** reason, executor UID, original DOB, source and server timestamp are embedded on the patient; an append-only `portalAdminAudit` event must be created in the same operation. Existing client default-deny rules are unchanged. The denied attempt created neither hold nor event; immutable audit creation remains outstanding, not claimed complete.
 
 Preserve status, DOB, all other dependent/guardian fields, consent/conversion dates, Auth/UID bindings, identityGeneration/accountWork, tokens, hydration jobs, membership and configuration. Do not create a guardian workflow, reset an account, revoke a token, provision anything or send email. No automatic rollback; a later correction/removal needs separate review and cannot erase unrelated dependent state.
 
 ## 4. Manual-list exclusion proposal
 
-At approved execution, remove **only patient ID/MRN `1455085200211969`** from each reviewed manual invitation input, regardless of its patient-ID column label. Match the exact ID, never name/email. Preview before/after counts and confirm no other rows change; confirm zero target-ID rows remain before any separately approved future run. No manual list or wave input has been changed now. This is an operational exclusion, not a new sender bypass or permission to send.
+Preview completed: **zero exact target rows/cells in 12 available invitation/reissue/validation CSVs**; no removals needed and bytes unchanged. Repository tree has no manual cohort CSV inputs; externally held inputs are not certified. Future reviewed inputs must exclude only patient ID/MRN `1455085200211969`, never name/email, with before/after preview and no other row changes. No permission to send.
 
 ## 5. Release hold and next work
 
-Return this proposal to Claude; execute neither the patient write nor list edits until separately approved. Leave Cynthia one-off provisioning (`1399946260185089`) and the deploy-pipeline reliability pass entirely unstarted. They come after this audit and Rhodes review. No counter increment, discovery run, nudge, code/PR, merge, deployment, arming or invitation is included.
+Owner-approved quarantine execution remains blocked on an authorized writer. Read-only follow-up at `2026-11-23T00:12:24.348873Z`: 175 minors, one account binding (`1189873388814337`, DOB `2023-07-28`), zero live tokens/both; no account/token remediation. Leave Cynthia (`1399946260185089`) and pipeline work entirely unstarted. No counter increment, discovery run, nudge, code/PR, merge, deployment, arming or invitation is included.
