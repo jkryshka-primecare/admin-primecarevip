@@ -1,5 +1,10 @@
 # Roadmap
 
+## Nov 23 — pipeline A code; discovery B revised design
+- [x] Workstream A implemented in draft PR #626, head dbc89eb1facee5475fdfe1a501a27df44df42de3. 52 local tests, syntax and hosted allowed-diff pass; full actual hosted claim-hydration/social and all checks green. Diff/evidence delivered. No merge/deploy/arming.
+- [ ] BLOCKED ON OWNER ISSUE NUMBER: genuine issue and Closes #N pending (creation denied 403).
+- [x] Workstream B revised design delivered: stable anchor plus cursor hold, no full pending collection justified; paging gaps require reproduced evidence and separate narrow exact-ID retention review. Dry-run bookkeeping explicit; Cynthia separate previewed owner approval. No B code until A merges.
+
 ## Nov 23 — approved Rhodes execution and minor account audit
 - [ ] BLOCKED ON AUTHORIZED OWNER WRITER: verified real Prime Care OS super_admin UID and fresh Rhodes DOB/MINOR/version; attempted approved scoped patient+create-only audit atomic batch once, rejected 403 PERMISSION_DENIED. Read-back confirms no patient/audit write. No retry/permission changes.
 - [x] Exact-ID manual-list preview: zero Rhodes rows in 12 available reviewed CSVs; before/after identical, bytes unchanged. Repository has no manual cohort CSVs; external inputs not certified.
