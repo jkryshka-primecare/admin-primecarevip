@@ -1,10 +1,16 @@
 # Roadmap
 
+## Nov 22 — production status, DOB audit and Rhodes plan
+- [x] Read-only fixed-snapshot audit at 2026-11-22T23:59:47.843210Z: all 1,625 patients; DOB_UNKNOWN 0, ADULT 1,450, MINOR 175. No unknown-DOB sample exists; no patient edit or send.
+- [x] Proposed exact conditional single-doc Rhodes flag + embedded audit hold, preserving other fields, and exact-ID manual-list exclusion; Claude review and separate execution approval required. No production write/code/list edit.
+- [x] Owner reports #624 merged/deployed green and #615/#617/#618/#619 safety arc live; not independently deployment-verified in this request.
+- [ ] BLOCKED ON REVIEW/OWNER: Rhodes execution and manual-list edits need separate approval; Cynthia/pipeline work remains held and unstarted until after items 1 and 2.
+
 ## Nov 22 — invite and pre-C1 claim age gate
 - [x] Implemented draft portal PR #624 on fix/invite-claim-age-gate, head 35f5f7736ddd1220f7b700747f60439535bfd512, one commit ahead/zero behind main baseline 59caed7d. Universal transactional writer, shared/CLI final-send, manual/C4 fresh pre-reset/pre-revoke and pre-C1 claim gates share #615; C1/C2/security/reset/gates unchanged. Contract, 21 age units and 40 new emulator cases included.
 - [x] Read-only live audit: 387 unused/unexpired tokens; zero minor/unknown-DOB/dependent-minor holders at 2026-11-22T22:32:59.711824Z. No revocation needed/executed, patient change or send.
 - [x] All 13 hosted checks success on exact head; claim-hydration-gate45079970394 executes real queue/worker/Recovery, C4/rules and 107 lifecycle/reservation/age tests (no-op skipped); social45079970393 real suite passes. Independent review clear; diff/evidence delivered. No merge/deploy/arming.
-- [ ] BLOCKED ON OWNER: GitHub issues permission denied; provide actual issue number for Closes #N. Draft PR remains review-only until linked and approved.
+- [x] Superseded by owner status: #624 merged/deployed green; no retrospective issue number invented or requested in this audit.
 
 ## Nov 22 — #619 token reservation
 - [x] Implemented PR #623 on fix/claim-token-reservation-619 off main 44b97be0; final head 2172575567f637c499a37d1c8135ead705c67e99. C1/disabled-create/C2 bind+consume/original-only mint; backend-only no-mint/no-password resumes, atomic settled cleanup and uncertain holds. 67 real lifecycle/reservation, 39 C4/rules, 11 hydration, 33 sender/social units and 27 social emulator tests pass. Full hosted hydration45052802082 and social45052801972 SUCCESS with real steps executed and no-op skipped. Review diff/evidence delivered; no merge/deploy/arming.
