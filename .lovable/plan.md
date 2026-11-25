@@ -78,8 +78,10 @@ Plus the full hosted `roster-discovery-test` and claim-hydration-gate.
 
 Confirmed: `COLD_START_LOOKBACK_MS` = 7 days (`rosterDiscovery.js:29`), used only when a practice has no cursor, and the cursor only moves forward. Active members whose charts were untouched for more than 7 days before practice 809235966787588's first live run are invisible to the tick until their chart changes. That's by design: the historical roster is `provisionRosterDocs`' job. The live practice already has a cursor, so cold start won't recur there; the exposure is a one-time historical gap. I'd handle it as a separate read-only reconciliation: compare Hint-active members to `patients/` doc ids by chart id, list missing ids, and confirm whether and when `provisionRosterDocs` ran. Cynthia (1399946260185089) stays her own separate, previewed, owner-approved bootstrap.
 
-## Delivery after approval
-- Separate owner-created issue, then branch `fix/discovery-cursor-reliability`, then a draft PR with `Closes #N` once you give me the number.
-- Changes are limited to `rosterDiscovery.js` (`computeNextCursor`, plus the sort helper), the cursor-guard block and cap slice in `rosterDiscoveryTick.js`, tests, the contract amendment and the decision-log entry.
-- No changes to `rosterFetch.js` paging, eligibility, age gates, cap values, autosend, nudges, counter state or Cynthia.
-- No merge, deploy or arming.
+## Delivery (approved build brief)
+- Issue #631 → branch `fix/discovery-cursor-reliability` off `6fe7d292026b32190292f113dcad2a8352daf514` → DRAFT PR with `Closes #631`.
+- Confirmed: `liveRunCount` increments only on drained runs; truncation holds `previousCursor`, sets `lastStats.cursorHeld = 'TRUNCATED'`, logs at error level; a deferred member with missing/unparseable `last_modified` holds. Exact-ID fallback stays unbuilt.
+- Sort once: eligible sorted by `last_modified` ascending (tie-break by Elation id) in one helper; the batch is a slice of that list, and L = min `last_modified` of the remainder from the same list. No other ordering anywhere.
+- PR description states that provisioning order changes from lowest-id to oldest-by-`last_modified`, and that this is intended and harmless (create-if-absent).
+- Scope lock: `rosterDiscovery.js` (`computeNextCursor` plus the sort helper), the cap slice and cursor-guard block in `rosterDiscoveryTick.js`, tests, the `INTEGRATION-CONTRACT.md` amendment (prepended) and a `DECISION-LOG.md` entry amending D-406/D-407 (appended, no renumbering). Nothing else.
+- Run the local suite (8 pure + 4 tick-level cases) and report the counts. Full claim-hydration-gate real suite and hosted roster-discovery-test must be green at head. Report the head SHA when CI is green. No merge, deploy or arming.
