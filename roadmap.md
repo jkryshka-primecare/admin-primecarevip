@@ -5,6 +5,7 @@
 - [x] Workstream A implemented in draft PR #626, head dbc89eb1facee5475fdfe1a501a27df44df42de3. 52 local tests, syntax and hosted allowed-diff pass; full actual hosted claim-hydration/social and all checks green. Diff/evidence delivered. No merge/deploy/arming.
 - [ ] BLOCKED ON OWNER ISSUE NUMBER: genuine issue and Closes #N pending (creation denied 403); supplied primecarevip-personal is an account name, not an issue number.
 - [x] Workstream B revised design delivered: stable anchor plus cursor hold, no full pending collection justified; paging gaps require reproduced evidence and separate narrow exact-ID retention review. Dry-run bookkeeping explicit; Cynthia separate previewed owner approval. No B code until A merges.
+- [x] Workstream B build (#631): draft PR #632 on fix/discovery-cursor-reliability, head 2eb72a45; all 13 checks green incl. full claim-hydration-gate and roster-discovery-test. Awaiting owner review; no merge/deploy/arming.
 
 ## Nov 23 — approved Rhodes execution and minor account audit
 - [ ] BLOCKED ON AUTHORIZED OWNER WRITER: verified real Prime Care OS super_admin UID and fresh Rhodes DOB/MINOR/version; attempted approved scoped patient+create-only audit atomic batch once, rejected 403 PERMISSION_DENIED. Read-back confirms no patient/audit write. No retry/permission changes.
