@@ -307,3 +307,7 @@
 - [ ] Review: 1 under-18 with portal access, 2 under-18 with expired direct invites
 
 - [x] #597 / PR #598: admin Issue invite + 18th-birthday sweep honour emailSuppression and Portal Invitations group; 12 checks green; not merged/deployed. Follow-up: human-run issueInvites CLI also bypasses opt-outs.
+
+## Nov 27 — #634 backfill age gate
+- [x] Verified deployed main d5a96f35 (Deploy #716 success), shared #615 age evaluator and no intentional minor backfill cohort path.
+- [x] Draft PR #635 (Closes #634), fix/provision-roster-age-gate, head 393ca92038a46fe956420234a7586f1987df9c71; four files only, 96 local tests, all 12 hosted workflows green incl full real claim-hydration-gate. Historical docs preserved; diff/evidence delivered. No merge/deploy/arming/sends.
