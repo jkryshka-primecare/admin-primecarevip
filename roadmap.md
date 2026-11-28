@@ -311,3 +311,7 @@
 ## Nov 27 — #634 backfill age gate
 - [x] Verified deployed main d5a96f35 (Deploy #716 success), shared #615 age evaluator and no intentional minor backfill cohort path.
 - [x] Draft PR #635 (Closes #634), fix/provision-roster-age-gate, head 393ca92038a46fe956420234a7586f1987df9c71; four files only, 96 local tests, all 12 hosted workflows green incl full real claim-hydration-gate. Historical docs preserved; diff/evidence delivered. No merge/deploy/arming/sends.
+
+## Nov 28 — #636 backfill Hint-membership gate
+- [x] Verified current main 1d77a914 (#635), successful Deploy #717, ACTIVE Appspot runtime, SELECT order, and shared membership helpers.
+- [ ] BLOCKED ON CURRENT RUNTIME-ACCESS VERIFICATION: diagnostic secret/project IAM reads denied 403; historical owner grant exists but current effective grant unconfirmed. Hold code/branch/PR until owner supplies filtered current policy or authorized read verification. Then scoped handler/tests/docs, local count, full real hosted gate, draft PR Closes #636; no merge/deploy/arming.
