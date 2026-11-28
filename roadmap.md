@@ -314,4 +314,5 @@
 
 ## Nov 28 — #636 backfill Hint-membership gate
 - [x] Verified current main 1d77a914 (#635), successful Deploy #717, ACTIVE Appspot runtime, SELECT order, and shared membership helpers.
-- [ ] BLOCKED ON CURRENT RUNTIME-ACCESS VERIFICATION: diagnostic secret/project IAM reads denied 403; historical owner grant exists but current effective grant unconfirmed. Hold code/branch/PR until owner supplies filtered current policy or authorized read verification. Then scoped handler/tests/docs, local count, full real hosted gate, draft PR Closes #636; no merge/deploy/arming.
+- [x] Owner cleared verify-first item 3 empirically: same Appspot runtime successfully performed Hint lookups (8 provisioned in a recent tick; 33 discovery docs total). Diagnostic IAM-read 403 is not runtime denial.
+- [x] Draft PR #637 (Closes #636), fix/provision-roster-hint-gate, head b8c8ceaa040293480c1ce46bb1e0326aae1610b7; four scoped files, 121 local tests, all 13 hosted runs green incl full real claim-hydration-gate46090219873 and social/roster gates. Published bytes and unchanged historical docs verified; diff/review delivered. No merge/deploy/arming/sends; all operational holds remain.
